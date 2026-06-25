@@ -48,7 +48,7 @@ export default function Navbar() {
           <a href="#login" className="hidden text-sm font-medium text-ink-muted hover:text-ink sm:inline">
             Login
           </a>
-          <a href="#pricing" className="btn-fire px-5 py-2.5 text-[13px]">
+          <a href="#generate" className="btn-fire px-5 py-2.5 text-[13px]">
             {nav.cta}
           </a>
         </div>

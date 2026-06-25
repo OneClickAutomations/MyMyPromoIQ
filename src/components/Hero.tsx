@@ -56,7 +56,7 @@ export default function Hero() {
             transition={{ duration: 0.45, delay: 0.18 }}
             className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
           >
-            <a href="#pricing" className="btn-fire w-full sm:w-auto">
+            <a href="#generate" className="btn-fire w-full sm:w-auto">
               {hero.ctaPrimary}
               <ArrowRight className="h-4 w-4" />
             </a>

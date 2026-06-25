@@ -25,7 +25,7 @@ export default function FinalCta() {
         </Reveal>
         <Reveal delay={0.12}>
           <div className="mt-10 flex flex-col items-center gap-3">
-            <a href="#top" className="btn-fire px-8 py-4 text-base">
+            <a href="#generate" className="btn-fire px-8 py-4 text-base">
               {finalCta.cta}
               <ArrowRight className="h-5 w-5" />
             </a>

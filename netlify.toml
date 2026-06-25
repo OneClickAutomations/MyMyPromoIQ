@@ -1,0 +1,37 @@
+# Netlify configuration — serves the Vite SPA + the generation API functions.
+#
+# Required environment variables (set in Netlify → Site settings → Environment
+# variables, and in a local .env for `netlify dev`). NEVER commit these.
+#   ANTHROPIC_API_KEY   — Claude "director" that writes the video prompt
+#   HF_API_KEY          — Higgsfield key id        (or use HF_CREDENTIALS="id:secret")
+#   HF_API_SECRET       — Higgsfield key secret
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Route the front-end /api/* calls to the functions.
+[[redirects]]
+  from = "/api/generate"
+  to = "/.netlify/functions/generate"
+  status = 200
+
+[[redirects]]
+  from = "/api/status"
+  to = "/.netlify/functions/status"
+  status = 200
+
+# SPA fallback — every other path serves index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  framework = "#custom"

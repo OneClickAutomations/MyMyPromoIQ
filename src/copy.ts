@@ -132,6 +132,37 @@ export const howItWorks = {
   ],
 }
 
+export const generator = {
+  eyebrow: 'Live · Real Generation',
+  title: 'Stop reading. Generate one.',
+  subtitle:
+    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and Higgsfield renders a real UGC video — right here, right now.',
+  // Style ids must match the backend (netlify/lib/director.ts).
+  styles: [
+    { id: 'testimonial', label: 'Testimonial', hint: 'Person to camera, warm + handheld' },
+    { id: 'unboxing', label: 'Unboxing', hint: 'Tactile reveal, crisp detail shots' },
+    { id: 'day-in-life', label: 'Day-in-the-life', hint: 'Lifestyle b-roll, golden light' },
+    { id: 'fast-cut', label: 'Fast-cut hook', hint: 'Kinetic, scroll-stopping opener' },
+  ],
+  qualities: [
+    { id: 'lite', label: 'Lite', hint: 'Fastest' },
+    { id: 'turbo', label: 'Turbo', hint: 'Balanced' },
+    { id: 'standard', label: 'Standard', hint: 'Highest quality' },
+  ],
+  fields: {
+    imageUrl: { label: 'Product image URL', placeholder: 'https://…/your-product.jpg' },
+    description: {
+      label: 'What is it?',
+      placeholder: 'A matte ceramic pour-over coffee dripper for slow mornings.',
+    },
+  },
+  cta: 'Generate My Video',
+  ctaBusy: 'Directing & rendering…',
+  // Status copy keyed to the render lifecycle.
+  steps: ['Claude is directing the shot', 'Submitting to the render engine', 'Rendering your video'],
+  note: 'First 3 videos are free. Rendering usually takes 1–3 minutes.',
+}
+
 export const testimonials = {
   eyebrow: 'Receipts',
   title: 'Operators, not influencers.',

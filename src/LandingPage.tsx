@@ -8,6 +8,7 @@ import SocialProof from './components/SocialProof'
 import Problem from './components/Problem'
 import VideoSection from './components/VideoSection'
 import HowItWorks from './components/HowItWorks'
+import Generator from './components/Generator'
 import Testimonials from './components/Testimonials'
 import Pricing from './components/Pricing'
 import FinalCta from './components/FinalCta'
@@ -23,6 +24,7 @@ export default function LandingPage() {
         <Problem />
         <VideoSection />
         <HowItWorks />
+        <Generator />
         <Testimonials />
         <Pricing />
         <FinalCta />

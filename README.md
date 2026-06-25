@@ -43,13 +43,21 @@ src/
     SocialProof.tsx        # infinite avatar testimonial marquee
     Problem.tsx            # Problem → Agitate → Solve copy block
     VideoSection.tsx       # demo player card (gold border)
-    HowItWorks.tsx         # interactive 4-step product tour
+    HowItWorks.tsx         # interactive 4-step product tour (explainer)
+    Generator.tsx          # LIVE generation flow — calls the API, polls, plays result
     Testimonials.tsx       # auto-scroll testimonial cards
     Pricing.tsx            # 3 tiers, gold-highlighted middle
     FinalCta.tsx           # Kennedy-style close
     Footer.tsx
     Reveal.tsx             # scroll-reveal helper
     icons.tsx              # inline SVG icon set (no emoji as UI)
+  lib/api.ts               # front-end client for /api/generate + /api/status
+
+netlify/
+  functions/generate.ts    # Claude directs + Higgsfield submit
+  functions/status.ts      # poll render status by id
+  lib/director.ts          # shared: styles, Claude director, Higgsfield calls
+netlify.toml               # build, functions dir, /api/* redirects, SPA fallback
 ```
 
 ## Hero visual
@@ -59,13 +67,56 @@ abstract atmosphere only, no text/faces. The **floating dashboard itself is
 hand-built React/SVG** (`DashboardMockup.tsx`) rather than an AI image, so the
 UI text stays crisp, on-brand, and editable at every resolution.
 
-## API wiring (next phase)
+## Live generation pipeline
 
-This is the landing page only. Markers in the code show where the real
-generation flow plugs in once you move into the app shell:
+The page ships with a **real, working** generation flow (`#generate`,
+`src/components/Generator.tsx`) backed by Netlify Functions. Keys stay
+**server-side only** — they never reach the React bundle.
 
-- `src/components/HowItWorks.tsx` — the 4-step tour maps to the live flow:
-  upload → style params → **Anthropic (Claude director) writes the prompt →
-  Seedance/Higgsfield renders** → download / push to Meta·TikTok.
-- Keys (`ANTHROPIC_API_KEY`, `SEEDANCE_API_KEY`) load **server-side only** —
-  never ship them to the client.
+```
+Browser (Generator.tsx)
+  │  POST /api/generate { productImageUrl, productDescription, style, quality }
+  ▼
+netlify/functions/generate.ts
+  │  1. Claude (claude-opus-4-8) writes the cinematic motion prompt   ← ANTHROPIC_API_KEY
+  │  2. Submit Higgsfield image-to-video job (non-blocking)           ← HF_API_KEY / HF_API_SECRET
+  ▼  → { requestId, directorPrompt }
+Browser polls  GET /api/status?id=<requestId>
+  ▼
+netlify/functions/status.ts → GET platform.higgsfield.ai/requests/{id}/status
+  ▼  → { status, videoUrl }  →  <video> + Download
+```
+
+Why async? Renders take 1–3 minutes — far longer than a serverless function
+may run — so submit and poll are split into two endpoints.
+
+Shared provider logic (Claude director prompt, Higgsfield submit/poll, the
+UGC style presets) lives in `netlify/lib/director.ts`.
+
+### Environment variables (server-side only)
+
+Set these in **Netlify → Site settings → Environment variables**, and in a
+local `.env` (gitignored) for `netlify dev`. See [`.env.example`](./.env.example).
+
+| Var | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude "director" that writes the video prompt |
+| `HF_API_KEY` + `HF_API_SECRET` | Higgsfield image-to-video (or `HF_CREDENTIALS="id:secret"`) |
+
+### Run with the functions locally
+
+```bash
+npm i -g netlify-cli   # once
+netlify dev            # serves the SPA + /api/* functions together
+```
+
+`npm run dev` alone runs the front end only; the `/api/*` calls need
+`netlify dev` (or a deploy) to reach the functions.
+
+### Notes / next phase
+
+- The generator takes a **public image URL**. To accept direct uploads,
+  add a storage step (S3, Cloudinary, Netlify Blobs) that returns a public
+  URL, then pass it as `productImageUrl`.
+- `src/components/HowItWorks.tsx` is the *explainer*; `Generator.tsx` is the
+  real thing. The "push to Meta/TikTok" step is left for the app-shell phase.
