@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-void text-ink font-sans antialiased;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgba(255, 107, 53, 0.3);
+    color: #fff;
+  }
+
+  /* Slim, on-brand scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0a0a0b;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #26262a;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #34343a;
+  }
+}
+
+@layer components {
+  /* Reusable fire CTA */
+  .btn-fire {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-fire px-6 py-3.5
+           text-sm font-semibold text-white transition-all duration-200
+           shadow-fire-soft hover:shadow-fire-glow hover:-translate-y-0.5
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2
+           focus-visible:ring-offset-void;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-void-500 bg-void-800/60 px-6 py-3.5
+           text-sm font-semibold text-ink transition-all duration-200
+           hover:bg-void-700 hover:-translate-y-0.5
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/60;
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-void-500 bg-void-800/70 px-3.5 py-1.5
+           text-xs font-medium uppercase tracking-widest text-ink-muted;
+  }
+
+  .section-pad {
+    @apply px-6 md:px-10 lg:px-16;
+  }
+
+  .container-x {
+    @apply mx-auto w-full max-w-[1200px];
+  }
+
+  /* Gradient text used on key headline fragments */
+  .text-fire {
+    @apply bg-gradient-fire bg-clip-text text-transparent;
+  }
+
+  .glass-chip {
+    @apply rounded-xl border border-white/10 bg-void-700/80 px-3 py-2 backdrop-blur-md shadow-card;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+    mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  }
+}
