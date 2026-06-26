@@ -6,6 +6,7 @@ import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, Plus, Spark, Wand } from '../components/icons'
 import { startGeneration, pollUntilDone, type StatusResponse } from '../lib/api'
 import { useSupabaseClient } from '../hooks/useSupabaseClient'
+import { type SupabaseDb } from '../lib/supabase'
 import { generator } from '../copy'
 
 type Phase = 'idle' | 'working' | 'done' | 'error'
@@ -63,7 +64,7 @@ export default function Studio() {
     setScenes((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
   }
 
-  async function upsertCampaign(db: Awaited<ReturnType<typeof getClient>>) {
+  async function upsertCampaign(db: SupabaseDb) {
     if (campaignIdRef.current) return campaignIdRef.current
     const { data, error } = await db
       .from('campaigns')

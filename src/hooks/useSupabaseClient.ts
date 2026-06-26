@@ -8,12 +8,12 @@
  */
 import { useAuth } from '@clerk/clerk-react'
 import { useCallback } from 'react'
-import { makeSupabaseClient } from '../lib/supabase'
+import { makeSupabaseClient, type SupabaseDb } from '../lib/supabase'
 
 export function useSupabaseClient() {
   const { getToken } = useAuth()
 
-  return useCallback(async () => {
+  return useCallback(async (): Promise<SupabaseDb> => {
     const token = await getToken({ template: 'supabase' })
     return makeSupabaseClient(token)
   }, [getToken])
