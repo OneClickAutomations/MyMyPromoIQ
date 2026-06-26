@@ -34,7 +34,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
   'day-in-life': {
     label: 'Day-in-the-life',
     brief:
-      'The product woven into a real moment of someone's day. Lifestyle b-roll energy, gentle motion, lived-in environment, golden ambient light. Aspirational but believable.',
+      `The product woven into a real moment of someone's day. Lifestyle b-roll energy, gentle motion, lived-in environment, golden ambient light. Aspirational but believable.`,
   },
   'fast-cut': {
     label: 'Fast-cut hook',
