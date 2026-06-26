@@ -63,9 +63,14 @@ netlify.toml               # build, functions dir, /api/* redirects, SPA fallbac
 ## Hero visual
 
 The cinematic background glow (`public/assets/hero-glow.png`) is AI-generated —
-abstract atmosphere only, no text/faces. The **floating dashboard itself is
-hand-built React/SVG** (`DashboardMockup.tsx`) rather than an AI image, so the
-UI text stays crisp, on-brand, and editable at every resolution.
+abstract atmosphere only, no text/faces. The floating dashboard is a **hybrid**:
+the chrome, sidebar, render queue and labels are **hand-built React/SVG**
+(`DashboardMockup.tsx`) so UI text stays crisp at every resolution, while the
+preview + variant tiles are **real AI-generated cinematic ad frames**
+(`public/assets/ad-*.jpg`) so the hero reads as a studio actively producing
+publish-ready commercials — not a wireframe. One tile is intentionally left in
+an "actively rendering" state (fire-tinted scanning shimmer) to show a live
+generation in progress.
 
 ## Live generation pipeline
 

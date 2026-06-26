@@ -83,13 +83,13 @@ export default function Hero() {
           <div className="pointer-events-none absolute inset-x-10 bottom-0 top-10 -z-10 rounded-[40px] bg-fire-start/20 blur-3xl" />
 
           <motion.div
-            initial={{ opacity: 0, y: 40, rotateX: 14 }}
-            animate={{ opacity: 1, y: 0, rotateX: 8 }}
+            initial={{ opacity: 0, y: 40, rotateX: 9 }}
+            animate={{ opacity: 1, y: 0, rotateX: 4 }}
             transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
             className="relative will-change-transform"
             style={{ transformStyle: 'preserve-3d' }}
           >
-            <div className="animate-float [transform:rotateX(8deg)_rotateY(-1deg)] shadow-fire-glow rounded-2xl">
+            <div className="animate-float [transform:rotateX(4deg)_rotateY(-0.5deg)] shadow-fire-glow rounded-2xl">
               <DashboardMockup />
             </div>
 
