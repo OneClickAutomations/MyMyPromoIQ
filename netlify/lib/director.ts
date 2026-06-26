@@ -1,28 +1,24 @@
 /**
  * Shared backend logic for the generation pipeline.
  *
- * Two providers, both server-side only (keys never reach the browser):
- *   1. Anthropic (Claude "director")  — writes the cinematic motion prompt
- *   2. Higgsfield (image-to-video)    — renders the finished UGC video
+ * This module owns two things:
+ *   1. The Claude "director" — writes the cinematic motion prompt.
+ *   2. Thin wrappers (submitVideoJob / getVideoStatus) that delegate to
+ *      whichever VideoProvider is active (see ./providers/index.ts).
  *
- * Grounded against the @higgsfield/client SDK source:
- *   base URL  https://platform.higgsfield.ai
- *   auth      Authorization: Key <KEY_ID>:<KEY_SECRET>
- *   submit    POST /v1/image2video/dop      -> { request_id, status, ... }
- *   status    GET  /requests/{id}/status    -> { status, video?: { url } }
+ * Swap providers via VIDEO_PROVIDER env var:  higgsfield (default) | arcads
  */
 import Anthropic from '@anthropic-ai/sdk'
+import { getProvider } from './providers'
+import type { SubmitOptions, SubmitResult, JobResult } from './providers'
 
-export const HF_BASE = 'https://platform.higgsfield.ai'
+export { getProvider }
+export type { SubmitOptions, SubmitResult, JobResult }
 
 export type StyleId = 'testimonial' | 'unboxing' | 'day-in-life' | 'fast-cut'
 export type Quality = 'lite' | 'turbo' | 'standard'
 
-type StyleDef = {
-  label: string
-  /** Direction handed to the Claude director for this UGC format. */
-  brief: string
-}
+type StyleDef = { label: string; brief: string }
 
 export const STYLES: Record<StyleId, StyleDef> = {
   testimonial: {
@@ -38,7 +34,7 @@ export const STYLES: Record<StyleId, StyleDef> = {
   'day-in-life': {
     label: 'Day-in-the-life',
     brief:
-      'The product woven into a real moment of someone’s day. Lifestyle b-roll energy, gentle motion, lived-in environment, golden ambient light. Aspirational but believable.',
+      'The product woven into a real moment of someone's day. Lifestyle b-roll energy, gentle motion, lived-in environment, golden ambient light. Aspirational but believable.',
   },
   'fast-cut': {
     label: 'Fast-cut hook',
@@ -47,39 +43,16 @@ export const STYLES: Record<StyleId, StyleDef> = {
   },
 }
 
-/** Quality tier → Higgsfield DoP model. */
-const QUALITY_MODEL: Record<Quality, 'dop-lite' | 'dop-turbo' | 'dop-standard'> = {
-  lite: 'dop-lite',
-  turbo: 'dop-turbo',
-  standard: 'dop-standard',
-}
-
-/** Resolve Higgsfield credentials from either env layout. */
-function higgsfieldAuth(): string {
-  const combined = process.env.HF_CREDENTIALS || process.env.HF_KEY
-  let key = process.env.HF_API_KEY
-  let secret = process.env.HF_API_SECRET
-  if (combined && combined.includes(':')) {
-    ;[key, secret] = combined.split(':')
-  }
-  if (!key || !secret) {
-    throw new Error(
-      'Missing Higgsfield credentials. Set HF_API_KEY + HF_API_SECRET (or HF_CREDENTIALS="id:secret").',
-    )
-  }
-  return `Key ${key}:${secret}`
-}
-
 /**
  * Claude is the director: given the product and the chosen UGC style, it writes
- * a single tight image-to-video motion prompt for the video model.
+ * a single tight image-to-video motion prompt for the downstream video model.
  */
 export async function writeDirectorPrompt(opts: {
   productDescription: string
   style: StyleId
 }): Promise<string> {
   const style = STYLES[opts.style]
-  const anthropic = new Anthropic() // reads ANTHROPIC_API_KEY from env
+  const anthropic = new Anthropic()
 
   const system = `You are an expert UGC ad director writing prompts for an image-to-video model. You are given a product and a creative style. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
 
@@ -114,48 +87,16 @@ Rules:
   return text
 }
 
-/** Submit an image-to-video job. Does NOT block on the render. */
+/** Submit an image-to-video job via the active provider. */
 export async function submitVideoJob(opts: {
   prompt: string
   imageUrl: string
   quality: Quality
-}): Promise<{ requestId: string; status: string }> {
-  const res = await fetch(`${HF_BASE}/v1/image2video/dop`, {
-    method: 'POST',
-    headers: { Authorization: higgsfieldAuth(), 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: QUALITY_MODEL[opts.quality],
-      prompt: opts.prompt,
-      input_images: [{ type: 'image_url', image_url: opts.imageUrl }],
-      enhance_prompt: true,
-    }),
-  })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`Higgsfield submit failed (${res.status}): ${detail.slice(0, 300)}`)
-  }
-
-  const data = (await res.json()) as { request_id: string; status: string }
-  return { requestId: data.request_id, status: data.status }
+}): Promise<SubmitResult> {
+  return getProvider().submit(opts)
 }
 
-/** Poll a job by id. Returns a normalized status + the video URL when ready. */
-export async function getVideoStatus(
-  requestId: string,
-): Promise<{ status: 'pending' | 'completed' | 'failed'; videoUrl: string | null; raw: string }> {
-  const res = await fetch(`${HF_BASE}/requests/${encodeURIComponent(requestId)}/status`, {
-    headers: { Authorization: higgsfieldAuth() },
-  })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`Higgsfield status failed (${res.status}): ${detail.slice(0, 300)}`)
-  }
-
-  const data = (await res.json()) as { status: string; video?: { url: string } }
-  const raw = data.status
-  if (raw === 'completed') return { status: 'completed', videoUrl: data.video?.url ?? null, raw }
-  if (raw === 'failed' || raw === 'nsfw') return { status: 'failed', videoUrl: null, raw }
-  return { status: 'pending', videoUrl: null, raw } // queued | in_progress
+/** Poll a job. Returns a normalized status + the video URL when ready. */
+export async function getVideoStatus(requestId: string): Promise<JobResult> {
+  return getProvider().poll(requestId)
 }
