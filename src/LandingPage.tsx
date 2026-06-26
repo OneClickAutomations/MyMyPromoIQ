@@ -8,6 +8,7 @@ import SocialProof from './components/SocialProof'
 import Problem from './components/Problem'
 import VideoSection from './components/VideoSection'
 import HowItWorks from './components/HowItWorks'
+import ShowcaseUGC from './components/ShowcaseUGC'
 import Generator from './components/Generator'
 import Testimonials from './components/Testimonials'
 import Pricing from './components/Pricing'
@@ -24,6 +25,7 @@ export default function LandingPage() {
         <Problem />
         <VideoSection />
         <HowItWorks />
+        <ShowcaseUGC />
         <Generator />
         <Testimonials />
         <Pricing />

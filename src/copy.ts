@@ -163,6 +163,35 @@ export const generator = {
   note: 'First 3 videos are free. Rendering usually takes 1–3 minutes.',
 }
 
+export const ugcShowcase = {
+  eyebrow: 'AI UGC Creator',
+  // Last two fragments render in the fire gradient.
+  headline: ['Authentic UGC.', 'Real Creators.', 'Any Niche.'],
+  subhead:
+    'Generate high-converting UGC campaigns featuring diverse creators, cinematic product shots, and scroll-stopping commercials in minutes. Every campaign is AI-generated, fully editable, and ready to publish.',
+  ctaPrimary: 'Generate a UGC Campaign',
+  ctaSecondary: 'See UGC examples',
+  // Bottom caption strip under the showcase
+  footnote: 'PromoIQ works with any product, any audience, any niche.',
+  footnoteEmphasis: 'Real people. Real products. Real performance.',
+  // Drives the shared <StudioMockup> — a second, completely different campaign
+  // (athletic hydration brand, male creator) in the same premium UI.
+  mockup: {
+    statusBadge: '12 videos generated',
+    renderPill: 'Rendering ad #7…',
+    title: '“Hydrate Electrolytes — UGC hook”',
+    percent: 68,
+    masterChip: '4K · 9:16 master',
+    previewAlt: 'AI-generated Hydrate Electrolytes UGC ad frame with a male creator',
+    director: 'Writing hook · adding captions · enhancing natural light…',
+    ctaCard: {
+      label: 'CTA card',
+      lines: ['Stay hydrated.', 'Perform better.'] as [string, string],
+      button: 'Shop Hydrate',
+    },
+  },
+}
+
 export const testimonials = {
   eyebrow: 'Receipts',
   title: 'Operators, not influencers.',
