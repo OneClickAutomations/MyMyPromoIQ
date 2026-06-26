@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
 import { nav, brand } from '../copy'
 import { Bolt } from './icons'
 
@@ -22,7 +24,7 @@ export default function Navbar() {
     >
       <nav className="container-x section-pad flex h-16 items-center justify-between">
         {/* Logo */}
-        <a href="#top" className="flex items-center gap-2.5">
+        <a href="/" className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-fire shadow-fire-soft">
             <Bolt className="h-4 w-4 text-white" />
           </span>
@@ -31,26 +33,53 @@ export default function Navbar() {
 
         {/* Center links */}
         <ul className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 lg:flex">
-          {nav.links.map((l) => (
-            <li key={l.label}>
-              <a
-                href={l.href}
-                className="text-sm font-medium text-ink-muted transition-colors duration-150 hover:text-ink"
-              >
-                {l.label}
-              </a>
-            </li>
-          ))}
+          {nav.links
+            .filter((l) => l.label !== 'Login')
+            .map((l) => (
+              <li key={l.label}>
+                <a
+                  href={l.href}
+                  className="text-sm font-medium text-ink-muted transition-colors duration-150 hover:text-ink"
+                >
+                  {l.label}
+                </a>
+              </li>
+            ))}
         </ul>
 
-        {/* CTA */}
+        {/* Right: auth-aware */}
         <div className="flex items-center gap-3">
-          <a href="#login" className="hidden text-sm font-medium text-ink-muted hover:text-ink sm:inline">
-            Login
-          </a>
-          <a href="#generate" className="btn-fire px-5 py-2.5 text-[13px]">
-            {nav.cta}
-          </a>
+          <SignedOut>
+            <Link
+              to="/sign-in"
+              className="hidden text-sm font-medium text-ink-muted hover:text-ink transition-colors sm:inline"
+            >
+              Login
+            </Link>
+            <Link to="/sign-up" className="btn-fire px-5 py-2.5 text-[13px]">
+              {nav.cta}
+            </Link>
+          </SignedOut>
+
+          <SignedIn>
+            <Link
+              to="/dashboard"
+              className="hidden text-sm font-medium text-ink-muted hover:text-ink transition-colors sm:inline"
+            >
+              Dashboard
+            </Link>
+            <Link to="/studio" className="btn-fire px-5 py-2.5 text-[13px]">
+              Open Studio
+            </Link>
+            <UserButton
+              afterSignOutUrl="/"
+              appearance={{
+                elements: {
+                  userButtonAvatarBox: 'h-8 w-8 rounded-xl',
+                },
+              }}
+            />
+          </SignedIn>
         </div>
       </nav>
     </header>
