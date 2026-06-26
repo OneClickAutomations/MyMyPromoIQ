@@ -4,27 +4,40 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App'
+import SetupNotice from './pages/SetupNotice'
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
 
-if (!PUBLISHABLE_KEY) {
-  throw new Error(
-    'Missing VITE_CLERK_PUBLISHABLE_KEY — copy .env.example to .env and add your key from clerk.com',
+// A real, configured key looks like `pk_test_…` / `pk_live_…` and isn't the
+// placeholder shipped in .env.example. If it's missing or unconfigured, show a
+// friendly setup screen instead of crashing to a blank page.
+const isConfigured =
+  !!PUBLISHABLE_KEY &&
+  /^pk_(test|live)_/.test(PUBLISHABLE_KEY) &&
+  !PUBLISHABLE_KEY.includes('REPLACE_ME')
+
+const root = createRoot(document.getElementById('root')!)
+
+if (!isConfigured) {
+  root.render(
+    <StrictMode>
+      <SetupNotice />
+    </StrictMode>,
+  )
+} else {
+  root.render(
+    <StrictMode>
+      <ClerkProvider
+        publishableKey={PUBLISHABLE_KEY!}
+        afterSignInUrl="/dashboard"
+        afterSignUpUrl="/dashboard"
+        signInUrl="/sign-in"
+        signUpUrl="/sign-up"
+      >
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ClerkProvider>
+    </StrictMode>,
   )
 }
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ClerkProvider
-      publishableKey={PUBLISHABLE_KEY}
-      afterSignInUrl="/dashboard"
-      afterSignUpUrl="/dashboard"
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-    >
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </ClerkProvider>
-  </StrictMode>,
-)
