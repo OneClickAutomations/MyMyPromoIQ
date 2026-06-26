@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:api": "netlify dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.5.2",
+    "netlify-cli": "^26.1.0",
     "oxlint": "^1.69.0",
     "playwright": "^1.61.1",
     "postcss": "^8.5.15",

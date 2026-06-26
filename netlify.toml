@@ -2,9 +2,14 @@
 #
 # Required environment variables (set in Netlify → Site settings → Environment
 # variables, and in a local .env for `netlify dev`). NEVER commit these.
-#   ANTHROPIC_API_KEY   — Claude "director" that writes the video prompt
-#   HF_API_KEY          — Higgsfield key id        (or use HF_CREDENTIALS="id:secret")
-#   HF_API_SECRET       — Higgsfield key secret
+#   Client (VITE_ prefix, bundled into the browser — publishable keys only):
+#     VITE_CLERK_PUBLISHABLE_KEY — Clerk auth (pk_test_… / pk_live_…)
+#     VITE_SUPABASE_URL          — Supabase project URL
+#     VITE_SUPABASE_ANON_KEY     — Supabase anon/public key (RLS-protected)
+#   Server (functions only, never sent to the browser):
+#     ANTHROPIC_API_KEY   — Claude "director" that writes the video prompt
+#     HF_API_KEY          — Higgsfield key id      (or use HF_CREDENTIALS="id:secret")
+#     HF_API_SECRET       — Higgsfield key secret
 
 [build]
   command = "npm run build"
