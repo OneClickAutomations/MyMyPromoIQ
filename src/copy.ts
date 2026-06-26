@@ -327,7 +327,7 @@ export const footer = {
     },
     {
       title: 'Legal',
-      links: ['Privacy', 'Terms', 'DPA', 'Security'],
+      links: ['Privacy', 'Terms', 'Cookies', 'DPA'],
     },
   ],
   socials: ['x', 'youtube', 'instagram', 'linkedin'],

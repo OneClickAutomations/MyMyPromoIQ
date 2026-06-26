@@ -1,5 +1,14 @@
+import { Link } from 'react-router-dom'
 import { footer, brand } from '../copy'
 import { Bolt, social } from './icons'
+
+const legalRoutes: Record<string, string> = {
+  Privacy: '/legal/privacy',
+  Terms: '/legal/terms',
+  DPA: '/legal/dpa',
+  Cookies: '/legal/cookies',
+  Security: '/legal/privacy#security',
+}
 
 export default function Footer() {
   return (
@@ -41,12 +50,21 @@ export default function Footer() {
               <ul className="mt-4 space-y-3">
                 {col.links.map((l) => (
                   <li key={l}>
-                    <a
-                      href="#"
-                      className="text-sm text-ink-muted transition-colors duration-150 hover:text-ink"
-                    >
-                      {l}
-                    </a>
+                    {col.title === 'Legal' && legalRoutes[l] ? (
+                      <Link
+                        to={legalRoutes[l]}
+                        className="text-sm text-ink-muted transition-colors duration-150 hover:text-ink"
+                      >
+                        {l}
+                      </Link>
+                    ) : (
+                      <a
+                        href="#"
+                        className="text-sm text-ink-muted transition-colors duration-150 hover:text-ink"
+                      >
+                        {l}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>

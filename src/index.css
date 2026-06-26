@@ -80,6 +80,50 @@
   }
 }
 
+  /* Legal document prose */
+  .legal-prose {
+    @apply text-sm text-ink-muted leading-relaxed space-y-6;
+  }
+  .legal-prose h2 {
+    @apply text-xl font-bold text-ink mt-10 mb-3 first:mt-0;
+  }
+  .legal-prose h3 {
+    @apply text-base font-semibold text-ink mt-6 mb-2;
+  }
+  .legal-prose p {
+    @apply text-ink-muted leading-7;
+  }
+  .legal-prose ul {
+    @apply list-none space-y-2 pl-0;
+  }
+  .legal-prose ul li {
+    @apply relative pl-5 before:absolute before:left-0 before:top-2.5 before:h-1.5 before:w-1.5 before:rounded-full before:bg-fire-start before:content-[''];
+  }
+  .legal-prose ol {
+    @apply list-decimal pl-5 space-y-2 marker:text-ink-faint;
+  }
+  .legal-prose a {
+    @apply text-fire-start hover:text-fire-end underline underline-offset-2 transition-colors;
+  }
+  .legal-prose strong {
+    @apply font-semibold text-ink;
+  }
+  .legal-prose table {
+    @apply w-full border-collapse text-xs;
+  }
+  .legal-prose th {
+    @apply bg-void-800 px-4 py-2.5 text-left font-semibold text-ink border border-white/10;
+  }
+  .legal-prose td {
+    @apply px-4 py-2.5 border border-white/5 align-top;
+  }
+  .legal-prose tr:nth-child(even) td {
+    @apply bg-void-800/40;
+  }
+  .legal-prose .callout {
+    @apply rounded-xl border border-fire-start/20 bg-fire-start/5 px-5 py-4 text-sm text-ink-muted;
+  }
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

@@ -5,6 +5,10 @@ import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
 import Dashboard from './pages/Dashboard'
 import Studio from './pages/Studio'
+import PrivacyPolicy from './pages/legal/Privacy'
+import TermsOfService from './pages/legal/Terms'
+import DataProcessingAgreement from './pages/legal/DPA'
+import CookiePolicy from './pages/legal/Cookies'
 
 function Protected({ children }: { children: React.ReactNode }) {
   return (
@@ -39,6 +43,11 @@ export default function App() {
           </Protected>
         }
       />
+      {/* Legal pages */}
+      <Route path="/legal/privacy" element={<PrivacyPolicy />} />
+      <Route path="/legal/terms" element={<TermsOfService />} />
+      <Route path="/legal/dpa" element={<DataProcessingAgreement />} />
+      <Route path="/legal/cookies" element={<CookiePolicy />} />
       {/* Catch-all → landing */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
