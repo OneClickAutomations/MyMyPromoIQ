@@ -57,27 +57,47 @@ export const socialProof = {
 }
 
 export const problem = {
-  eyebrow: 'The Old Way Is Bleeding You Dry',
-  // Problem → Agitate → Solve
-  blocks: [
+  eyebrow: 'The Old Way vs. The PromoIQ Way',
+  title: 'Stop renting the bottleneck.',
+  titleEmphasis: 'Own the pipeline instead.',
+  subtitle: 'Same ad. Two timelines. One of them is bleeding you dry.',
+  // Side-by-side comparison. Each row pairs a pain with the PromoIQ win,
+  // and each side floats its own metric chip.
+  oldLabel: 'The Agency Treadmill',
+  newLabel: 'PromoIQ',
+  rows: [
     {
-      kind: 'problem',
-      text: 'Here is how a single ad used to happen. Book a creator. Wait a week. Ship them product. Wait again. Get the footage. It is wrong. Reshoot. Pay the agency retainer anyway. Three weeks gone for one video you are not even sure will convert.',
+      pain: 'Book a creator. Wait a week. Reshoot when it’s wrong.',
+      painMetric: '3 weeks',
+      painMetricLabel: 'per video',
+      gain: 'Describe it. Walk away. Finished UGC in minutes.',
+      gainMetric: '90 sec',
+      gainMetricLabel: 'per video',
     },
     {
-      kind: 'agitate',
-      text: 'Meanwhile the cost is not the $400 you paid the creator. It is the ad spend you burned testing slow, stale creative. It is the winning angle you never found because you could only afford to test two. Your competitor shipped ten variants this week. You shipped none.',
+      pain: 'Pay the retainer before a single frame is shot.',
+      painMetric: '$5,000',
+      painMetricLabel: '/mo retainer',
+      gain: 'Flat plan. No crew, no retainer, no surprises.',
+      gainMetric: '$0',
+      gainMetricLabel: 'crew cost',
     },
     {
-      kind: 'solve',
-      text: 'So stop renting the bottleneck. PromoIQ hands the whole pipeline to an AI director that writes the script, casts the scene, and renders finished UGC video while you do literally anything else. You get the output. We hide the wiring.',
+      pain: 'Budget kills testing. You ship two angles and pray.',
+      painMetric: '2 variants',
+      painMetricLabel: 'all you can test',
+      gain: 'Spin up a dozen variants and let winners surface.',
+      gainMetric: '15+/day',
+      gainMetricLabel: 'variants shipped',
     },
-  ],
-  // Visceral cost-of-inaction stat row
-  costRow: [
-    { stat: '3 weeks', label: 'gone per agency video' },
-    { stat: '$5,000', label: 'retainer, before a single edit' },
-    { stat: '2 variants', label: 'all most teams can afford to test' },
+    {
+      pain: 'Your competitor shipped ten this week. You shipped none.',
+      painMetric: '0',
+      painMetricLabel: 'ads live',
+      gain: 'An AI director writes, casts, and renders on autopilot.',
+      gainMetric: '+340%',
+      gainMetricLabel: 'reply rate',
+    },
   ],
 }
 

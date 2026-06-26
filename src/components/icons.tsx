@@ -29,6 +29,17 @@ export const Check = (p: I) => (
     <path d="M20 6 9 17l-5-5" />
   </svg>
 )
+export const X = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M18 6 6 18M6 6l12 12" />
+  </svg>
+)
+export const Clock = (p: I) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+)
 export const Upload = (p: I) => (
   <svg {...base(p)}>
     <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
