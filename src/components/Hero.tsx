@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
 import { hero } from '../copy'
 import { ArrowRight, PlayIcon, Check } from './icons'
 import DashboardMockup from './DashboardMockup'
@@ -56,11 +57,11 @@ export default function Hero() {
             transition={{ duration: 0.45, delay: 0.18 }}
             className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row"
           >
-            <a href="#generate" className="btn-fire w-full sm:w-auto">
+            <Link to="/sign-up" className="btn-fire w-full sm:w-auto">
               {hero.ctaPrimary}
               <ArrowRight className="h-4 w-4" />
-            </a>
-            <a href="#demo" className="btn-ghost w-full sm:w-auto">
+            </Link>
+            <a href="#how-it-works" className="btn-ghost w-full sm:w-auto">
               <PlayIcon className="h-3.5 w-3.5 text-gold" />
               {hero.ctaSecondary}
             </a>

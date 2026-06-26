@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { finalCta } from '../copy'
 import { ArrowRight } from './icons'
 import Reveal from './Reveal'
@@ -25,10 +26,10 @@ export default function FinalCta() {
         </Reveal>
         <Reveal delay={0.12}>
           <div className="mt-10 flex flex-col items-center gap-3">
-            <a href="#generate" className="btn-fire px-8 py-4 text-base">
+            <Link to="/sign-up" className="btn-fire px-8 py-4 text-base">
               {finalCta.cta}
               <ArrowRight className="h-5 w-5" />
-            </a>
+            </Link>
             <span className="text-xs text-ink-faint">{finalCta.reassurance}</span>
           </div>
         </Reveal>

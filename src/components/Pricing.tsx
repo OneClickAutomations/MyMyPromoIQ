@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { pricing } from '../copy'
 import { Check, ArrowRight } from './icons'
 import Reveal from './Reveal'
@@ -52,8 +53,8 @@ export default function Pricing() {
                   ))}
                 </ul>
 
-                <a
-                  href="#top"
+                <Link
+                  to="/sign-up"
                   className={`mt-7 ${
                     t.featured
                       ? 'btn-fire w-full'
@@ -62,7 +63,7 @@ export default function Pricing() {
                 >
                   {t.cta}
                   <ArrowRight className="h-4 w-4" />
-                </a>
+                </Link>
               </div>
             </Reveal>
           ))}
