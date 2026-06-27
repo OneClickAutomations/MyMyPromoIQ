@@ -65,9 +65,8 @@ Rules:
 - Vertical 9:16, social-native, authentic — not a glossy TV commercial.`
 
   const message = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 1024,
-    thinking: { type: 'adaptive' },
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
     system,
     messages: [
       {

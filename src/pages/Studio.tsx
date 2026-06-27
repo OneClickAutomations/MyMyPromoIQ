@@ -262,6 +262,7 @@ export default function Studio() {
 
     // Generation — always runs
     try {
+      // Step 0: AI is writing the director prompt (shown while the request is in flight)
       const { requestId, directorPrompt: dp } = await startGeneration({
         productImageUrl: productApiUrl,
         productDescription: description.trim(),
@@ -272,9 +273,15 @@ export default function Studio() {
       if (db && sceneDbId) {
         try { await db.from('scenes').update({ director_prompt: dp, request_id: requestId }).eq('id', sceneDbId) } catch {}
       }
+      // Step 1: submitted to render engine; Step 2: rendering
+      setGenStepIdx(1)
+      await new Promise(r => setTimeout(r, 800)) // brief pause so users see "Submitting"
       setGenStepIdx(2)
 
-      const final: StatusResponse = await pollUntilDone(requestId, () => setGenStepIdx(2))
+      const final: StatusResponse = await pollUntilDone(requestId, () => setGenStepIdx(2), {
+        intervalMs: 5000,
+        timeoutMs: 10 * 60 * 1000, // 10-minute ceiling — renders can take a few minutes
+      })
 
       if (final.status === 'completed' && final.videoUrl) {
         updateScene(idx, { phase: 'done', videoUrl: final.videoUrl })
