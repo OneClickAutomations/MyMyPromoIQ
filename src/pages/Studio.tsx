@@ -6,7 +6,7 @@ import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
-  RefreshCw, Share2, Spark, Upload, Users, Wand,
+  PlayIcon, RefreshCw, Share2, Spark, Upload, Users, Wand,
 } from '../components/icons'
 import { startGeneration, pollUntilDone, uploadProductImage, type StatusResponse } from '../lib/api'
 import { useSupabaseClient } from '../hooks/useSupabaseClient'
@@ -51,12 +51,38 @@ const STYLE_ICON: Record<string, React.ComponentType<React.SVGProps<SVGSVGElemen
   'fast-cut': Bolt, 'unboxing': Upload, 'testimonial': Users, 'day-in-life': Spark,
 }
 
-// Style card thumbnails for Step 2 (gradient mood previews)
-const STYLE_CARD_GRAD: Record<string, string> = {
-  testimonial: 'linear-gradient(135deg,#FF6B35 0%,#FF3C14 50%,#1a0a05 100%)',
-  unboxing:    'linear-gradient(135deg,#FFB900 0%,#FF8C00 50%,#1a1000 100%)',
-  'day-in-life':'linear-gradient(135deg,#FF8C28 0%,#FF6B35 50%,#1a0d05 100%)',
-  'fast-cut':  'linear-gradient(135deg,#FF3C14 0%,#FF0000 50%,#0d0505 100%)',
+
+// Cinematic preview image + metadata for each style card in Step 2
+const STYLE_META: Record<string, {
+  img: string
+  colorGrade: string
+  bestFor: string
+  tagline: string
+}> = {
+  testimonial: {
+    img: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=640&q=80',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,107,53,0.22) 0%, rgba(0,0,0,0.10) 100%)',
+    bestFor: 'Social proof, reviews, UGC',
+    tagline: 'Real people. Real results.',
+  },
+  unboxing: {
+    img: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=640&q=80',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,185,0,0.18) 0%, rgba(0,0,0,0.10) 100%)',
+    bestFor: 'Features, benefits, how-to demos',
+    tagline: 'Show the product and how it works.',
+  },
+  'day-in-life': {
+    img: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=640&q=80',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,140,40,0.18) 0%, rgba(0,0,0,0.12) 100%)',
+    bestFor: 'Relatable moments, aspiration',
+    tagline: 'Show it in real-life situations.',
+  },
+  'fast-cut': {
+    img: 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=640&q=80',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,40,20,0.22) 0%, rgba(0,0,0,0.10) 100%)',
+    bestFor: 'Strong openings, bold hooks',
+    tagline: 'Grab attention in the first 3 seconds.',
+  },
 }
 
 function blankScene(label: string, style: string): Scene {
@@ -771,44 +797,86 @@ export default function Studio() {
           </div>
         )}
 
-        {/* Style cards (improved with visual thumbnail) */}
+        {/* Style cards — cinematic video preview thumbnails */}
         <div className="grid grid-cols-2 gap-3">
-          {generator.styles.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setStyle(s.id)}
-              className={`group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
-                style === s.id
-                  ? 'border-fire-start/60 ring-2 ring-fire-start/20 shadow-[0_0_20px_rgba(255,107,53,0.12)]'
-                  : 'border-white/[0.08] hover:border-white/[0.18]'
-              }`}
-            >
-              {/* Visual thumbnail */}
-              <div className="relative h-20 w-full overflow-hidden"
-                style={{ background: STYLE_CARD_GRAD[s.id] ?? STYLE_CARD_GRAD['testimonial'] }}
+          {generator.styles.map(s => {
+            const meta = STYLE_META[s.id]
+            const Icon = STYLE_ICON[s.id] ?? Spark
+            const isSelected = style === s.id
+            return (
+              <button
+                key={s.id}
+                onClick={() => setStyle(s.id)}
+                className={`group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
+                  isSelected
+                    ? 'border-fire-start/60 ring-2 ring-fire-start/20 shadow-[0_0_28px_rgba(255,107,53,0.18)]'
+                    : 'border-white/[0.08] hover:border-white/[0.26] hover:shadow-[0_8px_32px_rgba(0,0,0,0.55)]'
+                }`}
               >
-                <div className="pointer-events-none absolute inset-0 opacity-[0.04]"
-                  style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")', backgroundSize: '64px 64px' }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  {(() => {
-                    const Icon = STYLE_ICON[s.id] ?? Spark
-                    return <Icon className="h-8 w-8 text-white/25" />
-                  })()}
-                </div>
-                {style === s.id && (
-                  <div className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-white">
-                    <Check className="h-3 w-3 text-fire-start" />
+                {/* ── Thumbnail (16:9) ── */}
+                <div className="relative aspect-video w-full overflow-hidden">
+                  {/* Photo */}
+                  <img
+                    src={meta.img}
+                    alt={s.label}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+                  />
+                  {/* Cinematic color grade */}
+                  <div className="pointer-events-none absolute inset-0" style={{ background: meta.colorGrade }} />
+                  {/* Bottom darkening for readability */}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                  {/* Top darkening */}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 to-transparent" />
+
+                  {/* Play button */}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className={`grid h-9 w-9 place-items-center rounded-full border backdrop-blur-sm transition-all duration-200 group-hover:scale-110 ${
+                      isSelected
+                        ? 'border-fire-start/50 bg-fire-start/25 shadow-fire-soft'
+                        : 'border-white/25 bg-black/35 group-hover:border-white/45 group-hover:bg-black/55'
+                    }`}>
+                      <PlayIcon className="h-3.5 w-3.5 translate-x-px text-white" />
+                    </div>
                   </div>
-                )}
-              </div>
-              {/* Label */}
-              <div className="p-3">
-                <p className="text-sm font-bold text-ink">{s.label}</p>
-                <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">{s.hint}</p>
-              </div>
-            </button>
-          ))}
+
+                  {/* Selected checkmark */}
+                  {isSelected && (
+                    <motion.div
+                      initial={{ scale: 0.6, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="absolute right-2.5 top-2.5 grid h-6 w-6 place-items-center rounded-full bg-gradient-fire shadow-fire-soft"
+                    >
+                      <Check className="h-3.5 w-3.5 text-white" />
+                    </motion.div>
+                  )}
+
+                  {/* Bottom tagline over image */}
+                  <p className="absolute inset-x-0 bottom-2.5 px-3 text-[10px] font-semibold leading-tight text-white/70">
+                    {meta.tagline}
+                  </p>
+                </div>
+
+                {/* ── Info panel ── */}
+                <div className={`border-t p-3.5 transition-colors duration-200 ${
+                  isSelected ? 'border-fire-start/20 bg-fire-start/[0.06]' : 'border-white/[0.06] bg-void-900/80'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <div className={`grid h-6 w-6 flex-shrink-0 place-items-center rounded-lg transition-colors ${
+                      isSelected ? 'bg-fire-start/25' : 'bg-void-700/70'
+                    }`}>
+                      <Icon className={`h-3.5 w-3.5 transition-colors ${isSelected ? 'text-fire-start' : 'text-ink-faint/70'}`} />
+                    </div>
+                    <span className="text-sm font-bold text-ink">{s.label}</span>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">{s.hint}</p>
+                  <p className="mt-1.5 text-[10px] text-ink-faint/55">
+                    <span className="font-semibold text-ink-faint/75">Best for:</span> {meta.bestFor}
+                  </p>
+                </div>
+              </button>
+            )
+          })}
         </div>
 
         {/* Quality */}
