@@ -203,7 +203,20 @@ export default function Studio() {
     // Local file or camera capture — upload to get a hosted URL
     setUploadingImage(true)
     try {
-      const url = await uploadProductImage(productPreview)
+      // productPreview is a blob URL for file uploads; camera captures are already data URLs.
+      // We must send a base64 data URL to the server, so convert file uploads via FileReader.
+      let dataUrl: string
+      if (productFile) {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = () => reject(new Error('Could not read the image file.'))
+          reader.readAsDataURL(productFile)
+        })
+      } else {
+        dataUrl = productPreview // camera capture — already a data URL
+      }
+      const url = await uploadProductImage(dataUrl)
       setProductApiUrl(url)
       setWorkflowStep(2)
     } catch (err) {
@@ -212,7 +225,7 @@ export default function Studio() {
     } finally {
       setUploadingImage(false)
     }
-  }, [productPreview, description, inputMethod, urlInput])
+  }, [productPreview, productFile, description, inputMethod, urlInput])
 
   // Step 2 → 3: trigger generation
   async function handleGenerate() {
