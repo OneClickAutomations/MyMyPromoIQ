@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useTransition } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -285,7 +285,9 @@ export default function Studio() {
   const [productApiUrl, setProductApiUrl]   = useState('') // sent to /api/generate
   const [urlInput, setUrlInput]             = useState('')
   const [urlPreviewOk, setUrlPreviewOk]     = useState(false)
-  const [description, setDescription]       = useState('')
+  const [descInput, setDescInput]           = useState('')   // immediate — drives textarea
+  const [description, setDescription]       = useState('')   // deferred via startTransition
+  const [, startDescTransition]             = useTransition()
   const [cameraOpen, setCameraOpen]         = useState(false)
   const [isDragOver, setIsDragOver]         = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -502,6 +504,7 @@ export default function Studio() {
 
   function startOver() {
     clearProduct()
+    setDescInput('')
     setDescription('')
     setStyle(defaultStyle)
     setQuality('turbo')
@@ -514,7 +517,7 @@ export default function Studio() {
     setWorkflowStep(1)
   }
 
-  const canAdvanceStep1 = !!productPreview && !!description.trim()
+  const canAdvanceStep1 = !!productPreview && !!descInput.trim()
   const completedScenes = scenes.filter(s => s.phase === 'done').length
 
   // ── Step nav ─────────────────────────────────────────────────────────────
@@ -750,8 +753,12 @@ export default function Studio() {
             <textarea
               required
               rows={2}
-              value={description}
-              onChange={e => setDescription(e.target.value)}
+              value={descInput}
+              onChange={e => {
+                const v = e.target.value
+                setDescInput(v)
+                startDescTransition(() => setDescription(v))
+              }}
               placeholder="A matte ceramic pour-over coffee dripper for slow mornings."
               className="mt-2 w-full resize-none rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
             />
