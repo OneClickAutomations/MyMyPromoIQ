@@ -67,26 +67,26 @@ const STYLE_META: Record<string, {
   tagline: string
 }> = {
   testimonial: {
-    img: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=640&q=80',
-    colorGrade: 'linear-gradient(to bottom right, rgba(255,107,53,0.22) 0%, rgba(0,0,0,0.10) 100%)',
+    img: '/assets/fmt-testimonial.png',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,107,53,0.18) 0%, rgba(0,0,0,0.12) 100%)',
     bestFor: 'Social proof, reviews, UGC',
     tagline: 'Real people. Real results.',
   },
   unboxing: {
-    img: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=640&q=80',
-    colorGrade: 'linear-gradient(to bottom right, rgba(255,185,0,0.18) 0%, rgba(0,0,0,0.10) 100%)',
+    img: '/assets/fmt-unbox.png',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,185,0,0.14) 0%, rgba(0,0,0,0.12) 100%)',
     bestFor: 'Features, benefits, how-to demos',
     tagline: 'Show the product and how it works.',
   },
   'day-in-life': {
-    img: 'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=640&q=80',
-    colorGrade: 'linear-gradient(to bottom right, rgba(255,140,40,0.18) 0%, rgba(0,0,0,0.12) 100%)',
+    img: '/assets/fmt-life.png',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,140,40,0.14) 0%, rgba(0,0,0,0.12) 100%)',
     bestFor: 'Relatable moments, aspiration',
     tagline: 'Show it in real-life situations.',
   },
   'fast-cut': {
-    img: 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=640&q=80',
-    colorGrade: 'linear-gradient(to bottom right, rgba(255,40,20,0.22) 0%, rgba(0,0,0,0.10) 100%)',
+    img: '/assets/fmt-hook.png',
+    colorGrade: 'linear-gradient(to bottom right, rgba(255,40,20,0.18) 0%, rgba(0,0,0,0.12) 100%)',
     bestFor: 'Strong openings, bold hooks',
     tagline: 'Grab attention in the first 3 seconds.',
   },
