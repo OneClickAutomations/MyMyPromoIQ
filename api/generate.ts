@@ -13,7 +13,7 @@ import {
   writeDirectorPrompt,
   type Quality,
   type StyleId,
-} from '../netlify/lib/director'
+} from '../netlify/lib/director.ts'
 
 const QUALITIES: Quality[] = ['lite', 'turbo', 'standard']
 

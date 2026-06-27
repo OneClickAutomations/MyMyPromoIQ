@@ -7,11 +7,11 @@
  *
  * Each adapter is instantiated lazily and cached per function invocation.
  */
-import { HiggsfieldAdapter } from './higgsfield'
-import { ArcadsAdapter } from './arcads'
-import type { VideoProvider } from './types'
+import { HiggsfieldAdapter } from './higgsfield.ts'
+import { ArcadsAdapter } from './arcads.ts'
+import type { VideoProvider } from './types.ts'
 
-export type { VideoProvider, SubmitOptions, SubmitResult, JobResult, ProviderCapabilities } from './types'
+export type { VideoProvider, SubmitOptions, SubmitResult, JobResult, ProviderCapabilities } from './types.ts'
 
 type ProviderId = 'higgsfield' | 'arcads'
 
@@ -36,5 +36,5 @@ export function getProvider(id?: string): VideoProvider {
   return cache.get(resolvedId)!
 }
 
-export { HiggsfieldAdapter } from './higgsfield'
-export { ArcadsAdapter } from './arcads'
+export { HiggsfieldAdapter } from './higgsfield.ts'
+export { ArcadsAdapter } from './arcads.ts'

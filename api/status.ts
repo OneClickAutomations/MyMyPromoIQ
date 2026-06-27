@@ -6,7 +6,7 @@
  * can poll this freely without hitting any quota.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getVideoStatus } from '../netlify/lib/director'
+import { getVideoStatus } from '../netlify/lib/director.ts'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {

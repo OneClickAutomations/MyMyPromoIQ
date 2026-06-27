@@ -9,8 +9,8 @@
  * Swap providers via VIDEO_PROVIDER env var:  higgsfield (default) | arcads
  */
 import Anthropic from '@anthropic-ai/sdk'
-import { getProvider } from './providers'
-import type { SubmitOptions, SubmitResult, JobResult } from './providers'
+import { getProvider } from './providers/index.ts'
+import type { SubmitOptions, SubmitResult, JobResult } from './providers/index.ts'
 
 export { getProvider }
 export type { SubmitOptions, SubmitResult, JobResult }

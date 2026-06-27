@@ -14,7 +14,7 @@
  *
  * Credits are charged at create-time; there are no refunds on cancellation.
  */
-import type { VideoProvider, ProviderCapabilities, SubmitOptions, SubmitResult, JobResult } from './types'
+import type { VideoProvider, ProviderCapabilities, SubmitOptions, SubmitResult, JobResult } from './types.ts'
 
 const BASE = 'https://external-api.arcads.ai'
 

@@ -5,7 +5,7 @@
  * Submit: POST /v1/image2video/dop  → { request_id, status }
  * Poll:   GET  /requests/{id}/status → { status, video?: { url } }
  */
-import type { VideoProvider, ProviderCapabilities, SubmitOptions, SubmitResult, JobResult } from './types'
+import type { VideoProvider, ProviderCapabilities, SubmitOptions, SubmitResult, JobResult } from './types.ts'
 
 const BASE = 'https://platform.higgsfield.ai'
 
