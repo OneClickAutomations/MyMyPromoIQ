@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
-import { ArrowRight, ArrowUp, Bolt, Film, Grid, Layers, Plus, Spark, Users, Wand } from '../components/icons'
+import { ArrowRight, ArrowUp, Bolt, Film, Grid, Plus, Spark, Wand } from '../components/icons'
 import { useSupabaseClient } from '../hooks/useSupabaseClient'
 import type { Campaign } from '../lib/supabase'
 
@@ -55,6 +55,10 @@ function StatCard({
 }
 
 /* ── Quick-start template configs ──────────────────────────────── */
+// Each format card uses a cinematic photo that reflects the format, plus an
+// accent color-grade so the imagery ties into the dark fire-toned UI.
+const IMG = (id: string) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=600&h=760&q=80`
+
 const QUICK_STARTS = [
   {
     label: 'Testimonial',
@@ -62,11 +66,9 @@ const QUICK_STARTS = [
     style: 'testimonial',
     duration: '20s',
     category: 'UGC',
-    thumbGrad: 'from-fire-start/25 to-fire-start/5',
-    iconBg: 'bg-fire-start/15 ring-1 ring-fire-start/25',
-    iconColor: 'text-fire-start',
     catClass: 'bg-fire-start/10 text-fire-start',
-    Icon: Users,
+    img: IMG('1438761681033-6461ffad8d80'),
+    grade: 'linear-gradient(180deg, rgba(255,107,53,0.16) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
   },
   {
     label: 'Unboxing',
@@ -74,11 +76,9 @@ const QUICK_STARTS = [
     style: 'unboxing',
     duration: '15s',
     category: 'Product',
-    thumbGrad: 'from-gold/25 to-gold/5',
-    iconBg: 'bg-gold/15 ring-1 ring-gold/25',
-    iconColor: 'text-gold',
     catClass: 'bg-gold/10 text-gold',
-    Icon: Layers,
+    img: IMG('1505740420928-5e560c06d30e'),
+    grade: 'linear-gradient(180deg, rgba(255,185,0,0.14) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
   },
   {
     label: 'Day-in-the-Life',
@@ -86,11 +86,9 @@ const QUICK_STARTS = [
     style: 'day-in-life',
     duration: '45s',
     category: 'Lifestyle',
-    thumbGrad: 'from-fire-start/20 to-fire-end/5',
-    iconBg: 'bg-fire-start/12 ring-1 ring-fire-start/20',
-    iconColor: 'text-fire-start',
     catClass: 'bg-fire-start/10 text-fire-start',
-    Icon: Film,
+    img: IMG('1517836357463-d25dfeac3438'),
+    grade: 'linear-gradient(180deg, rgba(255,140,40,0.16) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
   },
   {
     label: 'Fast-Cut Hook',
@@ -98,11 +96,9 @@ const QUICK_STARTS = [
     style: 'fast-cut',
     duration: '8s',
     category: 'Hook',
-    thumbGrad: 'from-fire-end/30 to-fire-end/5',
-    iconBg: 'bg-fire-end/15 ring-1 ring-fire-end/25',
-    iconColor: 'text-fire-end',
     catClass: 'bg-fire-end/10 text-fire-end',
-    Icon: Bolt,
+    img: IMG('1552674605-db6ffd4facb5'),
+    grade: 'linear-gradient(180deg, rgba(255,40,20,0.20) 0%, rgba(10,10,12,0.22) 55%, rgba(10,10,12,0.80) 100%)',
   },
 ]
 
@@ -250,17 +246,22 @@ export default function Dashboard() {
                 to={`/studio?style=${q.style}`}
                 className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
               >
-                {/* Thumbnail */}
-                <div className={`relative flex h-[76px] items-center justify-center overflow-hidden bg-gradient-to-br ${q.thumbGrad} md:h-[88px]`}>
-                  {/* Decorative grid lines */}
-                  <div className="pointer-events-none absolute inset-0 opacity-20"
-                    style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+                {/* Cinematic thumbnail */}
+                <div className="relative aspect-[4/5] w-full overflow-hidden">
+                  <img
+                    src={q.img}
+                    alt={`${q.label} format`}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.06]"
                   />
-                  <div className={`grid h-11 w-11 place-items-center rounded-2xl ${q.iconBg} shadow-[0_4px_16px_-4px_rgba(0,0,0,0.4)] transition-transform duration-200 group-hover:scale-110`}>
-                    <q.Icon className={`h-5 w-5 ${q.iconColor}`} />
-                  </div>
-                  {/* Duration badge */}
-                  <span className="absolute bottom-2 right-2 rounded-md bg-black/40 px-1.5 py-0.5 text-[9px] font-semibold text-white/80 backdrop-blur-sm">
+                  {/* Accent color-grade — ties the photo into the fire-toned UI */}
+                  <div className="pointer-events-none absolute inset-0" style={{ background: q.grade }} />
+                  {/* Cinematic vignette for depth */}
+                  <div className="pointer-events-none absolute inset-0"
+                    style={{ background: 'radial-gradient(ellipse 95% 85% at 50% 35%, transparent 50%, rgba(0,0,0,0.45) 100%)' }}
+                  />
+                  {/* Duration badge — top right */}
+                  <span className="absolute right-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 text-[9px] font-semibold text-white/90 backdrop-blur-sm ring-1 ring-white/10">
                     ~{q.duration}
                   </span>
                 </div>
