@@ -66,7 +66,7 @@ const QUICK_STARTS = [
     duration: '20s',
     category: 'UGC',
     catClass: 'bg-fire-start/10 text-fire-start',
-    img: '/assets/ugc-main.jpg',
+    img: '/assets/fmt-testimonial.png',
     grade: 'linear-gradient(180deg, rgba(255,107,53,0.12) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
@@ -76,7 +76,7 @@ const QUICK_STARTS = [
     duration: '15s',
     category: 'Product',
     catClass: 'bg-gold/10 text-gold',
-    img: '/assets/ugc-benefit.jpg',
+    img: '/assets/fmt-unbox.png',
     grade: 'linear-gradient(180deg, rgba(255,185,0,0.10) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
@@ -86,7 +86,7 @@ const QUICK_STARTS = [
     duration: '45s',
     category: 'Lifestyle',
     catClass: 'bg-fire-start/10 text-fire-start',
-    img: '/assets/ugc-lifestyle.jpg',
+    img: '/assets/fmt-life.png',
     grade: 'linear-gradient(180deg, rgba(255,140,40,0.10) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
@@ -96,7 +96,7 @@ const QUICK_STARTS = [
     duration: '8s',
     category: 'Hook',
     catClass: 'bg-fire-end/10 text-fire-end',
-    img: '/assets/ugc-hook.jpg',
+    img: '/assets/fmt-hook.png',
     grade: 'linear-gradient(180deg, rgba(255,40,20,0.14) 0%, transparent 45%, rgba(10,10,12,0.34) 100%)',
   },
 ]
