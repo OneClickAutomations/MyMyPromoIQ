@@ -55,10 +55,9 @@ function StatCard({
 }
 
 /* ── Quick-start template configs ──────────────────────────────── */
-// Each format card uses a cinematic photo that reflects the format, plus an
-// accent color-grade so the imagery ties into the dark fire-toned UI.
-const IMG = (id: string) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=600&h=760&q=80`
-
+// Each format card uses an on-brand cinematic product shot (committed under
+// public/assets — the same set used across the marketing pages) plus a
+// subtle accent grade so the imagery ties into the dark fire-toned UI.
 const QUICK_STARTS = [
   {
     label: 'Testimonial',
@@ -67,8 +66,8 @@ const QUICK_STARTS = [
     duration: '20s',
     category: 'UGC',
     catClass: 'bg-fire-start/10 text-fire-start',
-    img: IMG('1438761681033-6461ffad8d80'),
-    grade: 'linear-gradient(180deg, rgba(255,107,53,0.16) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
+    img: '/assets/ad-main.jpg',
+    grade: 'linear-gradient(180deg, rgba(255,107,53,0.12) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
     label: 'Unboxing',
@@ -77,8 +76,8 @@ const QUICK_STARTS = [
     duration: '15s',
     category: 'Product',
     catClass: 'bg-gold/10 text-gold',
-    img: IMG('1505740420928-5e560c06d30e'),
-    grade: 'linear-gradient(180deg, rgba(255,185,0,0.14) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
+    img: '/assets/ad-unbox.jpg',
+    grade: 'linear-gradient(180deg, rgba(255,185,0,0.10) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
     label: 'Day-in-the-Life',
@@ -87,8 +86,8 @@ const QUICK_STARTS = [
     duration: '45s',
     category: 'Lifestyle',
     catClass: 'bg-fire-start/10 text-fire-start',
-    img: IMG('1517836357463-d25dfeac3438'),
-    grade: 'linear-gradient(180deg, rgba(255,140,40,0.16) 0%, rgba(10,10,12,0.20) 55%, rgba(10,10,12,0.78) 100%)',
+    img: '/assets/ad-life.jpg',
+    grade: 'linear-gradient(180deg, rgba(255,140,40,0.10) 0%, transparent 45%, rgba(10,10,12,0.32) 100%)',
   },
   {
     label: 'Fast-Cut Hook',
@@ -97,8 +96,8 @@ const QUICK_STARTS = [
     duration: '8s',
     category: 'Hook',
     catClass: 'bg-fire-end/10 text-fire-end',
-    img: IMG('1552674605-db6ffd4facb5'),
-    grade: 'linear-gradient(180deg, rgba(255,40,20,0.20) 0%, rgba(10,10,12,0.22) 55%, rgba(10,10,12,0.80) 100%)',
+    img: '/assets/ad-splash.jpg',
+    grade: 'linear-gradient(180deg, rgba(255,40,20,0.14) 0%, transparent 45%, rgba(10,10,12,0.34) 100%)',
   },
 ]
 
@@ -247,7 +246,7 @@ export default function Dashboard() {
                 className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
               >
                 {/* Cinematic thumbnail */}
-                <div className="relative aspect-[4/5] w-full overflow-hidden">
+                <div className="relative aspect-square w-full overflow-hidden">
                   <img
                     src={q.img}
                     alt={`${q.label} format`}
