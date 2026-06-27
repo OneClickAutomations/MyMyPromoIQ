@@ -106,9 +106,18 @@ export default function Studio() {
     updateScene(idx, { phase: 'working', error: '', videoUrl: null, directorPrompt: '' })
     setStepIdx(0)
 
+    // ── Persistence is best-effort ──────────────────────────────────────────
+    // The actual video generation must work exactly like the landing-page demo,
+    // which uses no database at all. We try to save to Supabase, but a DB/auth
+    // failure (e.g. missing Clerk JWT template, RLS not yet configured) must
+    // NEVER block the render. db stays null if persistence is unavailable.
+    let db: SupabaseDb | null = null
+    let campaignId: string | null = null
+    let sceneDbId = scenes[idx].dbId
+
     try {
-      const db = await getClient()
-      const campaignId = await upsertCampaign(db)
+      db = await getClient()
+      campaignId = await upsertCampaign(db)
 
       const scenePayload = {
         campaign_id: campaignId,
@@ -118,16 +127,20 @@ export default function Studio() {
         order_index: idx,
         phase: 'working' as const,
       }
-      const existing = scenes[idx].dbId
-      let sceneDbId = existing
-      if (!existing) {
+      if (!sceneDbId) {
         const { data } = await db.from('scenes').insert(scenePayload).select('id').single()
         sceneDbId = data?.id ?? null
         updateScene(idx, { dbId: sceneDbId })
       } else {
-        await db.from('scenes').update({ phase: 'working', error_message: null, video_url: null }).eq('id', existing)
+        await db.from('scenes').update({ phase: 'working', error_message: null, video_url: null }).eq('id', sceneDbId)
       }
+    } catch (dbErr) {
+      console.warn('[Studio] Supabase persistence unavailable — generating without saving:', dbErr)
+      db = null
+    }
 
+    // ── Video generation — runs regardless of persistence ───────────────────
+    try {
       const { requestId, directorPrompt } = await startGeneration({
         productImageUrl: imageUrl.trim(),
         productDescription: description.trim(),
@@ -135,8 +148,10 @@ export default function Studio() {
         quality,
       })
       updateScene(idx, { directorPrompt })
-      if (sceneDbId) {
-        await db.from('scenes').update({ director_prompt: directorPrompt, request_id: requestId }).eq('id', sceneDbId)
+      if (db && sceneDbId) {
+        try {
+          await db.from('scenes').update({ director_prompt: directorPrompt, request_id: requestId }).eq('id', sceneDbId)
+        } catch (e) { console.warn('[Studio] could not persist director prompt:', e) }
       }
       setStepIdx(2)
 
@@ -144,20 +159,24 @@ export default function Studio() {
 
       if (final.status === 'completed' && final.videoUrl) {
         updateScene(idx, { phase: 'done', videoUrl: final.videoUrl })
-        if (sceneDbId) {
-          await db.from('scenes').update({ phase: 'done', video_url: final.videoUrl }).eq('id', sceneDbId)
-        }
-        const allDone = scenes.every((s, i) => i === idx || s.phase === 'done')
-        if (allDone) {
-          await db.from('campaigns').update({ status: 'ready' }).eq('id', campaignId)
+        if (db && sceneDbId) {
+          try {
+            await db.from('scenes').update({ phase: 'done', video_url: final.videoUrl }).eq('id', sceneDbId)
+            const allDone = scenes.every((s, i) => i === idx || s.phase === 'done')
+            if (allDone && campaignId) {
+              await db.from('campaigns').update({ status: 'ready' }).eq('id', campaignId)
+            }
+          } catch (e) { console.warn('[Studio] could not persist completed scene:', e) }
         }
       } else {
         const msg = final.raw === 'timeout'
           ? 'Render timed out. Try again.'
           : 'Render did not complete. Try a different image or style.'
         updateScene(idx, { phase: 'error', error: msg })
-        if (sceneDbId) {
-          await db.from('scenes').update({ phase: 'error', error_message: msg }).eq('id', sceneDbId)
+        if (db && sceneDbId) {
+          try {
+            await db.from('scenes').update({ phase: 'error', error_message: msg }).eq('id', sceneDbId)
+          } catch (e) { console.warn('[Studio] could not persist error state:', e) }
         }
       }
     } catch (err) {
