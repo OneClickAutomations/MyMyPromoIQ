@@ -11,7 +11,6 @@ import {
 import {
   startGeneration,
   pollUntilDone,
-  pollSceneUntilDone,
   presignUpload,
   uploadDirectToStorage,
   dataUrlToBlob,
@@ -466,35 +465,12 @@ export default function Studio() {
       await new Promise(r => setTimeout(r, 800)) // brief pause so users see "Submitting"
       setGenStepIdx(2)
 
-      // Kick off the background watcher (fire-and-forget).
-      // It polls Higgsfield server-side for up to 13 min and writes the result
-      // into the Supabase scene row — no /api/status calls needed.
-      if (sceneDbId) {
-        fetch('/api/watch', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ requestId, sceneId: sceneDbId }),
-        }).catch(() => {})
-      }
-
-      // Poll the Supabase scene row directly (zero Netlify function invocations).
-      // Falls back to /api/status polling when DB is unavailable.
-      const final: StatusResponse = (sceneDbId && db)
-        ? await pollSceneUntilDone(
-            async () => {
-              const { data } = await db!.from('scenes')
-                .select('phase,video_url,error_message')
-                .eq('id', sceneDbId)
-                .single()
-              return data
-            },
-            () => setGenStepIdx(2),
-            { intervalMs: 5_000, timeoutMs: 12 * 60 * 1_000 },
-          )
-        : await pollUntilDone(requestId, () => setGenStepIdx(2), {
-            intervalMs: 5_000,
-            timeoutMs: 10 * 60 * 1_000,
-          })
+      // Poll /api/status every 5 s until the render finishes or times out.
+      // On Vercel's free tier, function invocations are unlimited.
+      const final: StatusResponse = await pollUntilDone(requestId, () => setGenStepIdx(2), {
+        intervalMs: 5_000,
+        timeoutMs: 10 * 60 * 1_000,
+      })
 
       if (final.status === 'completed' && final.videoUrl) {
         updateScene(idx, { phase: 'done', videoUrl: final.videoUrl })
