@@ -4,15 +4,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Near-black backgrounds with slight warmth — never pure black.
+        // Semantic void/ink tokens — driven by CSS variables so light mode works.
+        // Variables are space-separated RGB channels (e.g. "10 10 11") for
+        // opacity-modifier support (bg-void-800/60 etc).
         void: {
-          DEFAULT: '#0A0A0B',
-          800: '#111113',
-          700: '#161618',
-          600: '#1C1C1F',
-          500: '#26262A',
+          DEFAULT: 'rgb(var(--c-void) / <alpha-value>)',
+          900: 'rgb(var(--c-void-900) / <alpha-value>)',
+          800: 'rgb(var(--c-void-800) / <alpha-value>)',
+          700: 'rgb(var(--c-void-700) / <alpha-value>)',
+          600: 'rgb(var(--c-void-600) / <alpha-value>)',
+          500: 'rgb(var(--c-void-500) / <alpha-value>)',
         },
-        // Orange → red fire system (primary).
+        // Orange → red fire system (primary — fixed across modes).
         fire: {
           start: '#FF6B35',
           end: '#E8341C',
@@ -24,9 +27,9 @@ export default {
           soft: '#F7CE7A',
         },
         ink: {
-          DEFAULT: '#F5F5F4',
-          muted: '#A1A1A6',
-          faint: '#6B6B72',
+          DEFAULT: 'rgb(var(--c-ink) / <alpha-value>)',
+          muted: 'rgb(var(--c-ink-muted) / <alpha-value>)',
+          faint: 'rgb(var(--c-ink-faint) / <alpha-value>)',
         },
       },
       fontFamily: {
@@ -42,6 +45,7 @@ export default {
         'fire-soft': '0 0 0 1px rgba(255,107,53,0.18), 0 18px 50px -18px rgba(255,107,53,0.30)',
         'gold-ring': '0 0 0 1px rgba(242,184,75,0.35)',
         'card': '0 24px 60px -28px rgba(0,0,0,0.85)',
+        'card-light': '0 1px 3px 0 rgba(0,0,0,0.08), 0 4px 16px -4px rgba(0,0,0,0.06)',
       },
       letterSpacing: {
         'tightest': '-0.045em',

@@ -5,8 +5,41 @@
 @tailwind utilities;
 
 @layer base {
+  /* ── Dark mode tokens (default) ── */
   :root {
     color-scheme: dark;
+    /* Space-separated RGB channels — allows /opacity modifiers in Tailwind */
+    --c-void:     10 10 11;
+    --c-void-900: 7 7 8;
+    --c-void-800: 17 17 19;
+    --c-void-700: 22 22 24;
+    --c-void-600: 28 28 31;
+    --c-void-500: 38 38 42;
+    --c-ink:      245 245 244;
+    --c-ink-muted: 161 161 166;
+    --c-ink-faint: 107 107 114;
+  }
+
+  /* ── Light mode tokens — applied via .light class on the AppShell wrapper ── */
+  .light {
+    color-scheme: light;
+    --c-void:     250 250 249;
+    --c-void-900: 243 243 241;
+    --c-void-800: 234 234 231;
+    --c-void-700: 222 222 219;
+    --c-void-600: 208 208 204;
+    --c-void-500: 188 188 184;
+    --c-ink:      22 22 24;
+    --c-ink-muted: 88 88 98;
+    --c-ink-faint: 148 148 158;
+  }
+
+  /* In light mode: white borders become dark-on-light borders */
+  .light [class*="border-white"] {
+    border-color: rgb(0 0 0 / 0.08);
+  }
+  .light [class*="ring-white"] {
+    --tw-ring-color: rgb(0 0 0 / 0.08);
   }
 
   html {
@@ -24,20 +57,16 @@
     color: #fff;
   }
 
-  /* Slim, on-brand scrollbar */
-  ::-webkit-scrollbar {
-    width: 10px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #0a0a0b;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #26262a;
-    border-radius: 999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #34343a;
-  }
+  /* Slim, on-brand scrollbar — dark */
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: #0a0a0b; }
+  ::-webkit-scrollbar-thumb { background: #26262a; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #34343a; }
+
+  /* Light mode scrollbar */
+  .light ::-webkit-scrollbar-track { background: #f4f4f2; }
+  .light ::-webkit-scrollbar-thumb { background: #d0d0cc; }
+  .light ::-webkit-scrollbar-thumb:hover { background: #bcbcb8; }
 }
 
 @layer components {

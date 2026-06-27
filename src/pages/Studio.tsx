@@ -160,7 +160,7 @@ export default function Studio() {
   return (
     <AppShell>
       {/* Breadcrumb */}
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-5 flex items-center justify-between md:mb-8">
         <div>
           <div className="flex items-center gap-2 text-sm text-ink-muted">
             <Link to="/dashboard" className="hover:text-ink transition-colors">Campaigns</Link>
@@ -266,7 +266,7 @@ export default function Studio() {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-3 md:gap-3">
             {scenes.map((scene, idx) => (
               <button key={scene.id} type="button" onClick={() => setActiveIdx(idx)}
                 className={`group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 ${

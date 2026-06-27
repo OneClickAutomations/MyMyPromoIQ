@@ -65,15 +65,15 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"
+        className="flex flex-row items-center justify-between gap-3"
       >
         <div>
-          <p className="text-sm text-ink-muted">Good to see you,</p>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink">{firstName}</h1>
+          <p className="text-xs text-ink-muted">Good to see you,</p>
+          <h1 className="text-2xl font-extrabold tracking-tight text-ink md:text-3xl">{firstName}</h1>
         </div>
-        <Link to="/studio" className="btn-fire gap-2 self-start sm:self-auto">
+        <Link to="/studio" className="btn-fire gap-1.5 px-4 py-2.5 text-sm md:gap-2 md:px-6 md:py-3.5">
           <Plus className="h-4 w-4" />
-          New Campaign
+          <span className="hidden sm:inline">New </span>Campaign
         </Link>
       </motion.div>
 
@@ -82,17 +82,17 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
-        className="mt-8 grid grid-cols-3 gap-4"
+        className="mt-6 grid grid-cols-3 gap-3 md:mt-8 md:gap-4"
       >
         {[
           { label: 'Videos generated', value: loading ? '—' : String(totalVideos), sub: 'all time' },
-          { label: 'Free credits left', value: '3', sub: 'videos remaining' },
+          { label: 'Free credits left', value: '3', sub: 'remaining' },
           { label: 'Campaigns', value: loading ? '—' : String(campaigns.length), sub: 'total' },
         ].map((s) => (
-          <div key={s.label} className="rounded-2xl border border-white/8 bg-void-900/60 p-5 backdrop-blur-sm">
-            <p className="text-3xl font-bold text-ink">{s.value}</p>
-            <p className="mt-0.5 text-sm font-medium text-ink-muted">{s.label}</p>
-            <p className="mt-0.5 text-xs text-ink-faint">{s.sub}</p>
+          <div key={s.label} className="rounded-2xl border border-white/10 bg-void-900/60 p-3 backdrop-blur-sm md:p-5">
+            <p className="text-2xl font-bold text-ink md:text-3xl">{s.value}</p>
+            <p className="mt-0.5 text-xs font-medium text-ink-muted md:text-sm">{s.label}</p>
+            <p className="mt-0.5 text-[10px] text-ink-faint md:text-xs">{s.sub}</p>
           </div>
         ))}
       </motion.div>
@@ -102,19 +102,19 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-        className="mt-10"
+        className="mt-7 md:mt-10"
       >
-        <h2 className="mb-4 text-base font-semibold text-ink">Start with a format</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <h2 className="mb-3 text-sm font-semibold text-ink md:mb-4 md:text-base">Start with a format</h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {QUICK_STARTS.map((q) => (
             <Link
               key={q.style}
               to={`/studio?style=${q.style}`}
-              className={`group relative overflow-hidden rounded-2xl border border-white/8 bg-gradient-to-br ${q.color} p-5 transition-all duration-200 hover:border-white/20 hover:shadow-card`}
+              className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${q.color} p-4 transition-all duration-200 hover:border-white/20 hover:shadow-card md:p-5`}
             >
-              <Wand className="h-5 w-5 text-fire-start" />
-              <p className="mt-3 font-semibold text-ink">{q.label}</p>
-              <p className="mt-1 text-xs text-ink-muted">{q.desc}</p>
+              <Wand className="h-4 w-4 text-fire-start md:h-5 md:w-5" />
+              <p className="mt-2 text-sm font-semibold text-ink md:mt-3">{q.label}</p>
+              <p className="mt-0.5 text-[11px] text-ink-muted md:mt-1 md:text-xs">{q.desc}</p>
               <ArrowRight className="absolute bottom-4 right-4 h-4 w-4 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100" />
             </Link>
           ))}
@@ -126,9 +126,9 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-        className="mt-10"
+        className="mt-7 md:mt-10"
       >
-        <h2 className="mb-4 text-base font-semibold text-ink">Recent campaigns</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink md:mb-4 md:text-base">Recent campaigns</h2>
 
         {loading ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -146,7 +146,7 @@ export default function Dashboard() {
               <Link
                 key={c.id}
                 to={`/studio?campaign=${c.id}`}
-                className="group rounded-2xl border border-white/8 bg-void-900/60 p-4 transition-all hover:border-white/20 hover:shadow-card"
+                className="group rounded-2xl border border-white/10 bg-void-900/60 p-3 transition-all hover:border-white/20 hover:shadow-card md:p-4"
               >
                 <div className="aspect-[9/16] overflow-hidden rounded-xl bg-void-800 flex items-center justify-center">
                   {c.product_image_url ? (
