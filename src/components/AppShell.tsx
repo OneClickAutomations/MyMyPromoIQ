@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { UserButton, useUser } from '@clerk/clerk-react'
+import { UserButton, useUser, useClerk } from '@clerk/clerk-react'
 import { brand } from '../copy'
-import { Bolt, Grid, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
+import { Bolt, Grid, LogOut, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
 
 const NAV = [
   { label: 'Campaigns', href: '/dashboard', icon: Grid },
@@ -26,6 +26,7 @@ function usePersistentTheme() {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation()
   const { user } = useUser()
+  const { signOut } = useClerk()
   const { theme, toggle } = usePersistentTheme()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -165,6 +166,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               {isLight ? <Moon className="h-[15px] w-[15px]" /> : <Sun className="h-[15px] w-[15px]" />}
             </button>
           </div>
+
+          {/* Sign out */}
+          <button
+            onClick={() => signOut({ redirectUrl: '/' })}
+            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-ink-faint hover:bg-white/[0.05] hover:text-ink transition-colors"
+          >
+            <LogOut className="h-[15px] w-[15px] flex-shrink-0" />
+            <span className="text-sm font-medium">Sign out</span>
+          </button>
         </div>
       </aside>
 
