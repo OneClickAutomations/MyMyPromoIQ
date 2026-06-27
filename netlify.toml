@@ -37,6 +37,18 @@
   to = "/.netlify/functions/upload"
   status = 200
 
+# Direct-to-Supabase upload: server mints a signed URL, file data never touches Netlify.
+[[redirects]]
+  from = "/api/presign"
+  to = "/.netlify/functions/presign"
+  status = 200
+
+# Background poller: runs up to 15 min server-side; browser polls Supabase DB instead of /api/status.
+[[redirects]]
+  from = "/api/watch"
+  to = "/.netlify/functions/watch-background"
+  status = 200
+
 # SPA fallback — every other path serves index.html.
 [[redirects]]
   from = "/*"

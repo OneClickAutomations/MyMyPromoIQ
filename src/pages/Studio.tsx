@@ -8,7 +8,15 @@ import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
   PlayIcon, RefreshCw, Share2, Spark, Upload, Users, Wand,
 } from '../components/icons'
-import { startGeneration, pollUntilDone, uploadProductImage, type StatusResponse } from '../lib/api'
+import {
+  startGeneration,
+  pollUntilDone,
+  pollSceneUntilDone,
+  presignUpload,
+  uploadDirectToStorage,
+  dataUrlToBlob,
+  type StatusResponse,
+} from '../lib/api'
 import { useSupabaseClient } from '../hooks/useSupabaseClient'
 import { type SupabaseDb } from '../lib/supabase'
 import { generator } from '../copy'
@@ -382,24 +390,22 @@ export default function Studio() {
       return
     }
 
-    // Local file or camera capture — upload to get a hosted URL
+    // Local file or camera capture — get a signed URL from the server, then
+    // upload the file directly to Supabase Storage (bypasses Netlify entirely).
     setUploadingImage(true)
     try {
-      // productPreview is a blob URL for file uploads; camera captures are already data URLs.
-      // We must send a base64 data URL to the server, so convert file uploads via FileReader.
-      let dataUrl: string
-      if (productFile) {
-        dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.onerror = () => reject(new Error('Could not read the image file.'))
-          reader.readAsDataURL(productFile)
-        })
-      } else {
-        dataUrl = productPreview // camera capture — already a data URL
-      }
-      const url = await uploadProductImage(dataUrl)
-      setProductApiUrl(url)
+      const mimeType = productFile?.type ||
+        (productPreview.startsWith('data:image/png')  ? 'image/png'  :
+         productPreview.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg')
+
+      const { path, token, publicUrl } = await presignUpload(mimeType)
+
+      // productFile is a raw File (no conversion needed).
+      // Camera captures are data URLs — convert to Blob.
+      const fileData: Blob = productFile ?? dataUrlToBlob(productPreview)
+
+      await uploadDirectToStorage(path, token, fileData, mimeType)
+      setProductApiUrl(publicUrl)
       setWorkflowStep(2)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upload failed.'
@@ -460,10 +466,35 @@ export default function Studio() {
       await new Promise(r => setTimeout(r, 800)) // brief pause so users see "Submitting"
       setGenStepIdx(2)
 
-      const final: StatusResponse = await pollUntilDone(requestId, () => setGenStepIdx(2), {
-        intervalMs: 5000,
-        timeoutMs: 10 * 60 * 1000, // 10-minute ceiling — renders can take a few minutes
-      })
+      // Kick off the background watcher (fire-and-forget).
+      // It polls Higgsfield server-side for up to 13 min and writes the result
+      // into the Supabase scene row — no /api/status calls needed.
+      if (sceneDbId) {
+        fetch('/api/watch', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ requestId, sceneId: sceneDbId }),
+        }).catch(() => {})
+      }
+
+      // Poll the Supabase scene row directly (zero Netlify function invocations).
+      // Falls back to /api/status polling when DB is unavailable.
+      const final: StatusResponse = (sceneDbId && db)
+        ? await pollSceneUntilDone(
+            async () => {
+              const { data } = await db!.from('scenes')
+                .select('phase,video_url,error_message')
+                .eq('id', sceneDbId)
+                .single()
+              return data
+            },
+            () => setGenStepIdx(2),
+            { intervalMs: 5_000, timeoutMs: 12 * 60 * 1_000 },
+          )
+        : await pollUntilDone(requestId, () => setGenStepIdx(2), {
+            intervalMs: 5_000,
+            timeoutMs: 10 * 60 * 1_000,
+          })
 
       if (final.status === 'completed' && final.videoUrl) {
         updateScene(idx, { phase: 'done', videoUrl: final.videoUrl })
