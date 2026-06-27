@@ -48,12 +48,21 @@ export type PresignResponse = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 async function readError(res: Response): Promise<string> {
+  // Read the body once as text, then try to parse it as JSON. This lets us
+  // surface the *real* server error even when Vercel returns a non-JSON
+  // page (e.g. a platform 500 / FUNCTION_INVOCATION_TIMEOUT), instead of a
+  // useless generic "Request failed (500)".
+  const text = await res.text().catch(() => '')
   try {
-    const data = await res.json()
-    return data?.error || `Request failed (${res.status})`
+    const data = JSON.parse(text)
+    if (data?.error) return data.error
   } catch {
-    return `Request failed (${res.status})`
+    // not JSON — fall through and surface the raw text
   }
+  const snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+  return snippet
+    ? `Request failed (${res.status}): ${snippet}`
+    : `Request failed (${res.status})`
 }
 
 /**
