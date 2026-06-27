@@ -7,9 +7,11 @@
 #     VITE_SUPABASE_URL          — Supabase project URL
 #     VITE_SUPABASE_ANON_KEY     — Supabase anon/public key (RLS-protected)
 #   Server (functions only, never sent to the browser):
-#     ANTHROPIC_API_KEY   — Claude "director" that writes the video prompt
-#     HF_API_KEY          — Higgsfield key id      (or use HF_CREDENTIALS="id:secret")
-#     HF_API_SECRET       — Higgsfield key secret
+#     ANTHROPIC_API_KEY    — Claude "director" that writes the video prompt
+#     HF_API_KEY           — Higgsfield key id      (or use HF_CREDENTIALS="id:secret")
+#     HF_API_SECRET        — Higgsfield key secret
+#     SUPABASE_SERVICE_KEY — Supabase service-role key for image uploads (from
+#                            Supabase → Project Settings → API → service_role key)
 
 [build]
   command = "npm run build"
@@ -28,6 +30,11 @@
 [[redirects]]
   from = "/api/status"
   to = "/.netlify/functions/status"
+  status = 200
+
+[[redirects]]
+  from = "/api/upload"
+  to = "/.netlify/functions/upload"
   status = 200
 
 # SPA fallback — every other path serves index.html.

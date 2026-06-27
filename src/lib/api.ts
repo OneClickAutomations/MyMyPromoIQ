@@ -31,6 +31,31 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
+/**
+ * Upload a local image (data URL) to Supabase Storage via the /api/upload
+ * Netlify function. Returns the public URL for use with startGeneration.
+ * Throws if the server returns an error (e.g. SUPABASE_SERVICE_KEY not set).
+ */
+export async function uploadProductImage(imageDataUrl: string): Promise<string> {
+  const mimeType = imageDataUrl.startsWith('data:image/png')
+    ? 'image/png'
+    : imageDataUrl.startsWith('data:image/webp')
+      ? 'image/webp'
+      : 'image/jpeg'
+
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ imageData: imageDataUrl, mimeType }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Upload failed' }))
+    throw new Error(err.error || 'Upload failed')
+  }
+  const { url } = await res.json()
+  return url as string
+}
+
 export async function startGeneration(input: GenerateInput): Promise<GenerateResponse> {
   const res = await fetch('/api/generate', {
     method: 'POST',
