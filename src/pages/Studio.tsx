@@ -78,6 +78,162 @@ const WORKFLOW_STEPS = [
   { num: 4 as const, title: 'Download or publish',   desc: 'Download your ad or publish it to your account.', Icon: Download },
 ]
 
+// ── Scene card ────────────────────────────────────────────────────────────────
+
+type SceneCardProps = {
+  scene: Scene
+  idx: number
+  isActive: boolean
+  isClickable?: boolean
+  size?: 'sm' | 'lg'
+  onClick?: () => void
+}
+
+function SceneCard({ scene, idx, isActive, isClickable = false, size = 'lg', onClick }: SceneCardProps) {
+  const t = SCENE_TEMPLATES[idx]
+  const theme = STYLE_THEME[t.style] ?? STYLE_THEME['testimonial']
+  const Icon = STYLE_ICON[t.style] ?? Spark
+
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileHover={isClickable ? { y: -3, transition: { duration: 0.15 } } : {}}
+      className={`group relative w-full overflow-hidden text-left rounded-2xl border transition-all duration-200 ${
+        isActive
+          ? 'border-fire-start/60 ring-2 ring-fire-start/20 shadow-[0_0_28px_rgba(255,107,53,0.14)]'
+          : isClickable
+            ? 'border-white/[0.08] hover:border-white/[0.22] hover:shadow-[0_6px_28px_rgba(0,0,0,0.45)]'
+            : 'border-white/[0.08] cursor-default'
+      }`}
+    >
+      {/* ── Visual area ── */}
+      <div className="relative aspect-[9/16] w-full overflow-hidden">
+
+        {/* Background gradient */}
+        <div
+          className="absolute inset-0 transition-opacity duration-500"
+          style={{ background: (scene.phase === 'done' || scene.phase === 'working') ? '#07070a' : theme.grad }}
+        />
+
+        {/* Subtle vignette */}
+        <div className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 90% 90% at 50% 50%, transparent 55%, rgba(0,0,0,0.45) 100%)' }}
+        />
+
+        {/* Film grain */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.045] mix-blend-overlay"
+          style={{
+            backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.75\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
+            backgroundSize: '80px 80px',
+          }}
+        />
+
+        {/* Corner brackets — film-frame aesthetic */}
+        {scene.phase !== 'done' && (
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute left-[7px] top-[7px] h-3 w-3 border-l border-t border-white/[0.20]" />
+            <div className="absolute right-[7px] top-[7px] h-3 w-3 border-r border-t border-white/[0.20]" />
+            <div className="absolute bottom-[7px] left-[7px] h-3 w-3 border-b border-l border-white/[0.20]" />
+            <div className="absolute bottom-[7px] right-[7px] h-3 w-3 border-b border-r border-white/[0.20]" />
+          </div>
+        )}
+
+        {/* Duration badge — top left */}
+        <div className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 backdrop-blur-sm">
+          <span className="text-[9px] font-bold tabular-nums tracking-wide text-white/85">{t.duration}</span>
+        </div>
+
+        {/* Scene number — top right (hidden when done, check takes over) */}
+        {scene.phase !== 'done' && (
+          <div className="absolute right-2 top-2 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-black/60 backdrop-blur-sm">
+            <span className="text-[9px] font-bold text-white/70">{idx + 1}</span>
+          </div>
+        )}
+
+        {/* ── State content ── */}
+        {scene.phase === 'done' && scene.videoUrl ? (
+          <>
+            <video src={scene.videoUrl} className="h-full w-full object-cover" autoPlay loop muted playsInline />
+            {/* Done badge */}
+            <div className="absolute right-2 top-2 z-10 grid h-5 w-5 place-items-center rounded-full bg-gradient-fire shadow-fire-soft">
+              <Check className="h-3 w-3 text-white" />
+            </div>
+          </>
+
+        ) : scene.phase === 'working' ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2">
+            <div className="relative">
+              <span
+                className="absolute -inset-2 animate-ping rounded-full opacity-30"
+                style={{ background: `radial-gradient(circle, ${theme.accent}60 0%, transparent 70%)` }}
+              />
+              <span className="relative block h-5 w-5 animate-spin rounded-full border-2 border-fire-start/25 border-t-fire-start" />
+            </div>
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-faint/80">Rendering</span>
+          </div>
+
+        ) : scene.phase === 'error' ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
+            <div className="grid h-9 w-9 place-items-center rounded-[14px] bg-fire-start/[0.09] ring-1 ring-fire-start/25">
+              <span className="text-base leading-none text-fire-start">✕</span>
+            </div>
+            <span className="text-[9px] font-bold text-fire-start">Failed</span>
+            {isClickable && <span className="text-[8px] text-ink-faint">Click to retry</span>}
+          </div>
+
+        ) : (
+          /* Idle */
+          <>
+            {/* Center icon */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <div
+                className="grid h-11 w-11 place-items-center rounded-[14px] transition-transform duration-200 group-hover:scale-110"
+                style={{
+                  background: `${theme.accent}14`,
+                  boxShadow: `0 0 24px ${theme.accent}1a, inset 0 1px 0 ${theme.accent}22`,
+                }}
+              >
+                <Icon className="h-5 w-5" style={{ color: `${theme.accent}cc` }} />
+              </div>
+              <span
+                className="px-2 text-center text-[9px] font-semibold leading-tight tracking-wide"
+                style={{ color: `${theme.accent}75` }}
+              >
+                {t.shotType}
+              </span>
+            </div>
+
+            {/* Bottom: objective */}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent px-2.5 pb-2.5 pt-8">
+              <p className="text-[8px] leading-tight text-white/38">{t.objective}</p>
+            </div>
+
+            {/* Hover: generate CTA */}
+            {isClickable && (
+              <div
+                className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                style={{ background: `linear-gradient(to bottom, ${theme.accent}0e 0%, ${theme.accent}06 100%)` }}
+              >
+                <span className="rounded-xl bg-fire-start px-3 py-1.5 text-[10px] font-bold text-white shadow-fire-soft">
+                  Generate ↗
+                </span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Footer ── */}
+      <div className="border-t border-white/[0.06] bg-void-900/90 px-2.5 py-2">
+        <p className={`font-bold text-ink ${size === 'sm' ? 'text-[10px]' : 'text-[11px]'}`}>{scene.label}</p>
+        <p className="mt-0.5 text-[8px] capitalize leading-tight text-ink-faint/60">{t.shotType}</p>
+      </div>
+    </motion.button>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Studio() {
@@ -765,47 +921,16 @@ export default function Studio() {
         <div>
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-faint">Storyboard</p>
           <div className="grid grid-cols-3 gap-2 md:gap-3">
-            {scenes.map((scene, idx) => {
-              const t = SCENE_TEMPLATES[idx]
-              const theme = STYLE_THEME[t.style] ?? STYLE_THEME['testimonial']
-              const SceneIcon = STYLE_ICON[t.style] ?? Spark
-              const isActive = idx === activeSceneIdx
-
-              return (
-                <div key={scene.id} className={`relative overflow-hidden rounded-xl border ${
-                  isActive ? 'border-fire-start/50 ring-1 ring-fire-start/20' : 'border-white/[0.07]'
-                }`}>
-                  <div className="relative aspect-[9/16] w-full"
-                    style={{ background: scene.phase === 'done' ? '#0A0A0C' : theme.grad }}
-                  >
-                    <div className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white/80">{t.duration}</div>
-                    <div className="absolute right-1.5 top-1.5 grid h-4 w-4 place-items-center rounded-full bg-black/60 text-[8px] font-bold text-white/80">{idx + 1}</div>
-
-                    {scene.phase === 'done' && scene.videoUrl ? (
-                      <video src={scene.videoUrl} className="h-full w-full object-cover" autoPlay loop muted playsInline />
-                    ) : scene.phase === 'working' ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-1.5">
-                        <span className="h-5 w-5 animate-spin rounded-full border-2 border-fire-start/30 border-t-fire-start" />
-                        <span className="text-[8px] text-ink-faint">Rendering</span>
-                      </div>
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center">
-                        <SceneIcon className="h-4 w-4 text-white/20" style={{ color: `${theme.accent}60` }} />
-                      </div>
-                    )}
-
-                    {scene.phase === 'done' && (
-                      <span className="absolute right-1.5 top-1.5 grid h-4 w-4 place-items-center rounded-full bg-gradient-fire">
-                        <Check className="h-2.5 w-2.5 text-white" />
-                      </span>
-                    )}
-                  </div>
-                  <div className="bg-void-900/90 px-2 py-1.5">
-                    <p className="text-[10px] font-semibold text-ink">{scene.label}</p>
-                  </div>
-                </div>
-              )
-            })}
+            {scenes.map((scene, idx) => (
+              <SceneCard
+                key={scene.id}
+                scene={scene}
+                idx={idx}
+                isActive={idx === activeSceneIdx}
+                isClickable={false}
+                size="sm"
+              />
+            ))}
           </div>
         </div>
 
@@ -909,84 +1034,24 @@ export default function Studio() {
           </div>
 
           <div className="grid grid-cols-3 gap-2 md:gap-3">
-            {scenes.map((scene, idx) => {
-              const t = SCENE_TEMPLATES[idx]
-              const theme = STYLE_THEME[t.style] ?? STYLE_THEME['testimonial']
-              const SceneIcon = STYLE_ICON[t.style] ?? Spark
-              const isSelected = idx === activeSceneIdx
-
-              return (
-                <motion.button
-                  key={scene.id}
-                  type="button"
-                  onClick={() => {
-                    if (scene.phase === 'idle' || scene.phase === 'error') {
-                      setActiveSceneIdx(idx)
-                      setWorkflowStep(2)
-                    } else {
-                      setActiveSceneIdx(idx)
-                    }
-                  }}
-                  whileHover={{ y: -2 }}
-                  transition={{ duration: 0.12 }}
-                  className={`group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
-                    isSelected
-                      ? 'border-fire-start/60 ring-2 ring-fire-start/20'
-                      : 'border-white/[0.08] hover:border-white/[0.18]'
-                  }`}
-                >
-                  <div className="relative aspect-[9/16] w-full overflow-hidden"
-                    style={{ background: (scene.phase === 'idle' || scene.phase === 'error') ? theme.grad : '#0A0A0C' }}
-                  >
-                    <div className="absolute left-2 top-2 rounded-md bg-black/60 px-1.5 py-0.5 backdrop-blur-sm">
-                      <span className="text-[8px] font-bold text-white/90">{t.duration}</span>
-                    </div>
-                    <div className="absolute right-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-black/60">
-                      <span className="text-[8px] font-bold text-white/90">{idx + 1}</span>
-                    </div>
-
-                    {scene.phase === 'done' && scene.videoUrl ? (
-                      <video src={scene.videoUrl} className="h-full w-full object-cover" autoPlay loop muted playsInline />
-                    ) : scene.phase === 'working' ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-2 bg-void-900">
-                        <span className="h-6 w-6 animate-spin rounded-full border-2 border-fire-start/30 border-t-fire-start" />
-                        <span className="text-[9px] text-ink-faint">Rendering…</span>
-                      </div>
-                    ) : scene.phase === 'error' ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center">
-                        <span className="text-[9px] font-semibold text-fire-start">Failed</span>
-                        <span className="text-[8px] text-ink-faint">Click to retry</span>
-                      </div>
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center">
-                        <div className={`grid h-9 w-9 place-items-center rounded-2xl transition-transform duration-200 group-hover:scale-110 bg-white/[0.06]`}
-                          style={{ boxShadow: `0 0 16px ${theme.accent}22` }}
-                        >
-                          <SceneIcon className="h-4 w-4" style={{ color: `${theme.accent}99` }} />
-                        </div>
-                        <p className="mt-1.5 text-[8px] font-medium text-white/25 group-hover:text-white/50 transition-colors">Generate</p>
-                      </div>
-                    )}
-
-                    {scene.phase === 'done' && (
-                      <span className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-gradient-fire">
-                        <Check className="h-3 w-3 text-white" />
-                      </span>
-                    )}
-
-                    {scene.phase === 'idle' && (
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent px-2 pb-2 pt-5">
-                        <p className="text-[8px] leading-tight text-white/45">{t.objective}</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="border-t border-white/[0.06] bg-void-900/90 px-2.5 py-2">
-                    <p className="text-[11px] font-semibold text-ink">{scene.label}</p>
-                    <p className="text-[9px] capitalize text-ink-faint">{scene.style.replace(/-/g, ' ')}</p>
-                  </div>
-                </motion.button>
-              )
-            })}
+            {scenes.map((scene, idx) => (
+              <SceneCard
+                key={scene.id}
+                scene={scene}
+                idx={idx}
+                isActive={idx === activeSceneIdx}
+                isClickable={scene.phase === 'idle' || scene.phase === 'error'}
+                size="lg"
+                onClick={() => {
+                  if (scene.phase === 'idle' || scene.phase === 'error') {
+                    setActiveSceneIdx(idx)
+                    setWorkflowStep(2)
+                  } else {
+                    setActiveSceneIdx(idx)
+                  }
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>
