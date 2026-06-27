@@ -29,10 +29,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, toggle } = usePersistentTheme()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  // Close drawer on route change
   useEffect(() => { setMenuOpen(false) }, [pathname])
-
-  // Lock body scroll when drawer is open
   useEffect(() => {
     document.body.style.overflow = menuOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
@@ -46,64 +43,77 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* ── Mobile backdrop ── */}
       {menuOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm md:hidden"
           onClick={() => setMenuOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      {/* ── Sidebar (desktop: always visible · mobile: slide-in drawer) ── */}
+      {/* ── Sidebar ── */}
       <aside
         className={`
           fixed inset-y-0 left-0 z-40 flex w-64 flex-col
-          border-r border-white/5 bg-void-800
+          border-r border-white/[0.06]
           transition-transform duration-300 ease-out will-change-transform
           ${menuOpen ? 'translate-x-0' : '-translate-x-full'}
           md:translate-x-0
         `}
+        style={{ background: 'linear-gradient(180deg, #0F0F11 0%, #0A0A0C 100%)' }}
         aria-label="Sidebar navigation"
       >
-        {/* Logo row */}
-        <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-fire shadow-fire-soft flex-shrink-0">
-            <Bolt className="h-4 w-4 text-white" />
-          </span>
-          <span className="text-[17px] font-bold tracking-tight text-ink">{brand.name}</span>
-          {/* Close button — mobile only */}
+        {/* Subtle fire ambient at the top of sidebar */}
+        <div className="pointer-events-none absolute left-0 right-0 top-0 h-32 opacity-30"
+          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(255,107,53,0.15) 0%, transparent 70%)' }}
+        />
+
+        {/* Logo */}
+        <div className="relative flex h-[60px] items-center gap-3 px-5">
+          <div className="grid h-[34px] w-[34px] flex-shrink-0 place-items-center rounded-xl bg-gradient-fire shadow-fire-soft">
+            <Bolt className="h-[17px] w-[17px] text-white" />
+          </div>
+          <span className="text-[16px] font-bold tracking-tight text-ink">{brand.name}</span>
           <button
             onClick={() => setMenuOpen(false)}
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint hover:bg-white/5 hover:text-ink transition-colors md:hidden"
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-ink-faint hover:text-ink transition-colors md:hidden"
             aria-label="Close menu"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Nav links */}
-        <nav className="flex-1 space-y-0.5 px-3 py-4" aria-label="Main navigation">
+        {/* Section label */}
+        <div className="relative px-5 pb-1 pt-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint/60">Navigation</span>
+        </div>
+
+        {/* Nav */}
+        <nav className="relative flex-1 space-y-0.5 px-3 pb-4" aria-label="Main navigation">
           {NAV.map(({ label, href, icon: Icon, soon }) => {
             const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
             return (
               <div key={label}>
                 {soon ? (
-                  <div className="flex items-center gap-3 rounded-xl px-3 py-3 text-ink-faint cursor-default select-none">
-                    <Icon className="h-4 w-4 flex-shrink-0" />
+                  <div className="flex items-center gap-3 rounded-xl px-3 py-[11px] text-ink-faint/50 cursor-default select-none">
+                    <Icon className="h-[18px] w-[18px] flex-shrink-0" />
                     <span className="text-sm font-medium">{label}</span>
-                    <span className="ml-auto rounded-full bg-void-700 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-ink-faint">
+                    <span className="ml-auto rounded-full bg-void-700/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-ink-faint/50">
                       soon
                     </span>
                   </div>
                 ) : (
                   <Link
                     to={href}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-3 transition-all duration-150 ${
+                    className={`relative flex items-center gap-3 rounded-xl px-3 py-[11px] transition-all duration-150 ${
                       active
-                        ? 'bg-fire-start/10 text-fire-start ring-1 ring-fire-start/20'
-                        : 'text-ink-muted hover:bg-white/5 hover:text-ink'
+                        ? 'bg-fire-start/[0.10] text-fire-start'
+                        : 'text-ink-muted hover:bg-white/[0.04] hover:text-ink'
                     }`}
                   >
-                    <Icon className="h-4 w-4 flex-shrink-0" />
-                    <span className="text-sm font-medium">{label}</span>
+                    {active && (
+                      <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-fire-start shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
+                    )}
+                    <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-colors ${active ? 'text-fire-start' : ''}`} />
+                    <span className="text-sm font-semibold">{label}</span>
                   </Link>
                 )}
               </div>
@@ -111,79 +121,81 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Bottom — usage meter + user row */}
-        <div className="border-t border-white/5 p-4 space-y-3">
-          {/* Usage meter */}
-          <div className="rounded-xl bg-void-700 p-3">
-            <div className="flex items-center justify-between text-xs text-ink-muted">
-              <span>Videos this month</span>
-              <span className="font-semibold text-ink">0 / 3 free</span>
+        {/* Bottom */}
+        <div className="relative border-t border-white/[0.06] p-4 space-y-3">
+          <div className="mb-1 px-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint/60">Workspace</span>
+          </div>
+
+          {/* Usage */}
+          <div className="rounded-xl border border-white/[0.06] bg-void-700/30 p-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-ink-faint">Videos this month</span>
+              <span className="font-bold text-ink">0 / 3</span>
             </div>
-            <div className="mt-2 h-1.5 w-full rounded-full bg-void-600">
-              <div className="h-1.5 rounded-full bg-gradient-fire" style={{ width: '0%' }} />
+            <div className="mt-2.5 h-1 w-full rounded-full bg-void-600/60 overflow-hidden">
+              <div className="h-1 rounded-full bg-gradient-fire" style={{ width: '0%' }} />
             </div>
             <Link
               to="#pricing"
-              className="mt-2 block text-center text-[11px] font-semibold text-fire-start hover:text-fire-end transition-colors"
+              className="mt-2.5 block text-center text-[11px] font-semibold text-fire-start hover:text-fire-end transition-colors"
             >
               Upgrade for more →
             </Link>
           </div>
 
-          {/* Theme toggle + User */}
-          <div className="flex items-center gap-2 rounded-xl px-1">
+          {/* User row */}
+          <div className="flex items-center gap-2.5 rounded-xl px-1">
             <UserButton
-              appearance={{ elements: { userButtonAvatarBox: 'h-8 w-8 rounded-xl' } }}
+              appearance={{ elements: { userButtonAvatarBox: 'h-[34px] w-[34px] rounded-xl' } }}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-ink">
+              <p className="truncate text-sm font-semibold text-ink leading-tight">
                 {user?.firstName} {user?.lastName}
               </p>
-              <p className="truncate text-[11px] text-ink-faint">
+              <p className="truncate text-[11px] text-ink-faint leading-tight mt-0.5">
                 {user?.primaryEmailAddress?.emailAddress}
               </p>
             </div>
             <button
               onClick={toggle}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-ink-faint hover:bg-white/5 hover:text-ink transition-colors"
-              aria-label="Toggle light/dark mode"
-              title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-ink-faint hover:bg-white/[0.06] hover:text-ink transition-colors"
+              aria-label={isLight ? 'Dark mode' : 'Light mode'}
             >
-              {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              {isLight ? <Moon className="h-[15px] w-[15px]" /> : <Sun className="h-[15px] w-[15px]" />}
             </button>
           </div>
         </div>
       </aside>
 
-      {/* ── Mobile top bar (hidden on md+) ── */}
-      <header className="fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b border-white/5 bg-void/95 px-4 backdrop-blur-md md:hidden">
+      {/* ── Mobile top bar ── */}
+      <header className="fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b border-white/[0.06] bg-void/95 px-4 backdrop-blur-md md:hidden">
         <div className="flex items-center gap-2">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-fire shadow-fire-soft">
-            <Bolt className="h-3.5 w-3.5 text-white" />
-          </span>
-          <span className="text-base font-bold tracking-tight text-ink">{brand.name}</span>
+          <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-fire shadow-fire-soft">
+            <Bolt className="h-[14px] w-[14px] text-white" />
+          </div>
+          <span className="text-[15px] font-bold tracking-tight text-ink">{brand.name}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <button
             onClick={toggle}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted hover:bg-white/5 hover:text-ink transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted hover:bg-white/[0.06] hover:text-ink transition-colors"
             aria-label="Toggle theme"
           >
             {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </button>
           <button
             onClick={() => setMenuOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted hover:bg-white/5 hover:text-ink transition-colors"
-            aria-label="Open navigation menu"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-ink-muted hover:bg-white/[0.06] hover:text-ink transition-colors"
+            aria-label="Open menu"
           >
-            <Menu className="h-5 w-5" />
+            <Menu className="h-[18px] w-[18px]" />
           </button>
         </div>
       </header>
 
       {/* ── Main content ── */}
       <main className="flex min-h-screen flex-1 flex-col overflow-auto md:ml-64">
-        {/* Spacer for mobile top bar */}
         <div className="h-14 flex-shrink-0 md:hidden" aria-hidden="true" />
         <div className="mx-auto w-full max-w-6xl px-4 py-5 md:px-8 md:py-8">
           {children}
