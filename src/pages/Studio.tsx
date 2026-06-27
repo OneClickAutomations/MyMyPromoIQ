@@ -324,6 +324,72 @@ export default function Studio() {
 
   const campaignIdRef = useRef<string | null>(null)
   const fileInputRef  = useRef<HTMLInputElement>(null)
+  const loadedCampaignRef = useRef<string | null>(null)
+
+  // ── Load an existing campaign (History → open/edit/regenerate) ─────────────
+  useEffect(() => {
+    const campaignParam = searchParams.get('campaign')
+    if (!campaignParam || loadedCampaignRef.current === campaignParam) return
+    loadedCampaignRef.current = campaignParam
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const db = await getClient()
+        const { data: campaign } = await db
+          .from('campaigns').select('*').eq('id', campaignParam).single()
+        if (cancelled || !campaign) return
+
+        const { data: dbScenes } = await db
+          .from('scenes').select('*').eq('campaign_id', campaignParam).order('order_index')
+        if (cancelled) return
+
+        campaignIdRef.current = campaign.id
+        if (campaign.product_image_url) {
+          setProductPreview(campaign.product_image_url)
+          setProductApiUrl(campaign.product_image_url)
+          setInputMethod('url')
+          setUrlInput(campaign.product_image_url)
+          setUrlPreviewOk(true)
+        }
+        if (campaign.product_description) {
+          setDescInput(campaign.product_description)
+          setDescription(campaign.product_description)
+        }
+        if (campaign.style) setStyle(campaign.style)
+        if (campaign.quality) setQuality(campaign.quality)
+
+        // Merge DB scenes onto the template storyboard by order index.
+        const merged = SCENE_TEMPLATES.map((t, i) => {
+          const row = (dbScenes ?? []).find(s => s.order_index === i)
+          if (!row) return blankScene(t.label, t.style)
+          return {
+            id: crypto.randomUUID(),
+            dbId: row.id,
+            label: t.label,
+            style: t.style,
+            phase: (row.phase as Phase) ?? 'idle',
+            videoUrl: row.video_url ?? null,
+            directorPrompt: row.director_prompt ?? '',
+            error: row.error_message ?? '',
+          }
+        })
+        setScenes(merged)
+
+        const firstDone = merged.findIndex(s => s.phase === 'done')
+        if (firstDone >= 0) {
+          setActiveSceneIdx(firstDone)
+          setGenPhase('done')
+          setDirectorPrompt(merged[firstDone].directorPrompt)
+          setWorkflowStep(4)
+        }
+      } catch {
+        // Campaign not found / Supabase unavailable — fall back to a fresh studio
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [searchParams, getClient])
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 

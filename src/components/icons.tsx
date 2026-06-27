@@ -34,6 +34,18 @@ export const X = (p: I) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </svg>
 )
+export const Edit = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+  </svg>
+)
+export const Trash = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+)
 export const Clock = (p: I) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />

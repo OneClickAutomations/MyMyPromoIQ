@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
-import { ArrowRight, ArrowUp, Bolt, Film, Grid, Plus, Spark, Wand } from '../components/icons'
+import { ArrowRight, ArrowUp, Bolt, Download, Edit, Film, Grid, Plus, RefreshCw, Spark, Trash, Wand } from '../components/icons'
 import { useSupabaseClient } from '../hooks/useSupabaseClient'
 import type { Campaign } from '../lib/supabase'
 
@@ -132,9 +132,13 @@ export default function Dashboard() {
   const firstName = user?.firstName || 'there'
   const getClient = useSupabaseClient()
 
+  const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [totalVideos, setTotalVideos] = useState(0)
+  // campaign_id → first finished video URL (for thumbnail + download)
+  const [videoByCampaign, setVideoByCampaign] = useState<Record<string, string>>({})
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -147,6 +151,26 @@ export default function Dashboard() {
           .order('created_at', { ascending: false })
           .limit(20)
         if (!cancelled && data) setCampaigns(data)
+
+        // Pull finished videos so history cards show real footage + download.
+        const ids = (data ?? []).map(c => c.id)
+        if (ids.length) {
+          const { data: doneScenes } = await db
+            .from('scenes')
+            .select('campaign_id, video_url, updated_at')
+            .in('campaign_id', ids)
+            .eq('phase', 'done')
+            .not('video_url', 'is', null)
+            .order('updated_at', { ascending: false })
+          if (!cancelled && doneScenes) {
+            const map: Record<string, string> = {}
+            for (const s of doneScenes) {
+              if (s.campaign_id && s.video_url && !map[s.campaign_id]) map[s.campaign_id] = s.video_url
+            }
+            setVideoByCampaign(map)
+          }
+        }
+
         const { count } = await db
           .from('scenes')
           .select('id', { count: 'exact', head: true })
@@ -161,6 +185,21 @@ export default function Dashboard() {
     load()
     return () => { cancelled = true }
   }, [getClient])
+
+  async function deleteCampaign(id: string) {
+    if (!window.confirm('Delete this campaign and all of its videos? This cannot be undone.')) return
+    setDeletingId(id)
+    try {
+      const db = await getClient()
+      await db.from('scenes').delete().eq('campaign_id', id)
+      await db.from('campaigns').delete().eq('id', id)
+      setCampaigns(prev => prev.filter(c => c.id !== id))
+    } catch {
+      window.alert('Could not delete the campaign. Please try again.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   return (
     <AppShell>
@@ -284,7 +323,7 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      {/* ── Recent campaigns ── */}
+      {/* ── History ── */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -293,7 +332,7 @@ export default function Dashboard() {
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-ink-faint md:text-[11px]">
-            Recent campaigns
+            History
           </h2>
           {campaigns.length > 0 && (
             <span className="text-[11px] text-ink-faint">{campaigns.length} total</span>
@@ -312,28 +351,88 @@ export default function Dashboard() {
           </div>
         ) : campaigns.length > 0 ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {campaigns.map((c) => (
-              <Link
-                key={c.id}
-                to={`/studio?campaign=${c.id}`}
-                className="group rounded-2xl border border-white/[0.08] bg-void-800/50 p-3 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] md:p-4"
-              >
-                <div className="aspect-[9/16] overflow-hidden rounded-xl bg-void-700/60 flex items-center justify-center">
-                  {c.product_image_url ? (
-                    <img src={c.product_image_url} alt={c.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <Film className="h-7 w-7 text-ink-faint/40" />
-                  )}
+            {campaigns.map((c) => {
+              const videoUrl = videoByCampaign[c.id]
+              const open = () => navigate(`/studio?campaign=${c.id}`)
+              return (
+                <div
+                  key={c.id}
+                  className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)]"
+                >
+                  {/* Thumbnail — click to open */}
+                  <button
+                    type="button"
+                    onClick={open}
+                    className="relative block aspect-[9/16] w-full overflow-hidden bg-void-700/60"
+                    aria-label={`Open ${c.name}`}
+                  >
+                    {videoUrl ? (
+                      <video
+                        src={`${videoUrl}#t=0.1`}
+                        poster={c.product_image_url ?? undefined}
+                        muted loop playsInline preload="metadata"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : c.product_image_url ? (
+                      <img src={c.product_image_url} alt={c.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <Film className="h-7 w-7 text-ink-faint/40" />
+                      </div>
+                    )}
+
+                    {/* Hover action toolbar */}
+                    <div className="absolute right-2 top-2 flex items-center gap-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                      <span
+                        onClick={(e) => { e.stopPropagation(); open() }}
+                        title="Open / edit"
+                        className="grid h-7 w-7 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-sm ring-1 ring-white/15 hover:bg-black/80 transition-colors"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); open() }}
+                        title="Regenerate"
+                        className="grid h-7 w-7 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-sm ring-1 ring-white/15 hover:bg-black/80 transition-colors"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </span>
+                      {videoUrl && (
+                        <a
+                          href={videoUrl}
+                          download
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Download video"
+                          className="grid h-7 w-7 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-sm ring-1 ring-white/15 hover:bg-black/80 transition-colors"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); deleteCampaign(c.id) }}
+                        title="Delete"
+                        className={`grid h-7 w-7 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-sm ring-1 ring-white/15 transition-colors hover:bg-red-600/80 ${deletingId === c.id ? 'pointer-events-none opacity-50' : ''}`}
+                      >
+                        <Trash className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Meta */}
+                  <button type="button" onClick={open} className="px-3 pb-3 pt-2.5 text-left md:px-3.5">
+                    <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
+                    <div className="mt-1 flex items-center justify-between">
+                      <p className="text-[11px] text-ink-faint capitalize">{c.style?.replace('-', ' ') ?? 'custom'}</p>
+                      <span className={`text-[10px] font-bold capitalize ${STATUS_COLORS[c.status] ?? 'text-ink-faint'}`}>
+                        {c.status}
+                      </span>
+                    </div>
+                  </button>
                 </div>
-                <p className="mt-3 truncate text-sm font-semibold text-ink">{c.name}</p>
-                <div className="mt-1 flex items-center justify-between">
-                  <p className="text-[11px] text-ink-faint capitalize">{c.style?.replace('-', ' ') ?? 'custom'}</p>
-                  <span className={`text-[10px] font-bold capitalize ${STATUS_COLORS[c.status] ?? 'text-ink-faint'}`}>
-                    {c.status}
-                  </span>
-                </div>
-              </Link>
-            ))}
+              )
+            })}
             {/* New campaign card */}
             <Link
               to="/studio"
