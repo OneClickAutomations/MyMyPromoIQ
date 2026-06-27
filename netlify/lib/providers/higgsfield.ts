@@ -45,9 +45,11 @@ export class HiggsfieldAdapter implements VideoProvider {
       headers: { Authorization: auth(), 'content-type': 'application/json' },
       body: JSON.stringify({
         model: QUALITY_MODEL[opts.quality],
-        prompt: opts.prompt,
-        input_images: [{ type: 'image_url', image_url: opts.imageUrl }],
-        enhance_prompt: true,
+        params: {
+          prompt: opts.prompt,
+          input_images: [{ type: 'image_url', image_url: opts.imageUrl }],
+          enhance_prompt: true,
+        },
       }),
     })
 
