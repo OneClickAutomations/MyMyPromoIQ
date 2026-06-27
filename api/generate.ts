@@ -116,8 +116,21 @@ async function submitVideoJob(prompt: string, imageUrl: string, quality: Quality
     throw new Error(`Higgsfield submit failed (${res.status}): ${detail.slice(0, 300)}`)
   }
 
-  const data = (await res.json()) as { request_id: string; status: string }
-  return { requestId: data.request_id, status: data.status }
+  const data = (await res.json()) as Record<string, unknown>
+  // The id field name varies across Higgsfield API versions. Try the common
+  // variants; nested under `job`/`data` on some responses.
+  const nested = (data.job ?? data.data ?? data.result ?? {}) as Record<string, unknown>
+  const requestId =
+    (data.request_id ?? data.id ?? data.requestId ?? data.job_id ??
+      nested.request_id ?? nested.id ?? nested.requestId) as string | undefined
+  const status = (data.status ?? nested.status ?? 'queued') as string
+
+  if (!requestId) {
+    throw new Error(
+      `Higgsfield submit returned no job id. Raw response: ${JSON.stringify(data).slice(0, 400)}`,
+    )
+  }
+  return { requestId, status }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

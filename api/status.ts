@@ -42,12 +42,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw new Error(`Higgsfield status failed (${hfRes.status}): ${detail.slice(0, 300)}`)
     }
 
-    const data = (await hfRes.json()) as { status: string; video?: { url: string } }
-    const raw = data.status
-    if (raw === 'completed') {
-      return res.status(200).json({ status: 'completed', videoUrl: data.video?.url ?? null, raw })
+    const data = (await hfRes.json()) as Record<string, any>
+    const raw = String(data.status ?? '')
+    const norm = raw.toLowerCase().replace(/[\s-]/g, '_')
+
+    // Video URL location varies across API versions.
+    const videoUrl: string | null =
+      data.video?.url ??
+      data.video_url ??
+      data.output?.url ??
+      data.result?.url ??
+      (Array.isArray(data.results) ? data.results[0]?.url : null) ??
+      null
+
+    if (norm === 'completed' || norm === 'succeeded' || norm === 'success') {
+      return res.status(200).json({ status: 'completed', videoUrl, raw })
     }
-    if (raw === 'failed' || raw === 'nsfw') {
+    if (norm === 'failed' || norm === 'nsfw' || norm === 'error' || norm === 'canceled' || norm === 'cancelled') {
       return res.status(200).json({ status: 'failed', videoUrl: null, raw })
     }
     return res.status(200).json({ status: 'pending', videoUrl: null, raw })
