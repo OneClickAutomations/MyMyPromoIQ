@@ -119,10 +119,17 @@ type SceneCardProps = {
   isActive: boolean
   isClickable?: boolean
   size?: 'sm' | 'lg'
+  posterUrl?: string
   onClick?: () => void
 }
 
-function SceneCard({ scene, idx, isActive, isClickable = false, size = 'lg', onClick }: SceneCardProps) {
+// Append a seek fragment so browsers paint the first frame as a thumbnail
+// even when autoplay is blocked. Harmless if the host ignores it.
+function videoThumbSrc(url: string): string {
+  return /#t=/.test(url) ? url : `${url}#t=0.1`
+}
+
+function SceneCard({ scene, idx, isActive, isClickable = false, size = 'lg', posterUrl, onClick }: SceneCardProps) {
   const t = SCENE_TEMPLATES[idx]
   const theme = STYLE_THEME[t.style] ?? STYLE_THEME['testimonial']
   const Icon = STYLE_ICON[t.style] ?? Spark
@@ -188,9 +195,18 @@ function SceneCard({ scene, idx, isActive, isClickable = false, size = 'lg', onC
         {/* ── State content ── */}
         {scene.phase === 'done' && scene.videoUrl ? (
           <>
-            <video src={scene.videoUrl} className="h-full w-full object-cover" autoPlay loop muted playsInline />
+            <video
+              src={videoThumbSrc(scene.videoUrl)}
+              poster={posterUrl}
+              className="absolute inset-0 h-full w-full object-cover"
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="metadata"
+            />
             {/* Done badge */}
-            <div className="absolute right-2 top-2 z-10 grid h-5 w-5 place-items-center rounded-full bg-gradient-fire shadow-fire-soft">
+            <div className="absolute right-2 top-2 z-10 grid h-5 w-5 place-items-center rounded-full bg-gradient-fire shadow-fire-soft ring-2 ring-black/20">
               <Check className="h-3 w-3 text-white" />
             </div>
           </>
@@ -1011,6 +1027,7 @@ export default function Studio() {
                 isActive={idx === activeSceneIdx}
                 isClickable={false}
                 size="sm"
+                posterUrl={productPreview}
               />
             ))}
           </div>
@@ -1059,8 +1076,9 @@ export default function Studio() {
         {doneScene?.videoUrl && (
           <div className="overflow-hidden rounded-2xl border border-gold/20 bg-void-900 shadow-card">
             <video
-              src={doneScene.videoUrl}
-              controls autoPlay loop playsInline
+              src={videoThumbSrc(doneScene.videoUrl)}
+              poster={productPreview || undefined}
+              controls autoPlay loop muted playsInline preload="metadata"
               className="aspect-[9/16] max-h-80 w-full object-contain"
             />
             {doneScene.directorPrompt && (
@@ -1124,6 +1142,7 @@ export default function Studio() {
                 isActive={idx === activeSceneIdx}
                 isClickable={scene.phase === 'idle' || scene.phase === 'error'}
                 size="lg"
+                posterUrl={productPreview}
                 onClick={() => {
                   if (scene.phase === 'idle' || scene.phase === 'error') {
                     setActiveSceneIdx(idx)
