@@ -19,7 +19,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 
-const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image'
+const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation'
 
 function buildPrompt(subjectType: 'product' | 'character', subject: string): string {
   if (subjectType === 'character') {
@@ -96,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               { text: prompt },
             ],
           }],
-          generationConfig: { temperature: 0.4 },
+          generationConfig: { temperature: 0.4, responseModalities: ['IMAGE', 'TEXT'] },
         }),
       },
     )
