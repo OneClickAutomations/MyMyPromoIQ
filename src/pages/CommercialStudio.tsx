@@ -13,7 +13,7 @@ import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
-  Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand,
+  Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
   startGeneration,
@@ -37,6 +37,7 @@ import {
   type CreativeBrief,
   type CreatorAttributes,
 } from '../lib/studio/types'
+import type { ClonePrefill } from '../lib/discovery/types'
 import {
   STYLE_PRESETS,
   CAMERA_OPTIONS,
@@ -287,6 +288,9 @@ export default function CommercialStudio() {
   const [savedProducts, setSavedProducts] = useState<StoredProduct[]>([])
   const [savedBrand, setSavedBrand] = useState<StoredBrand | null>(null)
 
+  // ── Clone bridge — set when this brief was pre-filled from a discovered ad
+  const [clonedFrom, setClonedFrom] = useState<{ name: string; notes: string } | null>(null)
+
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleSave = useCallback((b: CreativeBrief) => {
@@ -305,6 +309,7 @@ export default function CommercialStudio() {
           script: b.script,
           storyboard: b.storyboard,
           render: b.render,
+          ...(b.sourceAd ? { sourceAd: b.sourceAd } : {}),
         })
         briefIdRef.current = id
       } catch {
@@ -329,6 +334,61 @@ export default function CommercialStudio() {
     })
     return () => { cancelled = true }
   }, [user?.id])
+
+  // ── Clone bridge: hydrate the brief from a discovered-ad analysis (once) ────
+  useEffect(() => {
+    let raw: string | null = null
+    try { raw = sessionStorage.getItem('promoiq_clone_prefill') } catch { return }
+    if (!raw) return
+    try { sessionStorage.removeItem('promoiq_clone_prefill') } catch {}
+
+    let prefill: ClonePrefill
+    try { prefill = JSON.parse(raw) } catch { return }
+    const a = prefill.analysis
+    if (!a) return
+
+    const s = a.suggestedCreatorAttributes ?? {}
+    const attributes: CreatorAttributes = {
+      gender: s.gender ?? '',
+      ageRange: s.ageRange ?? '',
+      ethnicity: s.ethnicity ?? '',
+      bodyType: s.bodyType ?? '',
+      hair: s.hair ?? '',
+      wardrobe: s.wardrobe ?? '',
+      expression: s.expression ?? '',
+      energyLevel: (s.energyLevel as CreatorAttributes['energyLevel']) ?? 'medium',
+      cameraConfidence: s.cameraConfidence ?? '',
+    }
+
+    setBrief(prev => {
+      let next: CreativeBrief = {
+        ...prev,
+        creator: { ...prev.creator, mode: 'generated', attributes },
+        script: { ...prev.script, generationMode: 'manual', editedText: a.improvedScript },
+        sourceAd: {
+          sourceAdId: prefill.sourceAdId,
+          analysisSummary: a.differentiationNotes,
+          appliedAt: prefill.appliedAt,
+        },
+      }
+      if (a.suggestedCommercialStyle) next = applyStylePreset(next, a.suggestedCommercialStyle)
+      // Workflow B: seed the product from the sourced listing so Step 1 is pre-filled.
+      if (prefill.sourcedProduct) {
+        next = { ...next, product: { ...next.product, productName: prefill.sourcedProduct.name } }
+      }
+      return next
+    })
+
+    if (prefill.sourcedProduct) {
+      if (prefill.sourcedProduct.imageUrl) {
+        setInputMethod('url')
+        setUrlInput(prefill.sourcedProduct.imageUrl)
+        setProductPreview(prefill.sourcedProduct.imageUrl)
+        setUrlPreviewOk(true)
+      }
+    }
+    setClonedFrom({ name: prefill.sourceAdName, notes: a.differentiationNotes })
+  }, [])
 
   function patch(update: Partial<CreativeBrief>) {
     setBrief(prev => {
@@ -1413,6 +1473,27 @@ export default function CommercialStudio() {
           Step {stepNum} of 11
         </span>
       </div>
+
+      {/* Cloned-from-ad banner */}
+      {clonedFrom && (
+        <div className="mb-5 rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-fire-start/15">
+              <Spark className="h-4 w-4 text-fire-start" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink">
+                Filled from ad analysis · <span className="text-fire-start">{clonedFrom.name}</span>
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-muted">{clonedFrom.notes}</p>
+              <p className="mt-1.5 text-[11px] text-ink-faint">Creator, style, and script are pre-filled — edit anything before generating.</p>
+            </div>
+            <button onClick={() => setClonedFrom(null)} className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg text-ink-faint hover:bg-white/[0.06] hover:text-ink">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mobile progress bar */}
       <div className="mb-5 lg:hidden">

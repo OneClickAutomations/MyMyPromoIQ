@@ -130,6 +130,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           script: b.script ?? {},
           storyboard: b.storyboard ?? {},
           render: b.render ?? {},
+          // Only sent when cloned from a discovered ad — requires the additive
+          // source_ad column (see supabase/schema.sql).
+          ...(b.sourceAd ? { source_ad: b.sourceAd } : {}),
           ...(b.id ? { id: b.id } : {}),
         }
         const { data, error } = await supabase

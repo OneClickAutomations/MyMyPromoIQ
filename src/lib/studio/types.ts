@@ -123,6 +123,14 @@ export interface CreativeBrief {
     creditsCost?: number
     statusLog: DirectorLogEntry[]
   }
+
+  /** Set when this brief was cloned from a discovered ad (Discovery Engine). */
+  sourceAd?: {
+    sourceAdId: string
+    /** Claude's structured breakdown, summarized for display/storage. */
+    analysisSummary: string
+    appliedAt: string
+  }
 }
 
 // ── Composition Engine output ────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import History from './pages/History'
 import CreatorStudio from './pages/CreatorStudio'
 import ProductStudio from './pages/ProductStudio'
 import BrandKit from './pages/BrandKit'
+import Discovery from './pages/Discovery'
 import PrivacyPolicy from './pages/legal/Privacy'
 import TermsOfService from './pages/legal/Terms'
 import DataProcessingAgreement from './pages/legal/DPA'
@@ -61,6 +62,15 @@ export default function App() {
         element={
           <Protected>
             <History />
+          </Protected>
+        }
+      />
+      {/* Discovery Engine */}
+      <Route
+        path="/discover"
+        element={
+          <Protected>
+            <Discovery />
           </Protected>
         }
       />

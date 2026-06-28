@@ -253,3 +253,21 @@ export const Building = (p: I) => (
     <path d="M9 3v18M15 3v18M3 9h6M3 15h6M15 9h6M15 15h6" />
   </svg>
 )
+export const Compass = (p: I) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+  </svg>
+)
+export const Search = (p: I) => (
+  <svg {...base(p)}>
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+)
+export const TrendingUp = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M3 17l6-6 4 4 8-8" />
+    <path d="M17 7h4v4" />
+  </svg>
+)

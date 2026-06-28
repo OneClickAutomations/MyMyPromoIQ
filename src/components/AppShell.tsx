@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { UserButton, useUser, useClerk } from '@clerk/clerk-react'
 import { brand } from '../copy'
-import { Bolt, Clock, Grid, LogOut, Menu, Moon, Package, Palette, Settings, Sun, Users, Wand, Film, X } from './icons'
+import { Bolt, Clock, Compass, Grid, LogOut, Menu, Moon, Package, Palette, Settings, Sun, Users, Wand, Film, X } from './icons'
 
 type NavItem = { label: string; href: string; icon: React.FC<React.SVGProps<SVGSVGElement>>; soon?: boolean }
 type NavSection = { sectionLabel?: string; items: NavItem[] }
@@ -11,6 +11,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { label: 'Campaigns',    href: '/dashboard',  icon: Grid },
+      { label: 'Discover Ads', href: '/discover',   icon: Compass },
       { label: 'New Campaign', href: '/studio/new', icon: Wand },
     ],
   },

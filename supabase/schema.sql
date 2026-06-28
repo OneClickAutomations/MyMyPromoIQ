@@ -251,3 +251,71 @@ drop trigger if exists brand_kits_updated_at on brand_kits;
 create trigger brand_kits_updated_at
   before update on brand_kits
   for each row execute function set_updated_at();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Discovery Engine & Clone Bridge (Phase 2 data layer)
+--
+-- Apify runs and sourcing lookups cost real money per call, so ad_searches and
+-- sourcing_lookups double as caches: check them before any new external call.
+-- All additive — nothing here changes the existing studio pipeline.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- source_ads — scored ads discovered via the research flow.
+create table if not exists source_ads (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            text not null,
+  platform           text not null,            -- 'meta' | 'tiktok'
+  external_ad_id     text,
+  page_or_shop_name  text,
+  creative           jsonb not null default '{}'::jsonb,
+  delivery           jsonb not null default '{}'::jsonb,
+  product            jsonb not null default '{}'::jsonb,
+  score              jsonb not null default '{}'::jsonb,
+  raw_payload        jsonb,                     -- full actor output for re-scoring/debug
+  fetched_at         timestamptz not null default now(),
+  created_at         timestamptz not null default now()
+);
+
+-- ad_searches — one row per search; also a cache keyed on (query, platform, day).
+create table if not exists ad_searches (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            text not null,
+  query_type         text not null,            -- 'keyword' | 'product_url'
+  query_value        text not null,
+  platform           text not null,            -- 'meta' | 'tiktok' | 'both'
+  date_bucket        date not null default current_date,
+  apify_run_id       text,
+  status             text not null default 'queued',
+  result_count       int not null default 0,
+  results            jsonb not null default '[]'::jsonb,
+  created_at         timestamptz not null default now()
+);
+
+-- sourcing_lookups — cache of dropship matches keyed on a normalized product name.
+create table if not exists sourcing_lookups (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            text not null,
+  normalized_name    text not null,
+  result             jsonb,                     -- SourcingResult, or null when no match
+  expires_at         timestamptz not null default (now() + interval '7 days'),
+  created_at         timestamptz not null default now()
+);
+
+-- creative_briefs gains an additive sourceAd column (cloned-from-ad provenance).
+alter table creative_briefs add column if not exists source_ad jsonb;
+
+create index if not exists source_ads_user_idx       on source_ads(user_id);
+create index if not exists ad_searches_user_idx       on ad_searches(user_id);
+create index if not exists ad_searches_cache_idx       on ad_searches(query_value, platform, date_bucket);
+create index if not exists sourcing_lookups_name_idx   on sourcing_lookups(normalized_name);
+
+alter table source_ads       enable row level security;
+alter table ad_searches      enable row level security;
+alter table sourcing_lookups enable row level security;
+
+drop policy if exists "own source_ads" on source_ads;
+create policy "own source_ads" on source_ads for all using ((auth.jwt() ->> 'sub') = user_id);
+drop policy if exists "own ad_searches" on ad_searches;
+create policy "own ad_searches" on ad_searches for all using ((auth.jwt() ->> 'sub') = user_id);
+drop policy if exists "own sourcing_lookups" on sourcing_lookups;
+create policy "own sourcing_lookups" on sourcing_lookups for all using ((auth.jwt() ->> 'sub') = user_id);
