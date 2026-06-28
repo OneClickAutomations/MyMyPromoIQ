@@ -174,7 +174,7 @@ export default function Dashboard() {
           </h1>
         </div>
         <Link
-          to="/studio"
+          to="/studio/new"
           className="btn-fire flex-shrink-0 gap-1.5 px-4 py-2.5 text-sm shadow-fire-soft md:gap-2 md:px-6 md:py-3.5"
         >
           <Plus className="h-4 w-4" />
@@ -237,7 +237,7 @@ export default function Dashboard() {
               transition={stagger(i + 3)}
             >
               <Link
-                to={`/studio?style=${q.style}`}
+                to="/studio/new"
                 className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
               >
                 {/* Cinematic thumbnail */}
@@ -332,7 +332,7 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <Link to="/studio" className="btn-fire mx-auto mt-8 gap-2 inline-flex">
+              <Link to="/studio/new" className="btn-fire mx-auto mt-8 gap-2 inline-flex">
                 <Bolt className="h-4 w-4" />
                 Create your first campaign
               </Link>
