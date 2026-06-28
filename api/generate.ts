@@ -41,6 +41,24 @@ const STYLES: Record<StyleId, { label: string; brief: string }> = {
   },
 }
 
+// The wizard (Commercial Studio) uses richer style-preset ids; map them onto the
+// four canonical render styles so generation accepts either vocabulary.
+const STYLE_ALIASES: Record<string, StyleId> = {
+  ugc_testimonial:   'testimonial',
+  founder_story:     'testimonial',
+  luxury_commercial: 'day-in-life',
+  cinematic_brand:   'day-in-life',
+  fast_cut_hook:     'fast-cut',
+  unboxing:          'unboxing',
+  explainer:         'unboxing',
+}
+
+/** Resolve any incoming style id (canonical or wizard preset) to a StyleId. */
+function resolveStyle(style: string): StyleId | null {
+  if (style in STYLES) return style as StyleId
+  return STYLE_ALIASES[style] ?? null
+}
+
 const HF_BASE = 'https://platform.higgsfield.ai'
 const QUALITY_MODEL: Record<Quality, string> = {
   lite: 'dop-lite',
@@ -181,8 +199,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!productDescription?.trim()) {
       return res.status(400).json({ error: 'Describe the product in a sentence.' })
     }
-    if (!STYLES[style as StyleId]) {
-      return res.status(400).json({ error: `Unknown style. Pick one of: ${Object.keys(STYLES).join(', ')}.` })
+    const styleId = resolveStyle(style)
+    if (!styleId) {
+      const accepted = [...Object.keys(STYLES), ...Object.keys(STYLE_ALIASES)].join(', ')
+      return res.status(400).json({ error: `Unknown style "${style}". Pick one of: ${accepted}.` })
     }
     if (!QUALITIES.includes(quality as Quality)) {
       return res.status(400).json({ error: `Unknown quality. Pick one of: ${QUALITIES.join(', ')}.` })
@@ -194,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cta: brandCta || undefined,
     }
 
-    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), style as StyleId, brand)
+    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand)
     const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality)
     return res.status(200).json({ requestId, status, directorPrompt })
   } catch (err) {
