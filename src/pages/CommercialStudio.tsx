@@ -5,8 +5,8 @@
  * 11 steps: Product → Creator → Scene → Style → Camera → Environment →
  *           Lighting → Voice → Script → Storyboard → Director (generation)
  */
-import { useState, useRef, useCallback, useEffect, useTransition } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useRef, useCallback, useTransition } from 'react'
+import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
@@ -56,8 +56,6 @@ const STEPS = [
   { num: 10, key: 'storyboard',  label: 'Storyboard',   required: true,  icon: PlayIcon },
   { num: 11, key: 'director',    label: 'Director',     required: true,  icon: Spark },
 ] as const
-
-type StepKey = typeof STEPS[number]['key']
 
 // ── Creator attribute options ─────────────────────────────────────────────────
 
@@ -183,14 +181,12 @@ function StepHeader({
 // ── Card option (preset cards) ────────────────────────────────────────────────
 
 function PresetCard({
-  id,
   label,
   blurb,
   img,
   selected,
   onSelect,
 }: {
-  id: string
   label: string
   blurb: string
   img?: string
@@ -248,7 +244,6 @@ const STYLE_IMAGES: Record<string, string> = {
 
 export default function CommercialStudio() {
   const { user } = useUser()
-  const navigate = useNavigate()
   const [, startDescTransition] = useTransition()
 
   // ── Wizard step state
@@ -369,7 +364,6 @@ export default function CommercialStudio() {
   async function handleProductNext() {
     setStep1Error('')
     if (inputMethod === 'url') {
-      const url = urlInput.trim()
       patch({ product: { ...brief.product, productName: brief.product.productName, rawImages: [], processedImages: [] } })
       goForward()
       return
@@ -791,7 +785,6 @@ export default function CommercialStudio() {
           {presets.map(preset => (
             <PresetCard
               key={preset.id}
-              id={preset.id}
               label={preset.label}
               blurb={preset.blurb}
               img={STYLE_IMAGES[preset.id]}
