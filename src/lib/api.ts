@@ -30,6 +30,8 @@ export type GenerateInput = {
   brandVoice?: string
   brandTaglines?: string[]
   brandCta?: string
+  /** Scene focus label (Hook, Problem, Solution, etc.) for multi-scene generation. */
+  sceneLabel?: string
 }
 
 export type GenerateResponse = {
@@ -230,6 +232,17 @@ export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioD
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** Stitch 2–6 silent video URLs into one concatenated MP4. */
+export async function stitchVideos(videoUrls: string[]): Promise<{ videoDataUrl: string; bytes: number; clips: number }> {
+  const res = await fetch('/api/stitch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videoUrls }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()

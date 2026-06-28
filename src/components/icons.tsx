@@ -277,3 +277,8 @@ export const TrendingUp = (p: I) => (
     <path d="M17 7h4v4" />
   </svg>
 )
+export const ChevronDown = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+)

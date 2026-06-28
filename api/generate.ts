@@ -90,6 +90,7 @@ async function writeDirectorPrompt(
   styleId: StyleId,
   brand?: BrandContext,
   composedPrompt?: string,
+  sceneLabel?: string,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -110,10 +111,22 @@ async function writeDirectorPrompt(
     ? `\nAUTHORITATIVE SCENE (preserve every casting detail VERBATIM — do not change the person's ethnicity, skin tone, gender, age, or the product's real-world scale; you may only add camera movement and timing):\n${composedPrompt}\n`
     : ''
 
+  const sceneFocusMap: Record<string, string> = {
+    'Hook':               'SCENE FOCUS — Hook (0-3s): Stop the scroll. Open with a surprising visual, bold movement, or striking emotion that demands attention before a single word is read.',
+    'Problem / Agitation':'SCENE FOCUS — Problem: Show the pain point or frustration this product solves. The viewer should feel seen — this is their life before the product.',
+    'Solution':           'SCENE FOCUS — Solution: Reveal the product as the answer. Show it working, being used, delivering the result. Clear cause-and-effect.',
+    'Social Proof':       'SCENE FOCUS — Social Proof: Convey credibility. Real-person testimonial energy, reactions, visible results, or an "I can\'t believe it worked" moment.',
+    'Call to Action':     'SCENE FOCUS — CTA: Drive action. Strong close, product prominently visible, urgency or excitement in the body language. Make the viewer want to tap now.',
+    'Outro':              'SCENE FOCUS — Outro/Brand Close: Leave a lasting impression. Product logo area, confident pose, brand color energy, and a final memorable visual beat.',
+  }
+  const sceneFocusSection = sceneLabel && sceneFocusMap[sceneLabel]
+    ? `\n${sceneFocusMap[sceneLabel]}\n`
+    : ''
+
   const system = `You are an expert UGC ad director writing prompts for an image-to-video model. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
 
 Style direction: ${style.brief}
-${brandSection}${identitySection}
+${brandSection}${sceneFocusSection}${identitySection}
 Rules:
 - Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation.
 - 2-4 sentences. Describe camera movement, subject action, lighting, and mood.
@@ -214,6 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       brandVoice,
       brandTaglines,
       brandCta,
+      sceneLabel,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
     if (!productImageUrl || !/^https?:\/\//i.test(productImageUrl)) {
@@ -237,7 +251,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cta: brandCta || undefined,
     }
 
-    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand, composedPrompt)
+    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand, composedPrompt, sceneLabel)
     const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality, {
       negativePrompt,
       // Disable Higgsfield's own prompt rewrite when we already supplied a strong,

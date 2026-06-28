@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, ImageIcon, Info, Layers, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, Film, ImageIcon, Info, Layers, LinkIcon,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -29,6 +29,7 @@ import {
   listVoices,
   generateVoiceover,
   muxVideoAudio,
+  stitchVideos,
   generateModelSheet,
   type DirectorLogEntry,
   type StatusResponse,
@@ -245,6 +246,54 @@ function ModelSheetGenerator({ imageUrl, subjectType, subjectHint }: {
   )
 }
 
+// ── Circular generation progress indicator ─────────────────────────────────────
+function CircularProgress({ pct, label }: { pct: number; label: string }) {
+  const r = 42
+  const circ = 2 * Math.PI * r
+  const offset = circ * (1 - Math.min(100, Math.max(0, pct)) / 100)
+  const isDone = pct >= 100
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div className="relative flex items-center justify-center" style={{ width: 120, height: 120 }}>
+        {/* Outer glow ring — pulses while in progress */}
+        {!isDone && (
+          <div
+            className="pointer-events-none absolute inset-0 rounded-full animate-pulse"
+            style={{ boxShadow: `0 0 32px 6px rgba(255,107,53,${0.15 + pct / 500})` }}
+          />
+        )}
+        <svg width="120" height="120" viewBox="0 0 100 100" className="-rotate-90">
+          <defs>
+            <linearGradient id="cg-fire" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#FF6B35" />
+              <stop offset="100%" stopColor="#FFD700" />
+            </linearGradient>
+          </defs>
+          {/* Track */}
+          <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
+          {/* Progress arc */}
+          <circle
+            cx="50" cy="50" r={r} fill="none"
+            stroke={isDone ? '#4ade80' : 'url(#cg-fire)'}
+            strokeWidth="7"
+            strokeLinecap="round"
+            strokeDasharray={circ}
+            strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 0.9s ease, stroke 0.4s ease' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+          <span className="text-2xl font-bold tabular-nums text-ink">{Math.round(pct)}%</span>
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-faint">
+            {isDone ? 'Done' : pct < 75 ? 'Planning' : 'Rendering'}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs font-semibold text-fire-start/90">{label}</p>
+    </div>
+  )
+}
+
 // ── Step header ───────────────────────────────────────────────────────────────
 
 function StepHeader({
@@ -396,6 +445,19 @@ export default function CommercialStudio() {
 
   // ── Clone bridge — set when this brief was pre-filled from a discovered ad
   const [clonedFrom, setClonedFrom] = useState<{ name: string; notes: string } | null>(null)
+
+  // ── Multi-scene state ──────────────────────────────────────────────────────
+  type SceneResult = { label: string; videoUrl: string; voiceoverUrl: string | null }
+  const SCENE_LABELS = ['Hook', 'Problem / Agitation', 'Solution', 'Social Proof', 'Call to Action', 'Outro'] as const
+  const [completedScenes, setCompletedScenes] = useState<SceneResult[]>([])
+  const [currentSceneIdx, setCurrentSceneIdx] = useState(0)
+  const [genProgress, setGenProgress] = useState(0)
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Stitch state
+  const [stitching, setStitching] = useState(false)
+  const [stitchedUrl, setStitchedUrl] = useState<string | null>(null)
+  const [stitchError, setStitchError] = useState('')
 
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -660,7 +722,12 @@ export default function CommercialStudio() {
 
   // ── Director feed / generation ────────────────────────────────────────────
 
-  async function handleGenerate() {
+  // Stage → percentage milestones (directing phase)
+  const STAGE_PROGRESS: Record<string, number> = {
+    analyzing: 12, casting: 28, scripting: 48, storyboarding: 68,
+  }
+
+  async function handleGenerate(sceneLabel?: string) {
     if (!productImageUrl) return
     setDirectorPhase('directing')
     setDirectorLog([])
@@ -671,13 +738,16 @@ export default function CommercialStudio() {
     setVoiceoverError('')
     setMuxedUrl(null)
     setMuxError('')
+    setGenProgress(0)
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
 
     // Kick off the voiceover in parallel — it's independent of the video render,
     // so we don't make the user wait on it sequentially.
     const scriptText = brief.script.editedText || brief.script.generatedText || ''
+    let currentVoiceoverUrl: string | null = null
     if (scriptText.trim() && brief.voice.voiceId) {
       generateVoiceover({ text: scriptText, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
-        .then(r => setVoiceoverUrl(r.audioDataUrl))
+        .then(r => { currentVoiceoverUrl = r.audioDataUrl; setVoiceoverUrl(r.audioDataUrl) })
         .catch(e => setVoiceoverError(e instanceof Error ? e.message : 'Voiceover failed.'))
     }
 
@@ -691,21 +761,30 @@ export default function CommercialStudio() {
         energyLevel: brief.creator.attributes?.energyLevel,
       })
 
-      // Animate log entries in, one per second
+      // Animate log entries in, one per second, updating progress circle
       setDirectorLog(log)
       for (let i = 0; i < log.length; i++) {
         await new Promise(r => setTimeout(r, 900))
         setVisibleLogCount(i + 1)
+        const stage = log[i]?.stage as string | undefined
+        if (stage && STAGE_PROGRESS[stage] !== undefined) {
+          setGenProgress(STAGE_PROGRESS[stage])
+        }
       }
 
-      // 2. Transition to rendering stage
+      // 2. Transition to rendering stage — start time-based creep 75% → 95%
       setDirectorPhase('generating')
+      setGenProgress(75)
+      let crept = 75
+      progressTimerRef.current = setInterval(() => {
+        crept = Math.min(95, crept + (95 - crept) * 0.04)
+        setGenProgress(crept)
+      }, 2_000)
 
-      // 3. Submit to Higgsfield. Pass the Composition Engine's compiled prompt so
-      //    the cast identity (ethnicity, skin tone) and product scale actually
-      //    reach the render engine instead of being re-derived from scratch.
+      // 3. Submit to Higgsfield with scene-specific focus when provided.
       const composed = composeHiggsfieldPrompt(brief)
       const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
+      const label = sceneLabel ?? SCENE_LABELS[currentSceneIdx]
       const { requestId, directorPrompt } = await startGeneration({
         productImageUrl,
         productDescription: brief.product.description ?? descInput,
@@ -716,10 +795,10 @@ export default function CommercialStudio() {
         brandVoice: savedBrand?.brand_voice ?? undefined,
         brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
         brandCta: savedBrand?.cta_preferences ?? undefined,
+        sceneLabel: label,
       })
       setDirectorNote(directorPrompt)
 
-      // Add rendering stage to log
       setDirectorLog(prev => [...prev, {
         timestamp: new Date().toISOString(),
         stage: 'rendering',
@@ -733,18 +812,57 @@ export default function CommercialStudio() {
         timeoutMs: 10 * 60 * 1_000,
       })
 
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+
       if (final.status === 'completed' && final.videoUrl) {
+        setGenProgress(100)
         setVideoUrl(final.videoUrl)
         setDirectorPhase('done')
         patch({ status: 'complete', render: { ...brief.render, outputUrl: final.videoUrl, statusLog: [] } })
+        // Save this scene to the completed list
+        setCompletedScenes(prev => [...prev, {
+          label: label,
+          videoUrl: final.videoUrl!,
+          voiceoverUrl: currentVoiceoverUrl,
+        }])
       } else {
+        setGenProgress(0)
         const msg = final.raw === 'timeout' ? 'Render timed out — try again.' : 'Render failed. Try a different style or image.'
         setGenError(msg)
         setDirectorPhase('error')
       }
     } catch (err) {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+      setGenProgress(0)
       setGenError(err instanceof Error ? err.message : 'Something went wrong.')
       setDirectorPhase('error')
+    }
+  }
+
+  function handleNextScene() {
+    const next = currentSceneIdx + 1
+    setCurrentSceneIdx(next)
+    setVideoUrl(null)
+    setVoiceoverUrl(null)
+    setMuxedUrl(null)
+    setMuxError('')
+    setDirectorPhase('idle')
+    setGenProgress(0)
+    handleGenerate(SCENE_LABELS[next])
+  }
+
+  async function handleStitch() {
+    const urls = completedScenes.map(s => s.videoUrl)
+    if (urls.length < 2) return
+    setStitching(true)
+    setStitchError('')
+    try {
+      const { videoDataUrl } = await stitchVideos(urls)
+      setStitchedUrl(videoDataUrl)
+    } catch (e) {
+      setStitchError(e instanceof Error ? e.message : 'Stitch failed.')
+    } finally {
+      setStitching(false)
     }
   }
 
@@ -1540,26 +1658,68 @@ export default function CommercialStudio() {
   function renderDirector() {
     const allStages = ['analyzing', 'casting', 'scripting', 'storyboarding', 'rendering']
     const doneStages = directorLog.slice(0, visibleLogCount).map(e => e.stage)
+    const isGenerating = directorPhase === 'directing' || directorPhase === 'generating'
+    const currentLabel = SCENE_LABELS[currentSceneIdx] ?? `Scene ${currentSceneIdx + 1}`
+    const scenesDone = completedScenes.length
+    const canAddMore = scenesDone < SCENE_LABELS.length
+    const canStitch = scenesDone >= 2
 
     return (
       <div className="space-y-6">
-        <StepHeader title="AI Director" desc="Sit back — the director is working." onBack={directorPhase === 'idle' ? goBack : undefined} />
+        <StepHeader
+          title={scenesDone === 0 ? 'AI Director' : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${SCENE_LABELS.length}`}
+          desc={isGenerating ? `Generating — ${currentLabel}` : scenesDone > 0 ? 'Keep going or stitch your scenes into a full ad.' : 'Sit back — the director is working.'}
+          onBack={directorPhase === 'idle' ? goBack : undefined}
+        />
 
-        {/* Idle: start button */}
+        {/* ── Completed scenes gallery ──────────────────────────────────────── */}
+        {completedScenes.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-faint">Completed scenes</p>
+            <div className="grid grid-cols-3 gap-2">
+              {completedScenes.map((sc, i) => (
+                <div key={i} className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-void-900">
+                  <video
+                    src={videoThumbSrc(sc.videoUrl)}
+                    muted playsInline preload="metadata"
+                    className="aspect-[9/16] w-full object-cover"
+                    onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play()}
+                    onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
+                  />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
+                    <p className="truncate text-[9px] font-bold text-white/90">{sc.label}</p>
+                  </div>
+                  <div className="absolute right-1.5 top-1.5">
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  </div>
+                </div>
+              ))}
+              {/* Empty slot placeholders */}
+              {Array.from({ length: Math.max(0, SCENE_LABELS.length - completedScenes.length) }).map((_, i) => (
+                <div key={`empty-${i}`} className="aspect-[9/16] rounded-xl border border-dashed border-white/[0.08] bg-void-900/30" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Idle: start / next-scene button ──────────────────────────────── */}
         {directorPhase === 'idle' && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-white/[0.07] bg-void-900/60 p-5">
-              <p className="text-sm text-ink-muted">The Composition Engine has assembled your brief. The AI Director will now:</p>
-              <ul className="mt-3 space-y-1.5">
-                {allStages.map(s => (
-                  <li key={s} className="flex items-center gap-2.5 text-sm text-ink-muted">
-                    <span className="h-1.5 w-1.5 rounded-full bg-fire-start/40" />
-                    {STAGE_LABELS[s]}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            {savedBrand && (
+            {scenesDone === 0 && (
+              <div className="rounded-2xl border border-white/[0.07] bg-void-900/60 p-5">
+                <p className="text-sm text-ink-muted">The Composition Engine has assembled your brief. The AI Director will plan and render:</p>
+                <ul className="mt-3 space-y-1.5">
+                  {allStages.map(s => (
+                    <li key={s} className="flex items-center gap-2.5 text-sm text-ink-muted">
+                      <span className="h-1.5 w-1.5 rounded-full bg-fire-start/40" />
+                      {STAGE_LABELS[s]}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-xs text-ink-faint">You'll be able to generate up to 6 scenes and stitch them into one complete ad.</p>
+              </div>
+            )}
+            {savedBrand && scenesDone === 0 && (
               <div className="flex items-center gap-2 rounded-xl border border-fire-start/20 bg-fire-start/[0.06] px-4 py-2.5">
                 <Palette className="h-3.5 w-3.5 flex-shrink-0 text-fire-start" />
                 <p className="text-xs text-ink-muted">
@@ -1569,82 +1729,87 @@ export default function CommercialStudio() {
                 </p>
               </div>
             )}
-            <button onClick={handleGenerate} className="btn-fire w-full">
-              <Spark className="h-4 w-4" /> Start Generation
+            <button onClick={() => handleGenerate()} className="btn-fire w-full">
+              <Spark className="h-4 w-4" />
+              {scenesDone === 0 ? 'Start Generation' : `Generate Scene ${scenesDone + 1} — ${currentLabel}`}
             </button>
           </div>
         )}
 
-        {/* Active feed */}
-        {(directorPhase === 'directing' || directorPhase === 'generating') && (
+        {/* ── Active feed: circular progress + stage log ────────────────────── */}
+        {isGenerating && (
           <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-void-900/60 shadow-card">
-            {/* Pulsing header */}
             <div className="relative border-b border-white/[0.06] px-5 py-4">
-              <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: 'linear-gradient(90deg,rgba(255,107,53,0.2) 0%,transparent 60%)' }} />
+              <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: 'linear-gradient(90deg,rgba(255,107,53,0.25) 0%,transparent 60%)' }} />
               <div className="flex items-center gap-2.5">
                 <span className="h-2 w-2 animate-pulse-dot rounded-full bg-fire-start" />
                 <p className="text-sm font-semibold text-ink">
-                  {directorPhase === 'directing' ? 'AI Director — Live' : 'Rendering video'}
+                  {directorPhase === 'directing' ? `AI Director — Planning` : `Rendering — ${currentLabel}`}
                 </p>
               </div>
             </div>
 
-            {/* Stage timeline */}
-            <div className="p-5 space-y-4">
-              {allStages.map((stage, i) => {
-                const logEntry = directorLog.find(e => e.stage === stage)
-                const isVisible = doneStages.includes(stage as DirectorLogEntry['stage'])
-                const isActive = !isVisible && (
-                  (directorPhase === 'directing' && i === doneStages.length) ||
-                  (directorPhase === 'generating' && stage === 'rendering')
-                )
-                const isDone = isVisible
+            {/* Circular progress + stage list */}
+            <div className="flex flex-col items-center gap-6 p-6">
+              <CircularProgress
+                pct={genProgress}
+                label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${SCENE_LABELS.length}`}
+              />
 
-                return (
-                  <div key={stage} className="flex gap-3">
-                    <div className={`relative mt-0.5 grid h-6 w-6 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
-                      isDone   ? 'bg-gradient-fire shadow-fire-soft' :
-                      isActive ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
-                      'bg-void-600/50'
-                    }`}>
-                      {isDone   ? <Check className="h-3.5 w-3.5 text-white" />
-                      : isActive ? <span className="h-2 w-2 animate-pulse-dot rounded-full bg-fire-start" />
-                      : <span className="h-1.5 w-1.5 rounded-full bg-ink-faint/30" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-semibold transition-colors duration-300 ${isDone || isActive ? 'text-ink' : 'text-ink-faint/40'}`}>
-                          {STAGE_LABELS[stage]}
-                        </span>
-                        {isActive && <span className="animate-pulse text-[10px] font-semibold text-fire-start/80">In progress…</span>}
+              <div className="w-full space-y-3">
+                {allStages.map((stage, i) => {
+                  const logEntry = directorLog.find(e => e.stage === stage)
+                  const isVisible = doneStages.includes(stage as DirectorLogEntry['stage'])
+                  const isActive = !isVisible && (
+                    (directorPhase === 'directing' && i === doneStages.length) ||
+                    (directorPhase === 'generating' && stage === 'rendering')
+                  )
+                  return (
+                    <div key={stage} className="flex gap-3">
+                      <div className={`relative mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
+                        isVisible ? 'bg-gradient-fire shadow-fire-soft' :
+                        isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
+                        'bg-void-600/50'
+                      }`}>
+                        {isVisible  ? <Check className="h-3 w-3 text-white" />
+                        : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
+                        : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
                       </div>
-                      <AnimatePresence>
-                        {logEntry && isVisible && (
-                          <motion.p
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            transition={{ duration: 0.4 }}
-                            className="mt-1 text-xs leading-relaxed text-ink-muted"
-                          >
-                            {logEntry.message}
-                          </motion.p>
-                        )}
-                      </AnimatePresence>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
+                            {STAGE_LABELS[stage]}
+                          </span>
+                          {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
+                        </div>
+                        <AnimatePresence>
+                          {logEntry && isVisible && (
+                            <motion.p
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              transition={{ duration: 0.4 }}
+                              className="mt-0.5 text-[11px] leading-relaxed text-ink-muted"
+                            >
+                              {logEntry.message}
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Error */}
+        {/* ── Error ─────────────────────────────────────────────────────────── */}
         {directorPhase === 'error' && (
           <div className="rounded-2xl border border-fire-start/20 bg-fire-start/5 p-5">
             <p className="text-sm font-semibold text-fire-start">Generation failed</p>
             <p className="mt-1 text-sm text-ink-muted">{genError}</p>
             <div className="mt-4 flex gap-3">
-              <button onClick={handleGenerate} className="btn-fire py-2.5 px-5 text-sm">
+              <button onClick={() => handleGenerate(currentLabel)} className="btn-fire py-2.5 px-5 text-sm">
                 <RefreshCw className="h-4 w-4" /> Retry
               </button>
               <button onClick={goBack} className="btn-ghost py-2.5 px-5 text-sm">
@@ -1654,88 +1819,119 @@ export default function CommercialStudio() {
           </div>
         )}
 
-        {/* Done — video result */}
+        {/* ── Done — current scene result ───────────────────────────────────── */}
         {directorPhase === 'done' && videoUrl && (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="space-y-4">
+
+            {/* Scene header badge */}
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-400">
+                <Check className="h-3 w-3" /> Scene {scenesDone} complete
+              </span>
+              <span className="text-xs text-ink-faint">{completedScenes[completedScenes.length - 1]?.label}</span>
+            </div>
+
+            {/* Video preview */}
             <div className="overflow-hidden rounded-2xl border border-gold/20 bg-void-900 shadow-card">
               <video
                 src={videoThumbSrc(videoUrl)}
                 poster={productPreview || undefined}
                 controls autoPlay loop muted playsInline preload="metadata"
-                className="aspect-[9/16] max-h-80 w-full object-contain"
+                className="aspect-[9/16] max-h-72 w-full object-contain"
               />
               {directorNote && (
-                <div className="border-t border-white/[0.06] p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-gold">✦ Director's note</p>
-                  <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">{directorNote}</p>
+                <div className="border-t border-white/[0.06] p-3">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-gold">✦ Director's note</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{directorNote}</p>
                 </div>
               )}
             </div>
 
-            {/* Voiceover (ElevenLabs) — the render itself is silent; play this with it. */}
+            {/* Per-scene voiceover */}
             {voiceoverUrl && (
-              <div className="mt-4 rounded-2xl border border-white/[0.08] bg-void-900 p-4">
+              <div className="rounded-2xl border border-white/[0.08] bg-void-900 p-4">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-ink">Voiceover</p>
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
                 </div>
                 <audio src={voiceoverUrl} controls className="mt-3 w-full" />
-                {!muxedUrl && (
-                  <p className="mt-2 text-[11px] text-ink-faint">
-                    The render is silent — combine it with this voiceover into one finished MP4 below.
-                  </p>
-                )}
+                {!muxedUrl && <p className="mt-1.5 text-[11px] text-ink-faint">Combine with the video below, or continue generating scenes and stitch them all at the end.</p>}
               </div>
             )}
-            {voiceoverError && (
-              <p className="mt-3 text-xs text-amber-300">Voiceover: {voiceoverError}</p>
-            )}
+            {voiceoverError && <p className="text-xs text-amber-300">Voiceover: {voiceoverError}</p>}
 
-            {/* Combined preview once muxed */}
             {muxedUrl && (
-              <div className="mt-4 overflow-hidden rounded-2xl border border-gold/30 bg-void-900">
+              <div className="overflow-hidden rounded-2xl border border-gold/30 bg-void-900">
                 <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
                   <Check className="h-4 w-4 text-emerald-400" />
-                  <p className="text-sm font-semibold text-ink">Final ad — video + voiceover</p>
+                  <p className="text-sm font-semibold text-ink">Scene + voiceover combined</p>
                 </div>
-                <video src={muxedUrl} controls autoPlay playsInline className="aspect-[9/16] max-h-80 w-full object-contain" />
+                <video src={muxedUrl} controls autoPlay playsInline className="aspect-[9/16] max-h-72 w-full object-contain" />
               </div>
             )}
-            {muxError && <p className="mt-3 text-xs text-amber-300">Combine: {muxError}</p>}
+            {muxError && <p className="text-xs text-amber-300">Combine: {muxError}</p>}
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {/* Primary action: the finished file with sound, or combine to make it. */}
-              {muxedUrl ? (
-                <a href={muxedUrl} download="ad-with-sound.mp4"
-                  className="btn-fire flex items-center justify-center gap-2 py-3">
-                  <Download className="h-4 w-4" /> Download ad with sound
-                </a>
-              ) : voiceoverUrl ? (
-                <button onClick={handleMux} disabled={muxing}
-                  className="btn-fire flex items-center justify-center gap-2 py-3 disabled:opacity-60">
-                  {muxing
-                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Combining…</>
-                    : <><Bolt className="h-4 w-4" /> Combine into one file with sound</>}
+            {/* ── Next scene / stitch CTA area ─────────────────────────────── */}
+            <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-void-900/60 p-4">
+              <p className="text-sm font-semibold text-ink">What's next?</p>
+
+              {canAddMore && (
+                <button onClick={handleNextScene}
+                  className="btn-fire flex w-full items-center justify-center gap-2 py-3">
+                  <Spark className="h-4 w-4" />
+                  Generate Next Scene — {SCENE_LABELS[currentSceneIdx + 1] ?? 'Next'}
                 </button>
-              ) : (
-                <a href={videoUrl} download target="_blank" rel="noreferrer"
-                  className="btn-fire flex items-center justify-center gap-2 py-3">
-                  <Download className="h-4 w-4" /> Download video
-                </a>
               )}
 
-              {/* Secondary: silent video download (when combined) or History. */}
-              {muxedUrl ? (
-                <a href={videoUrl} download target="_blank" rel="noreferrer"
-                  className="btn-ghost flex items-center justify-center gap-2 py-3">
-                  <Download className="h-4 w-4" /> Silent video
-                </a>
-              ) : (
-                <Link to="/history" className="btn-ghost flex items-center justify-center gap-2 py-3">
-                  <ImageIcon className="h-4 w-4" /> View in History
-                </Link>
+              {canStitch && (
+                <button onClick={handleStitch} disabled={stitching}
+                  className="btn-ghost flex w-full items-center justify-center gap-2 py-3 disabled:opacity-60">
+                  {stitching
+                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Stitching {scenesDone} scenes…</>
+                    : <><Film className="h-4 w-4" /> Stitch {scenesDone} scenes into one ad</>}
+                </button>
               )}
+
+              {/* Per-scene combine / download */}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {voiceoverUrl && !muxedUrl && (
+                  <button onClick={handleMux} disabled={muxing}
+                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-60">
+                    {muxing ? <><RefreshCw className="h-4 w-4 animate-spin" /> Combining…</> : <><Bolt className="h-4 w-4" /> Combine this scene with audio</>}
+                  </button>
+                )}
+                {muxedUrl ? (
+                  <a href={muxedUrl} download={`scene-${scenesDone}-with-sound.mp4`}
+                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm">
+                    <Download className="h-4 w-4" /> Download scene with sound
+                  </a>
+                ) : (
+                  <a href={videoUrl} download={`scene-${scenesDone}-silent.mp4`} target="_blank" rel="noreferrer"
+                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm">
+                    <Download className="h-4 w-4" /> Download scene (silent)
+                  </a>
+                )}
+              </div>
             </div>
+
+            {/* ── Stitched final ad ─────────────────────────────────────────── */}
+            {stitchedUrl && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                <div className="overflow-hidden rounded-2xl border border-gold/40 bg-void-900 shadow-card">
+                  <div className="flex items-center gap-2.5 border-b border-white/[0.06] bg-gold/5 px-4 py-3">
+                    <Film className="h-4 w-4 text-gold" />
+                    <p className="text-sm font-bold text-ink">Full ad — {scenesDone} scenes stitched</p>
+                  </div>
+                  <video src={stitchedUrl} controls playsInline className="w-full" />
+                </div>
+                <a href={stitchedUrl} download="full-ad-stitched.mp4"
+                  className="btn-fire flex w-full items-center justify-center gap-2 py-3">
+                  <Download className="h-4 w-4" /> Download complete ad ({scenesDone} scenes)
+                </a>
+              </motion.div>
+            )}
+            {stitchError && <p className="text-xs text-amber-300">Stitch: {stitchError}</p>}
+
           </motion.div>
         )}
       </div>
