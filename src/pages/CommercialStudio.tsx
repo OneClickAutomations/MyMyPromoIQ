@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, ImageIcon, Info, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, ImageIcon, Info, Layers, LinkIcon,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -28,6 +28,8 @@ import {
   getBrand,
   listVoices,
   generateVoiceover,
+  muxVideoAudio,
+  generateModelSheet,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
@@ -180,6 +182,69 @@ function BestResults({ title = 'For best results', tips }: { title?: string; tip
   )
 }
 
+// ── Turnaround model-sheet generator (Gemini) ──────────────────────────────────
+// Turns one reference photo into a 2x3 multi-angle sheet for consistency review.
+function ModelSheetGenerator({ imageUrl, subjectType, subjectHint }: {
+  imageUrl: string
+  subjectType: 'product' | 'character'
+  subjectHint?: string
+}) {
+  const [busy, setBusy] = useState(false)
+  const [sheet, setSheet] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+
+  async function go() {
+    if (!imageUrl || busy) return
+    setBusy(true); setErr(''); setSheet(null)
+    try {
+      const { sheetDataUrl } = await generateModelSheet({ imageUrl, subjectType, subjectHint })
+      setSheet(sheetDataUrl)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not generate the turnaround.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const label = subjectType === 'character' ? 'character' : 'product'
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-4">
+      <div className="flex items-start gap-3">
+        <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-fire-start/15">
+          <Layers className="h-4 w-4 text-fire-start" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-ink">Generate a 360° turnaround reference</p>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            AI reimagines your {label} from 6 angles on one sheet — a consistency reference to review before you generate.
+          </p>
+        </div>
+      </div>
+
+      <button onClick={go} disabled={!imageUrl || busy}
+        className="btn-ghost mt-3 flex w-full items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-40">
+        {busy
+          ? <><RefreshCw className="h-4 w-4 animate-spin" /> Rendering turnaround…</>
+          : <><Spark className="h-4 w-4" /> {sheet ? 'Regenerate turnaround' : 'Generate turnaround'}</>}
+      </button>
+
+      {err && <p className="mt-2 text-xs text-amber-300">{err}</p>}
+
+      {sheet && (
+        <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08]">
+          <img src={sheet} alt={`${label} turnaround model sheet`} className="w-full" />
+          <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] bg-void-900 px-3 py-2">
+            <span className="text-[11px] text-ink-faint">6-angle reference sheet</span>
+            <a href={sheet} download={`${label}-turnaround.png`} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-fire-start hover:text-fire-end">
+              <Download className="h-3.5 w-3.5" /> Download
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Step header ───────────────────────────────────────────────────────────────
 
 function StepHeader({
@@ -313,6 +378,9 @@ export default function CommercialStudio() {
   const [genError, setGenError]                 = useState('')
   const [voiceoverUrl, setVoiceoverUrl]         = useState<string | null>(null)
   const [voiceoverError, setVoiceoverError]     = useState('')
+  const [muxedUrl, setMuxedUrl]                 = useState<string | null>(null)
+  const [muxing, setMuxing]                     = useState(false)
+  const [muxError, setMuxError]                 = useState('')
 
   // ── Voiceover (ElevenLabs) state
   const [voices, setVoices]               = useState<ElevenVoice[]>([])
@@ -471,6 +539,20 @@ export default function CommercialStudio() {
     audio.play().then(() => setPreviewingVoiceId(v.voiceId)).catch(() => setPreviewingVoiceId(null))
   }
 
+  async function handleMux() {
+    if (!videoUrl || !voiceoverUrl || muxing) return
+    setMuxing(true)
+    setMuxError('')
+    try {
+      const { videoDataUrl } = await muxVideoAudio({ videoUrl, audioBase64: voiceoverUrl })
+      setMuxedUrl(videoDataUrl)
+    } catch (err) {
+      setMuxError(err instanceof Error ? err.message : 'Could not combine audio and video.')
+    } finally {
+      setMuxing(false)
+    }
+  }
+
   // ── Navigation helpers ────────────────────────────────────────────────────
 
   function goBack() {
@@ -587,6 +669,8 @@ export default function CommercialStudio() {
     setGenError('')
     setVoiceoverUrl(null)
     setVoiceoverError('')
+    setMuxedUrl(null)
+    setMuxError('')
 
     // Kick off the voiceover in parallel — it's independent of the video render,
     // so we don't make the user wait on it sequentially.
@@ -896,6 +980,11 @@ export default function CommercialStudio() {
 
         {step1Error && (
           <p className="rounded-xl border border-fire-start/20 bg-fire-start/5 px-4 py-3 text-sm text-fire-start">{step1Error}</p>
+        )}
+
+        {/* Optional: turnaround model sheet for consistency (needs an image). */}
+        {productImageUrl && (
+          <ModelSheetGenerator imageUrl={productImageUrl} subjectType="product" subjectHint={brief.product.productName || undefined} />
         )}
 
         <button onClick={handleProductNext} disabled={!canAdvanceStep1 || uploadingImage} className="btn-fire w-full disabled:opacity-50">
@@ -1591,24 +1680,55 @@ export default function CommercialStudio() {
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
                 </div>
                 <audio src={voiceoverUrl} controls className="mt-3 w-full" />
-                <p className="mt-2 text-[11px] text-ink-faint">
-                  The video renders silent — play this track alongside it, or download both. Auto-muxing into one file is coming next.
-                </p>
+                {!muxedUrl && (
+                  <p className="mt-2 text-[11px] text-ink-faint">
+                    The render is silent — combine it with this voiceover into one finished MP4 below.
+                  </p>
+                )}
               </div>
             )}
             {voiceoverError && (
               <p className="mt-3 text-xs text-amber-300">Voiceover: {voiceoverError}</p>
             )}
 
+            {/* Combined preview once muxed */}
+            {muxedUrl && (
+              <div className="mt-4 overflow-hidden rounded-2xl border border-gold/30 bg-void-900">
+                <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
+                  <Check className="h-4 w-4 text-emerald-400" />
+                  <p className="text-sm font-semibold text-ink">Final ad — video + voiceover</p>
+                </div>
+                <video src={muxedUrl} controls autoPlay playsInline className="aspect-[9/16] max-h-80 w-full object-contain" />
+              </div>
+            )}
+            {muxError && <p className="mt-3 text-xs text-amber-300">Combine: {muxError}</p>}
+
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <a href={videoUrl} download target="_blank" rel="noreferrer"
-                className="btn-fire flex items-center justify-center gap-2 py-3">
-                <Download className="h-4 w-4" /> Download video
-              </a>
-              {voiceoverUrl ? (
-                <a href={voiceoverUrl} download="voiceover.mp3"
+              {/* Primary action: the finished file with sound, or combine to make it. */}
+              {muxedUrl ? (
+                <a href={muxedUrl} download="ad-with-sound.mp4"
+                  className="btn-fire flex items-center justify-center gap-2 py-3">
+                  <Download className="h-4 w-4" /> Download ad with sound
+                </a>
+              ) : voiceoverUrl ? (
+                <button onClick={handleMux} disabled={muxing}
+                  className="btn-fire flex items-center justify-center gap-2 py-3 disabled:opacity-60">
+                  {muxing
+                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Combining…</>
+                    : <><Bolt className="h-4 w-4" /> Combine into one file with sound</>}
+                </button>
+              ) : (
+                <a href={videoUrl} download target="_blank" rel="noreferrer"
+                  className="btn-fire flex items-center justify-center gap-2 py-3">
+                  <Download className="h-4 w-4" /> Download video
+                </a>
+              )}
+
+              {/* Secondary: silent video download (when combined) or History. */}
+              {muxedUrl ? (
+                <a href={videoUrl} download target="_blank" rel="noreferrer"
                   className="btn-ghost flex items-center justify-center gap-2 py-3">
-                  <Download className="h-4 w-4" /> Download voiceover
+                  <Download className="h-4 w-4" /> Silent video
                 </a>
               ) : (
                 <Link to="/history" className="btn-ghost flex items-center justify-center gap-2 py-3">

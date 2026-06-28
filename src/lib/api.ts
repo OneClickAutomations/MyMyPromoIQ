@@ -235,6 +235,38 @@ export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioD
   return res.json()
 }
 
+/** Combine a silent video URL + voiceover audio into one MP4 with sound. */
+export async function muxVideoAudio(input: { videoUrl: string; audioBase64: string }): Promise<{ videoDataUrl: string; bytes: number }> {
+  const res = await fetch('/api/mux', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// ── Model sheet / turnaround (Gemini image) ─────────────────────────────────────
+
+export type ModelSheetInput = {
+  imageUrl?: string
+  imageBase64?: string
+  mimeType?: string
+  subjectType: 'product' | 'character'
+  subjectHint?: string
+}
+
+/** Turn one reference photo into a 2x3 multi-angle turnaround model sheet. */
+export async function generateModelSheet(input: ModelSheetInput): Promise<{ sheetDataUrl: string; subject: string; prompt: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 // ── Polling ────────────────────────────────────────────────────────────────────
 
 type SceneRow = {

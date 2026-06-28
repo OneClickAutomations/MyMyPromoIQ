@@ -14,6 +14,7 @@
     "@anthropic-ai/sdk": "^0.106.0",
     "@clerk/clerk-react": "^5.61.8",
     "@supabase/supabase-js": "^2.108.2",
+    "ffmpeg-static": "^5.2.0",
     "framer-motion": "^12.41.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
