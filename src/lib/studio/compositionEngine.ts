@@ -85,6 +85,10 @@ export function detectConflicts(brief: CreativeBrief): CompositionWarning[] {
 
 function describeCreator(attrs?: CreatorAttributes): string {
   if (!attrs) return 'a relatable on-camera presenter'
+  // Lead with identity — ethnicity and gender first and emphatically, so the
+  // render engine casts the right person. Identity drift (e.g. a specified
+  // African American woman rendering as white) is the #1 fidelity failure, so we
+  // state ethnicity up front and reinforce skin tone consistency.
   const parts: string[] = []
   if (attrs.ageRange) parts.push(attrs.ageRange)
   if (attrs.ethnicity) parts.push(attrs.ethnicity)
@@ -97,7 +101,11 @@ function describeCreator(attrs?: CreatorAttributes): string {
   if (attrs.wardrobe) look.push(`in ${attrs.wardrobe}`)
   const lookStr = look.length ? `, ${look.join(', ')}` : ''
   const perf = attrs.expression ? `, ${attrs.expression} expression` : ''
-  return `a ${who}${lookStr}${perf}`
+  // Reinforce that the cast identity and skin tone stay fixed across the clip.
+  const identity = attrs.ethnicity
+    ? `, distinctly ${attrs.ethnicity} with a consistent ${attrs.ethnicity.toLowerCase()} skin tone and facial features held identical throughout`
+    : ', with a consistent face and skin tone held identical throughout'
+  return `a ${who}${lookStr}${perf}${identity}, photorealistic natural skin texture with visible pores (not plastic or airbrushed)`
 }
 
 /**
@@ -118,17 +126,24 @@ export function assembleScenePrompt(brief: CreativeBrief, scene?: StoryboardScen
     ? 'the provided creator'
     : describeCreator(brief.creator.attributes)
 
+  // Product specifics (incl. any stated dimensions) help keep scale correct.
+  const productDesc = brief.product.description?.trim()
+  const productClause = productDesc ? `${product} (${productDesc})` : product
+
   const beats: string[] = []
   if (brief.scene.productAction === 'hero_display' || (scene?.shotType === 'hero_display')) {
     // Product-only hero shot — no presenter.
-    beats.push(`${product} shown as the hero of the frame, ${action}`)
+    beats.push(`${productClause} shown as the hero of the frame, ${action}`)
   } else {
-    beats.push(`${creator} ${action} ${product}`)
+    beats.push(`${creator} ${action} ${productClause}`)
     beats.push('eyes to camera, speaking naturally')
   }
+  // Scale discipline — products routinely render oversized; pin them to reality.
+  beats.push(`the product rendered at correct real-world scale and proportion relative to the hands and body, held naturally and comfortably, not oversized`)
   beats.push(`set in ${environment}`)
   beats.push(lighting)
   beats.push(`camera: ${camera}`)
+  beats.push('anatomically correct hands with five fingers, stable consistent face, no morphing or warping')
   beats.push('vertical 9:16, social-native, photoreal')
 
   return beats.join('. ') + '.'
@@ -138,7 +153,12 @@ function buildNegativePrompt(brief: CreativeBrief): string {
   const preset = STYLE_PRESETS[brief.style.commercialStyle]
   const cues = new Set<string>([
     'text overlays', 'watermark', 'logo', 'distorted hands', 'extra fingers',
-    'warped product label', 'blurry', 'low resolution',
+    'missing fingers', 'warped product label', 'blurry', 'low resolution',
+    // Fidelity guards — identity drift, bad scale, anatomy, plastic skin.
+    'oversized product', 'giant product', 'product wrong scale', 'disproportionate product',
+    'morphing', 'melting', 'warping', 'deformed body', 'deformed face',
+    'changing face', 'inconsistent identity', 'wrong ethnicity', 'skin tone shift',
+    'plastic skin', 'waxy skin', 'airbrushed skin', 'uncanny',
   ])
   for (const c of preset?.negativeCues ?? []) cues.add(c)
   return Array.from(cues).join(', ')

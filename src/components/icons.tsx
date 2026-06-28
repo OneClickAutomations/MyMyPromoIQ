@@ -253,6 +253,12 @@ export const Building = (p: I) => (
     <path d="M9 3v18M15 3v18M3 9h6M3 15h6M15 9h6M15 15h6" />
   </svg>
 )
+export const Info = (p: I) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 16v-4M12 8h.01" />
+  </svg>
+)
 export const Compass = (p: I) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="10" />

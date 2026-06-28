@@ -24,6 +24,9 @@ export type GenerateInput = {
   productDescription: string
   style: string
   quality: string
+  /** Composition Engine's compiled prompt — carries cast identity + scale. */
+  composedPrompt?: string
+  negativePrompt?: string
   brandVoice?: string
   brandTaglines?: string[]
   brandCta?: string
@@ -185,6 +188,45 @@ export async function uploadDirectToStorage(
 
 export async function startGeneration(input: GenerateInput): Promise<GenerateResponse> {
   const res = await fetch('/api/generate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// ── Voiceover (ElevenLabs) ──────────────────────────────────────────────────────
+
+export type ElevenVoice = {
+  voiceId: string
+  name: string
+  category: string
+  previewUrl?: string
+  gender?: string
+  accent?: string
+  description?: string
+  useCase?: string
+}
+
+export async function listVoices(): Promise<{ voices: ElevenVoice[] }> {
+  const res = await fetch('/api/voices')
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export type VoiceoverInput = {
+  text: string
+  voiceId: string
+  modelId?: string
+  stability?: number
+  similarityBoost?: number
+  style?: number
+  speed?: number
+}
+
+export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioDataUrl: string; bytes: number }> {
+  const res = await fetch('/api/voiceover', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),

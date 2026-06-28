@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
-  ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, ImageIcon, Info, LinkIcon,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -26,11 +26,14 @@ import {
   listCreators,
   listProducts,
   getBrand,
+  listVoices,
+  generateVoiceover,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
   type StoredBrand,
+  type ElevenVoice,
 } from '../lib/api'
 import {
   createEmptyBrief,
@@ -148,6 +151,32 @@ function SkipButton({ onClick }: { onClick: () => void }) {
     >
       Skip — use AI defaults
     </button>
+  )
+}
+
+// ── "For Best Results" guidance callout — collapsible, dismissible per step ─────
+function BestResults({ title = 'For best results', tips }: { title?: string; tips: string[] }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div className="rounded-2xl border border-gold/20 bg-gold/[0.05] p-4">
+      <button type="button" onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2.5 text-left">
+        <span className="grid h-6 w-6 flex-shrink-0 place-items-center rounded-full bg-gold/15">
+          <Info className="h-3.5 w-3.5 text-gold" />
+        </span>
+        <span className="text-sm font-bold text-ink">{title}</span>
+        <ChevronRight className={`ml-auto h-4 w-4 text-ink-faint transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-1.5 pl-1">
+          {tips.map((t, i) => (
+            <li key={i} className="flex gap-2 text-xs leading-relaxed text-ink-muted">
+              <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-gold/60" />
+              {t}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -282,6 +311,15 @@ export default function CommercialStudio() {
   const [directorNote, setDirectorNote]         = useState('')
   const [videoUrl, setVideoUrl]                 = useState<string | null>(null)
   const [genError, setGenError]                 = useState('')
+  const [voiceoverUrl, setVoiceoverUrl]         = useState<string | null>(null)
+  const [voiceoverError, setVoiceoverError]     = useState('')
+
+  // ── Voiceover (ElevenLabs) state
+  const [voices, setVoices]               = useState<ElevenVoice[]>([])
+  const [voicesLoading, setVoicesLoading] = useState(false)
+  const [voicesError, setVoicesError]     = useState('')
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
   // ── Creative Studio library (loaded once on mount)
   const [savedCreators, setSavedCreators] = useState<StoredCreator[]>([])
@@ -398,6 +436,41 @@ export default function CommercialStudio() {
     })
   }
 
+  // ── Voiceover helpers (ElevenLabs) ─────────────────────────────────────────
+  const loadVoices = useCallback(async () => {
+    if (voices.length || voicesLoading) return
+    setVoicesLoading(true)
+    setVoicesError('')
+    try {
+      const { voices: v } = await listVoices()
+      setVoices(v)
+    } catch (err) {
+      setVoicesError(err instanceof Error ? err.message : 'Could not load voices.')
+    } finally {
+      setVoicesLoading(false)
+    }
+  }, [voices.length, voicesLoading])
+
+  // Lazy-load voices the first time the user reaches the Voice step.
+  useEffect(() => {
+    if (stepNum === 8) loadVoices()
+  }, [stepNum, loadVoices])
+
+  function previewVoice(v: ElevenVoice) {
+    if (!v.previewUrl) return
+    // Toggle off if the same preview is playing.
+    if (previewingVoiceId === v.voiceId && previewAudioRef.current) {
+      previewAudioRef.current.pause()
+      setPreviewingVoiceId(null)
+      return
+    }
+    previewAudioRef.current?.pause()
+    const audio = new Audio(v.previewUrl)
+    previewAudioRef.current = audio
+    audio.onended = () => setPreviewingVoiceId(null)
+    audio.play().then(() => setPreviewingVoiceId(v.voiceId)).catch(() => setPreviewingVoiceId(null))
+  }
+
   // ── Navigation helpers ────────────────────────────────────────────────────
 
   function goBack() {
@@ -512,6 +585,17 @@ export default function CommercialStudio() {
     setVisibleLogCount(0)
     setVideoUrl(null)
     setGenError('')
+    setVoiceoverUrl(null)
+    setVoiceoverError('')
+
+    // Kick off the voiceover in parallel — it's independent of the video render,
+    // so we don't make the user wait on it sequentially.
+    const scriptText = brief.script.editedText || brief.script.generatedText || ''
+    if (scriptText.trim() && brief.voice.voiceId) {
+      generateVoiceover({ text: scriptText, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+        .then(r => setVoiceoverUrl(r.audioDataUrl))
+        .catch(e => setVoiceoverError(e instanceof Error ? e.message : 'Voiceover failed.'))
+    }
 
     try {
       // 1. Run director commentary
@@ -533,12 +617,18 @@ export default function CommercialStudio() {
       // 2. Transition to rendering stage
       setDirectorPhase('generating')
 
-      // 3. Submit to Higgsfield
+      // 3. Submit to Higgsfield. Pass the Composition Engine's compiled prompt so
+      //    the cast identity (ethnicity, skin tone) and product scale actually
+      //    reach the render engine instead of being re-derived from scratch.
+      const composed = composeHiggsfieldPrompt(brief)
+      const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
       const { requestId, directorPrompt } = await startGeneration({
         productImageUrl,
         productDescription: brief.product.description ?? descInput,
         style: brief.style.commercialStyle || 'testimonial',
         quality: 'turbo',
+        composedPrompt,
+        negativePrompt: composed.negativePrompt,
         brandVoice: savedBrand?.brand_voice ?? undefined,
         brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
         brandCta: savedBrand?.cta_preferences ?? undefined,
@@ -626,6 +716,14 @@ export default function CommercialStudio() {
     return (
       <div className="space-y-5">
         <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, or paste an image URL." />
+
+        <BestResults tips={[
+          'Use a clear, sharp photo on a plain, uncluttered background with even lighting.',
+          'Shoot the product straight-on at a natural angle — avoid extreme perspective.',
+          'State real dimensions in the description (e.g. “6-inch tall, fits in one hand”) so the AI keeps the product at correct scale and doesn’t render it oversized.',
+          'Mention the material/finish (matte, glossy, metal) and the exact label text to keep packaging faithful.',
+          'Higher-resolution images hold detail better through video generation.',
+        ]} />
 
         {/* Saved products quick-pick */}
         {savedProducts.length > 0 && (
@@ -813,6 +911,13 @@ export default function CommercialStudio() {
     return (
       <div className="space-y-6">
         <StepHeader title="Cast your creator" desc="Tell us who should star in your ad — or let AI choose." onBack={goBack} />
+
+        <BestResults title="For best results — casting fidelity" tips={[
+          'Be specific and explicit about ethnicity and skin tone — e.g. “African American woman, deep brown skin.” Vague casting is the #1 cause of the AI rendering the wrong person.',
+          'Set age range, hair, and wardrobe — the more concrete the description, the more consistent the result.',
+          'Energy level and expression shape delivery: pick high energy for hooks, calm/warm for testimonials.',
+          'Save a creator you like in the Creator Studio so you can reuse the exact same person across campaigns.',
+        ]} />
 
         <div className={`grid gap-3 ${savedCreators.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
           {([
@@ -1136,14 +1241,74 @@ export default function CommercialStudio() {
         </div>
 
         {brief.voice.mode === 'ai_generated' && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Voice gender</p>
-              <ChipGrid options={[{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }, { id: 'neutral', label: 'Neutral' }]} value={brief.voice.gender ?? ''} onChange={v => patch({ voice: { ...brief.voice, gender: v as string } })} />
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="mb-2 text-sm font-semibold text-ink">Voice gender</p>
+                <ChipGrid options={[{ id: 'female', label: 'Female' }, { id: 'male', label: 'Male' }, { id: 'neutral', label: 'Neutral' }]} value={brief.voice.gender ?? ''} onChange={v => patch({ voice: { ...brief.voice, gender: v as string } })} />
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-semibold text-ink">Tone</p>
+                <ChipGrid options={[{ id: 'warm', label: 'Warm' }, { id: 'confident', label: 'Confident' }, { id: 'energetic', label: 'Energetic' }, { id: 'calm', label: 'Calm' }]} value={brief.voice.tone ?? ''} onChange={v => patch({ voice: { ...brief.voice, tone: v as string } })} />
+              </div>
             </div>
+
+            {/* ElevenLabs voice library */}
             <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Tone</p>
-              <ChipGrid options={[{ id: 'warm', label: 'Warm' }, { id: 'confident', label: 'Confident' }, { id: 'energetic', label: 'Energetic' }, { id: 'calm', label: 'Calm' }]} value={brief.voice.tone ?? ''} onChange={v => patch({ voice: { ...brief.voice, tone: v as string } })} />
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-semibold text-ink">Premium voice</p>
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
+              </div>
+
+              {voicesLoading && <p className="text-sm text-ink-muted">Loading voices…</p>}
+              {voicesError && (
+                <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-xs text-ink-muted">
+                  {voicesError}
+                </div>
+              )}
+
+              {!voicesLoading && !voicesError && voices.length > 0 && (() => {
+                const g = (brief.voice.gender ?? '').toLowerCase()
+                const filtered = g && g !== 'neutral'
+                  ? voices.filter(v => !v.gender || v.gender.toLowerCase() === g)
+                  : voices
+                const list = (filtered.length ? filtered : voices).slice(0, 24)
+                return (
+                  <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                    {list.map(v => {
+                      const selected = brief.voice.voiceId === v.voiceId
+                      return (
+                        <div key={v.voiceId}
+                          className={`flex items-center gap-2.5 rounded-xl border p-3 transition-all ${
+                            selected ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
+                          }`}>
+                          <button
+                            type="button"
+                            onClick={() => previewVoice(v)}
+                            disabled={!v.previewUrl}
+                            className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-void-700 text-fire-start hover:bg-void-600 disabled:opacity-30"
+                            aria-label={`Preview ${v.name}`}
+                          >
+                            {previewingVoiceId === v.voiceId ? <span className="h-2.5 w-2.5 rounded-sm bg-fire-start" /> : <PlayIcon className="h-3.5 w-3.5" />}
+                          </button>
+                          <button type="button" onClick={() => patch({ voice: { ...brief.voice, voiceId: v.voiceId } })} className="min-w-0 flex-1 text-left">
+                            <p className="truncate text-sm font-semibold text-ink">{v.name}</p>
+                            <p className="truncate text-[11px] text-ink-faint capitalize">
+                              {[v.gender, v.accent, v.useCase].filter(Boolean).join(' · ') || v.category}
+                            </p>
+                          </button>
+                          {selected && <Check className="h-4 w-4 flex-shrink-0 text-fire-start" />}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
+              {!voicesLoading && !voicesError && voices.length === 0 && (
+                <p className="text-xs text-ink-faint">No voices available. Set ELEVENLABS_API_KEY to enable premium voiceovers.</p>
+              )}
+              <p className="mt-2 text-[11px] text-ink-faint">The voiceover is generated from your script in the next steps and plays with your finished ad.</p>
             </div>
           </div>
         )}
@@ -1418,14 +1583,38 @@ export default function CommercialStudio() {
               )}
             </div>
 
+            {/* Voiceover (ElevenLabs) — the render itself is silent; play this with it. */}
+            {voiceoverUrl && (
+              <div className="mt-4 rounded-2xl border border-white/[0.08] bg-void-900 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink">Voiceover</p>
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
+                </div>
+                <audio src={voiceoverUrl} controls className="mt-3 w-full" />
+                <p className="mt-2 text-[11px] text-ink-faint">
+                  The video renders silent — play this track alongside it, or download both. Auto-muxing into one file is coming next.
+                </p>
+              </div>
+            )}
+            {voiceoverError && (
+              <p className="mt-3 text-xs text-amber-300">Voiceover: {voiceoverError}</p>
+            )}
+
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <a href={videoUrl} download target="_blank" rel="noreferrer"
                 className="btn-fire flex items-center justify-center gap-2 py-3">
                 <Download className="h-4 w-4" /> Download video
               </a>
-              <Link to="/history" className="btn-ghost flex items-center justify-center gap-2 py-3">
-                <ImageIcon className="h-4 w-4" /> View in History
-              </Link>
+              {voiceoverUrl ? (
+                <a href={voiceoverUrl} download="voiceover.mp3"
+                  className="btn-ghost flex items-center justify-center gap-2 py-3">
+                  <Download className="h-4 w-4" /> Download voiceover
+                </a>
+              ) : (
+                <Link to="/history" className="btn-ghost flex items-center justify-center gap-2 py-3">
+                  <ImageIcon className="h-4 w-4" /> View in History
+                </Link>
+              )}
             </div>
           </motion.div>
         )}

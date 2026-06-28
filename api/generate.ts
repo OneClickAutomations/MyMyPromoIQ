@@ -89,6 +89,7 @@ async function writeDirectorPrompt(
   productDescription: string,
   styleId: StyleId,
   brand?: BrandContext,
+  composedPrompt?: string,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -101,19 +102,27 @@ async function writeDirectorPrompt(
     ? `\nBrand context (honour this voice and weave the CTA naturally into the scene if it fits):\n${brandLines.join('\n')}\n`
     : ''
 
-  const system = `You are an expert UGC ad director writing prompts for an image-to-video model. You are given a product and a creative style. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
+  // When the Composition Engine supplied a compiled prompt, it is AUTHORITATIVE on
+  // the cast identity (ethnicity, skin tone, gender, age) and product scale. Claude
+  // expands it into motion language but must NOT alter those facts — identity drift
+  // is the failure we're fixing.
+  const identitySection = composedPrompt
+    ? `\nAUTHORITATIVE SCENE (preserve every casting detail VERBATIM — do not change the person's ethnicity, skin tone, gender, age, or the product's real-world scale; you may only add camera movement and timing):\n${composedPrompt}\n`
+    : ''
+
+  const system = `You are an expert UGC ad director writing prompts for an image-to-video model. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
 
 Style direction: ${style.brief}
-${brandSection}
+${brandSection}${identitySection}
 Rules:
 - Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation.
 - 2-4 sentences. Describe camera movement, subject action, lighting, and mood.
-- Keep it concrete and physical (what moves, how the camera moves). Avoid brand claims and text overlays.
+- Keep it concrete and physical (what moves, how the camera moves). Avoid brand claims and text overlays.${composedPrompt ? '\n- Preserve the cast person\'s ethnicity and skin tone exactly as stated. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}
 - Vertical 9:16, social-native, authentic — not a glossy TV commercial.`
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
+    max_tokens: 320,
     system,
     messages: [
       {
@@ -133,18 +142,30 @@ Rules:
   return text
 }
 
-async function submitVideoJob(prompt: string, imageUrl: string, quality: Quality) {
+async function submitVideoJob(
+  prompt: string,
+  imageUrl: string,
+  quality: Quality,
+  opts?: { negativePrompt?: string; enhance?: boolean },
+) {
+  // Fold negatives inline as an "Avoid:" clause rather than a separate param —
+  // the dop endpoint only documents prompt/input_images/enhance_prompt, so an
+  // unknown field could 400 a request that otherwise works. Cap length to stay sane.
+  const avoid = opts?.negativePrompt?.trim()
+  const finalPrompt = avoid ? `${prompt} Avoid: ${avoid.slice(0, 400)}.` : prompt
+
+  const params: Record<string, unknown> = {
+    prompt: finalPrompt,
+    input_images: [{ type: 'image_url', image_url: imageUrl }],
+    // When we supply a strong composed prompt we disable enhancement so Higgsfield
+    // doesn't rewrite the cast identity away. Defaults to enhanced otherwise.
+    enhance_prompt: opts?.enhance ?? true,
+  }
+
   const res = await fetch(`${HF_BASE}/v1/image2video/dop`, {
     method: 'POST',
     headers: { Authorization: higgsfieldAuth(), 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: QUALITY_MODEL[quality],
-      params: {
-        prompt,
-        input_images: [{ type: 'image_url', image_url: imageUrl }],
-        enhance_prompt: true,
-      },
-    }),
+    body: JSON.stringify({ model: QUALITY_MODEL[quality], params }),
   })
 
   if (!res.ok) {
@@ -188,6 +209,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productDescription,
       style,
       quality = 'turbo',
+      composedPrompt,
+      negativePrompt,
       brandVoice,
       brandTaglines,
       brandCta,
@@ -214,8 +237,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cta: brandCta || undefined,
     }
 
-    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand)
-    const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality)
+    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand, composedPrompt)
+    const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality, {
+      negativePrompt,
+      // Disable Higgsfield's own prompt rewrite when we already supplied a strong,
+      // identity-locked composed prompt — keeps ethnicity/scale from drifting.
+      enhance: composedPrompt ? false : true,
+    })
     return res.status(200).json({ requestId, status, directorPrompt })
   } catch (err) {
     console.error('[/api/generate]', err)
