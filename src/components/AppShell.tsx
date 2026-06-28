@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { UserButton, useUser, useClerk } from '@clerk/clerk-react'
 import { brand } from '../copy'
-import { Bolt, Grid, LogOut, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
+import { Bolt, Clock, Grid, LogOut, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
 
 const NAV = [
   { label: 'Campaigns', href: '/dashboard', icon: Grid },
   { label: 'Studio',    href: '/studio',    icon: Wand },
+  { label: 'History',   href: '/history',   icon: Clock },
   { label: 'Queue',     href: '/queue',     icon: Film,     soon: true },
   { label: 'Settings',  href: '/settings',  icon: Settings, soon: true },
 ]
