@@ -187,3 +187,67 @@ drop trigger if exists render_jobs_updated_at on render_jobs;
 create trigger render_jobs_updated_at
   before update on render_jobs
   for each row execute function set_updated_at();
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Creative Studio — reusable asset library (product profiles, brand kits).
+-- creators table already exists above; product_profiles and brand_kits are new.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- product_profiles — standalone product entities (reused across campaigns).
+create table if not exists product_profiles (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            text not null,
+  name               text not null default 'Untitled Product',
+  brand              text,
+  category           text,
+  primary_image_url  text,
+  images             jsonb not null default '[]'::jsonb,
+  description        text,
+  features           jsonb not null default '[]'::jsonb,
+  benefits           jsonb not null default '[]'::jsonb,
+  target_audience    text,
+  logo_url           text,
+  colors             jsonb not null default '[]'::jsonb,
+  default_prompt     text,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+
+-- brand_kits — brand identity, voice, and guidelines.
+create table if not exists brand_kits (
+  id                 uuid primary key default gen_random_uuid(),
+  user_id            text not null,
+  name               text not null default 'My Brand',
+  logo_url           text,
+  primary_colors     jsonb not null default '[]'::jsonb,
+  secondary_colors   jsonb not null default '[]'::jsonb,
+  brand_voice        text,
+  taglines           jsonb not null default '[]'::jsonb,
+  target_audience    text,
+  industry           text,
+  brand_guidelines   text,
+  cta_preferences    text,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+
+create index if not exists product_profiles_user_idx on product_profiles(user_id);
+create index if not exists brand_kits_user_idx on brand_kits(user_id);
+
+alter table product_profiles enable row level security;
+alter table brand_kits       enable row level security;
+
+drop policy if exists "own product_profiles" on product_profiles;
+create policy "own product_profiles" on product_profiles for all using ((auth.jwt() ->> 'sub') = user_id);
+drop policy if exists "own brand_kits" on brand_kits;
+create policy "own brand_kits" on brand_kits for all using ((auth.jwt() ->> 'sub') = user_id);
+
+drop trigger if exists product_profiles_updated_at on product_profiles;
+create trigger product_profiles_updated_at
+  before update on product_profiles
+  for each row execute function set_updated_at();
+
+drop trigger if exists brand_kits_updated_at on brand_kits;
+create trigger brand_kits_updated_at
+  before update on brand_kits
+  for each row execute function set_updated_at();

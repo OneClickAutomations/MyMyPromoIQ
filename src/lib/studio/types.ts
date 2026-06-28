@@ -76,7 +76,7 @@ export interface CreativeBrief {
   }
 
   creator: {
-    mode: 'generated' | 'uploaded_seed'
+    mode: 'generated' | 'uploaded_seed' | 'saved'
     seedImages?: MediaAsset[]
     attributes?: CreatorAttributes
     savedCreatorId?: string

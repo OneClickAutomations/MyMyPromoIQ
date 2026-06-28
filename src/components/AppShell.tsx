@@ -2,14 +2,34 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { UserButton, useUser, useClerk } from '@clerk/clerk-react'
 import { brand } from '../copy'
-import { Bolt, Clock, Grid, LogOut, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
+import { Bolt, Clock, Grid, LogOut, Menu, Moon, Package, Palette, Settings, Sun, Users, Wand, Film, X } from './icons'
 
-const NAV = [
-  { label: 'Campaigns', href: '/dashboard',  icon: Grid },
-  { label: 'Studio',    href: '/studio/new', icon: Wand },
-  { label: 'History',   href: '/history',    icon: Clock },
-  { label: 'Queue',     href: '/queue',      icon: Film,     soon: true },
-  { label: 'Settings',  href: '/settings',   icon: Settings, soon: true },
+type NavItem = { label: string; href: string; icon: React.FC<React.SVGProps<SVGSVGElement>>; soon?: boolean }
+type NavSection = { sectionLabel?: string; items: NavItem[] }
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    items: [
+      { label: 'Campaigns',    href: '/dashboard',  icon: Grid },
+      { label: 'New Campaign', href: '/studio/new', icon: Wand },
+    ],
+  },
+  {
+    sectionLabel: 'Creative Studio',
+    items: [
+      { label: 'Creators', href: '/creators', icon: Users },
+      { label: 'Products', href: '/products', icon: Package },
+      { label: 'Brand Kit', href: '/brand',   icon: Palette },
+    ],
+  },
+  {
+    sectionLabel: 'Library',
+    items: [
+      { label: 'History',  href: '/history',  icon: Clock },
+      { label: 'Queue',    href: '/queue',     icon: Film,     soon: true },
+      { label: 'Settings', href: '/settings',  icon: Settings, soon: true },
+    ],
+  },
 ]
 
 function usePersistentTheme() {
@@ -83,46 +103,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        {/* Section label */}
-        <div className="relative px-5 pb-1 pt-3">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint/60">Navigation</span>
-        </div>
-
         {/* Nav */}
-        <nav className="relative flex-1 space-y-0.5 px-3 pb-4" aria-label="Main navigation">
-          {NAV.map(({ label, href, icon: Icon, soon }) => {
-            const active = pathname === href ||
-              (href !== '/dashboard' && href !== '/studio/new' && pathname.startsWith(href)) ||
-              (href === '/studio/new' && (pathname === '/studio/new' || pathname === '/studio'))
-            return (
-              <div key={label}>
-                {soon ? (
-                  <div className="flex items-center gap-3 rounded-xl px-3 py-[11px] text-ink-faint/50 cursor-default select-none">
-                    <Icon className="h-[18px] w-[18px] flex-shrink-0" />
-                    <span className="text-sm font-medium">{label}</span>
-                    <span className="ml-auto rounded-full bg-void-700/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-ink-faint/50">
-                      soon
-                    </span>
-                  </div>
-                ) : (
-                  <Link
-                    to={href}
-                    className={`relative flex items-center gap-3 rounded-xl px-3 py-[11px] transition-all duration-150 ${
-                      active
-                        ? 'bg-fire-start/[0.10] text-fire-start'
-                        : 'text-ink-muted hover:bg-white/[0.04] hover:text-ink'
-                    }`}
-                  >
-                    {active && (
-                      <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-fire-start shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
-                    )}
-                    <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-colors ${active ? 'text-fire-start' : ''}`} />
-                    <span className="text-sm font-semibold">{label}</span>
-                  </Link>
-                )}
+        <nav className="relative flex-1 pb-4 overflow-y-auto" aria-label="Main navigation">
+          {NAV_SECTIONS.map((section, si) => (
+            <div key={si} className={si > 0 ? 'mt-3' : ''}>
+              {section.sectionLabel && (
+                <div className="px-5 pb-1 pt-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint/40">{section.sectionLabel}</span>
+                </div>
+              )}
+              <div className="space-y-0.5 px-3">
+                {section.items.map(({ label, href, icon: Icon, soon }) => {
+                  const active = pathname === href ||
+                    (href !== '/dashboard' && href !== '/studio/new' && pathname.startsWith(href)) ||
+                    (href === '/studio/new' && (pathname === '/studio/new' || pathname === '/studio'))
+                  return (
+                    <div key={label}>
+                      {soon ? (
+                        <div className="flex items-center gap-3 rounded-xl px-3 py-[11px] text-ink-faint/50 cursor-default select-none">
+                          <Icon className="h-[18px] w-[18px] flex-shrink-0" />
+                          <span className="text-sm font-medium">{label}</span>
+                          <span className="ml-auto rounded-full bg-void-700/60 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-ink-faint/50">
+                            soon
+                          </span>
+                        </div>
+                      ) : (
+                        <Link
+                          to={href}
+                          className={`relative flex items-center gap-3 rounded-xl px-3 py-[11px] transition-all duration-150 ${
+                            active
+                              ? 'bg-fire-start/[0.10] text-fire-start'
+                              : 'text-ink-muted hover:bg-white/[0.04] hover:text-ink'
+                          }`}
+                        >
+                          {active && (
+                            <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-fire-start shadow-[0_0_8px_rgba(255,107,53,0.6)]" />
+                          )}
+                          <Icon className={`h-[18px] w-[18px] flex-shrink-0 transition-colors ${active ? 'text-fire-start' : ''}`} />
+                          <span className="text-sm font-semibold">{label}</span>
+                        </Link>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-            )
-          })}
+            </div>
+          ))}
         </nav>
 
         {/* Bottom */}

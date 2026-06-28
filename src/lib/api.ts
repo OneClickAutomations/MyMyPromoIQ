@@ -279,6 +279,87 @@ export function getBrief(
   return store({ action: 'getBrief', userId, briefId })
 }
 
+// ── Creative Studio asset types ───────────────────────────────────────────────
+
+export type StoredCreator = {
+  id: string
+  user_id: string
+  name: string
+  mode: 'generated' | 'uploaded_seed'
+  attributes: Record<string, unknown>
+  seed_images: { url: string; label?: string }[]
+  created_at: string
+  updated_at: string
+}
+
+export type StoredProduct = {
+  id: string
+  user_id: string
+  name: string
+  brand: string | null
+  category: string | null
+  primary_image_url: string | null
+  images: { url: string; label?: string }[]
+  description: string | null
+  features: string[]
+  benefits: string[]
+  target_audience: string | null
+  logo_url: string | null
+  colors: string[]
+  default_prompt: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type StoredBrand = {
+  id: string
+  user_id: string
+  name: string
+  logo_url: string | null
+  primary_colors: string[]
+  secondary_colors: string[]
+  brand_voice: string | null
+  taglines: string[]
+  target_audience: string | null
+  industry: string | null
+  brand_guidelines: string | null
+  cta_preferences: string | null
+  created_at: string
+  updated_at: string
+}
+
+export function saveCreator(userId: string, creator: Partial<StoredCreator> & { id?: string }): Promise<{ id: string }> {
+  return store({ action: 'saveCreator', userId, creator })
+}
+
+export function listCreators(userId: string): Promise<{ creators: StoredCreator[] }> {
+  return store({ action: 'listCreators', userId })
+}
+
+export function deleteCreator(userId: string, creatorId: string): Promise<{ ok: boolean }> {
+  return store({ action: 'deleteCreator', userId, creatorId })
+}
+
+export function saveProduct(userId: string, product: Partial<StoredProduct> & { id?: string }): Promise<{ id: string }> {
+  return store({ action: 'saveProduct', userId, product })
+}
+
+export function listProducts(userId: string): Promise<{ products: StoredProduct[] }> {
+  return store({ action: 'listProducts', userId })
+}
+
+export function deleteProduct(userId: string, productId: string): Promise<{ ok: boolean }> {
+  return store({ action: 'deleteProduct', userId, productId })
+}
+
+export function saveBrand(userId: string, brand: Partial<StoredBrand> & { id?: string }): Promise<{ id: string }> {
+  return store({ action: 'saveBrand', userId, brand })
+}
+
+export function getBrand(userId: string): Promise<{ brand: StoredBrand | null }> {
+  return store({ action: 'getBrand', userId })
+}
+
 // ── Director feed ─────────────────────────────────────────────────────────────
 
 export async function runDirector(params: {

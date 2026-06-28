@@ -154,6 +154,106 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ briefs: data ?? [] })
       }
 
+      // ── Creator CRUD ──────────────────────────────────────────────────────────
+
+      case 'saveCreator': {
+        const c = (body.creator ?? {}) as Record<string, any>
+        const row = {
+          user_id: userId,
+          name: c.name ?? 'Untitled Creator',
+          mode: c.mode ?? 'generated',
+          attributes: c.attributes ?? {},
+          seed_images: c.seed_images ?? [],
+          ...(c.id ? { id: c.id } : {}),
+        }
+        const { data, error } = await supabase.from('creators').upsert(row).select('id').single()
+        if (error) throw new Error(error.message)
+        return res.status(200).json({ id: data.id })
+      }
+
+      case 'listCreators': {
+        const { data } = await supabase
+          .from('creators').select('*').eq('user_id', userId)
+          .order('created_at', { ascending: false }).limit(50)
+        return res.status(200).json({ creators: data ?? [] })
+      }
+
+      case 'deleteCreator': {
+        const { creatorId } = body
+        if (!creatorId) return res.status(400).json({ error: 'creatorId required.' })
+        await supabase.from('creators').delete().eq('id', creatorId).eq('user_id', userId)
+        return res.status(200).json({ ok: true })
+      }
+
+      // ── Product CRUD ──────────────────────────────────────────────────────────
+
+      case 'saveProduct': {
+        const p = (body.product ?? {}) as Record<string, any>
+        const row = {
+          user_id: userId,
+          name: p.name ?? 'Untitled Product',
+          brand: p.brand ?? null,
+          category: p.category ?? null,
+          primary_image_url: p.primary_image_url ?? null,
+          images: p.images ?? [],
+          description: p.description ?? null,
+          features: p.features ?? [],
+          benefits: p.benefits ?? [],
+          target_audience: p.target_audience ?? null,
+          logo_url: p.logo_url ?? null,
+          colors: p.colors ?? [],
+          default_prompt: p.default_prompt ?? null,
+          ...(p.id ? { id: p.id } : {}),
+        }
+        const { data, error } = await supabase.from('product_profiles').upsert(row).select('id').single()
+        if (error) throw new Error(error.message)
+        return res.status(200).json({ id: data.id })
+      }
+
+      case 'listProducts': {
+        const { data } = await supabase
+          .from('product_profiles').select('*').eq('user_id', userId)
+          .order('created_at', { ascending: false }).limit(50)
+        return res.status(200).json({ products: data ?? [] })
+      }
+
+      case 'deleteProduct': {
+        const { productId } = body
+        if (!productId) return res.status(400).json({ error: 'productId required.' })
+        await supabase.from('product_profiles').delete().eq('id', productId).eq('user_id', userId)
+        return res.status(200).json({ ok: true })
+      }
+
+      // ── Brand Kit CRUD ────────────────────────────────────────────────────────
+
+      case 'saveBrand': {
+        const b = (body.brand ?? {}) as Record<string, any>
+        const row = {
+          user_id: userId,
+          name: b.name ?? 'My Brand',
+          logo_url: b.logo_url ?? null,
+          primary_colors: b.primary_colors ?? [],
+          secondary_colors: b.secondary_colors ?? [],
+          brand_voice: b.brand_voice ?? null,
+          taglines: b.taglines ?? [],
+          target_audience: b.target_audience ?? null,
+          industry: b.industry ?? null,
+          brand_guidelines: b.brand_guidelines ?? null,
+          cta_preferences: b.cta_preferences ?? null,
+          ...(b.id ? { id: b.id } : {}),
+        }
+        const { data, error } = await supabase.from('brand_kits').upsert(row).select('id').single()
+        if (error) throw new Error(error.message)
+        return res.status(200).json({ id: data.id })
+      }
+
+      case 'getBrand': {
+        const { data } = await supabase
+          .from('brand_kits').select('*').eq('user_id', userId)
+          .order('created_at', { ascending: false }).limit(1)
+        return res.status(200).json({ brand: (data ?? [])[0] ?? null })
+      }
+
       default:
         return res.status(400).json({ error: `Unknown action: ${action}` })
     }

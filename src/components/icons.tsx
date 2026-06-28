@@ -228,3 +228,28 @@ export const LogOut = (p: I) => (
     <line x1="21" y1="12" x2="9" y2="12" />
   </svg>
 )
+export const Package = (p: I) => (
+  <svg {...base(p)}>
+    <path d="m7.5 4.27 9 5.15M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <path d="m3.3 7 8.7 5 8.7-5M12 22V12" />
+  </svg>
+)
+export const Palette = (p: I) => (
+  <svg {...base(p)}>
+    <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4 10 9c0 3.314-2.686 6-6 6h-1.5a2 2 0 0 0-1.5 3.331A2 2 0 0 1 12 22z" />
+    <circle cx="8.5" cy="10.5" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="7" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="15.5" cy="10.5" r="1.5" fill="currentColor" stroke="none" />
+  </svg>
+)
+export const Star = (p: I) => (
+  <svg {...base(p)}>
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+)
+export const Building = (p: I) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18M15 3v18M3 9h6M3 15h6M15 9h6M15 15h6" />
+  </svg>
+)

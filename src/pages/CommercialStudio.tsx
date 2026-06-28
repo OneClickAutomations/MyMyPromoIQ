@@ -5,7 +5,7 @@
  * 11 steps: Product → Creator → Scene → Style → Camera → Environment →
  *           Lighting → Voice → Script → Storyboard → Director (generation)
  */
-import { useState, useRef, useCallback, useTransition } from 'react'
+import { useState, useRef, useCallback, useTransition, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -23,8 +23,12 @@ import {
   dataUrlToBlob,
   saveBrief,
   runDirector,
+  listCreators,
+  listProducts,
   type DirectorLogEntry,
   type StatusResponse,
+  type StoredCreator,
+  type StoredProduct,
 } from '../lib/api'
 import {
   createEmptyBrief,
@@ -276,6 +280,10 @@ export default function CommercialStudio() {
   const [videoUrl, setVideoUrl]                 = useState<string | null>(null)
   const [genError, setGenError]                 = useState('')
 
+  // ── Creative Studio library (loaded once on mount)
+  const [savedCreators, setSavedCreators] = useState<StoredCreator[]>([])
+  const [savedProducts, setSavedProducts] = useState<StoredProduct[]>([])
+
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleSave = useCallback((b: CreativeBrief) => {
@@ -300,6 +308,18 @@ export default function CommercialStudio() {
         // Autosave failure is silent — user data isn't lost, just not persisted yet
       }
     }, 500)
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    Promise.all([
+      listCreators(user.id).catch(() => ({ creators: [] as StoredCreator[] })),
+      listProducts(user.id).catch(() => ({ products: [] as StoredProduct[] })),
+    ]).then(([c, p]) => {
+      if (!cancelled) { setSavedCreators(c.creators); setSavedProducts(p.products) }
+    })
+    return () => { cancelled = true }
   }, [user?.id])
 
   function patch(update: Partial<CreativeBrief>) {
@@ -327,6 +347,26 @@ export default function CommercialStudio() {
       : brief
     patch(updated)
     goForward()
+  }
+
+  // ── Saved library helpers ─────────────────────────────────────────────────
+
+  function handleSelectSavedProduct(product: StoredProduct) {
+    const imageUrl = product.primary_image_url ?? ''
+    setInputMethod('url')
+    setUrlInput(imageUrl)
+    setProductPreview(imageUrl)
+    setUrlPreviewOk(!!imageUrl)
+    setDescInput(product.description ?? '')
+    patch({
+      product: {
+        ...brief.product,
+        productName: product.name,
+        description: product.description ?? '',
+        rawImages: [],
+        processedImages: [],
+      },
+    })
   }
 
   // ── Product helpers ───────────────────────────────────────────────────────
@@ -516,6 +556,40 @@ export default function CommercialStudio() {
       <div className="space-y-5">
         <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, or paste an image URL." />
 
+        {/* Saved products quick-pick */}
+        {savedProducts.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">Saved Products</p>
+            <div className="flex gap-2.5 overflow-x-auto pb-1">
+              {savedProducts.map(product => {
+                const isSelected = brief.product.productName === product.name
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handleSelectSavedProduct(product)}
+                    className={`flex flex-shrink-0 items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition-all ${
+                      isSelected
+                        ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30'
+                        : 'border-white/[0.08] bg-void-800 hover:border-fire-start/40'
+                    }`}
+                  >
+                    {product.primary_image_url && (
+                      <img src={product.primary_image_url} className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" alt={product.name} />
+                    )}
+                    <div className="min-w-0">
+                      <p className="max-w-[100px] truncate text-sm font-semibold text-ink">{product.name}</p>
+                      {product.brand && <p className="text-xs text-ink-faint">{product.brand}</p>}
+                    </div>
+                    {isSelected && <Check className="h-4 w-4 flex-shrink-0 text-fire-start" />}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="mt-4 h-px bg-white/[0.06]" />
+          </div>
+        )}
+
         <div className="flex rounded-xl border border-void-600 bg-void-800 p-1">
           {tabs.map(({ id, label, Icon }) => (
             <button key={id} type="button" onClick={() => { setInputMethod(id); clearProduct() }}
@@ -669,17 +743,19 @@ export default function CommercialStudio() {
       <div className="space-y-6">
         <StepHeader title="Cast your creator" desc="Tell us who should star in your ad — or let AI choose." onBack={goBack} />
 
-        <div className="flex gap-3">
-          {(['generated', 'uploaded_seed'] as const).map(mode => (
+        <div className={`grid gap-3 ${savedCreators.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {([
+            { mode: 'generated' as const,    label: 'Generate AI Creator', desc: 'AI builds from attributes' },
+            { mode: 'uploaded_seed' as const, label: 'Upload Seed Image',  desc: 'Use a reference photo' },
+            ...(savedCreators.length > 0 ? [{ mode: 'saved' as const, label: 'My Creators', desc: `${savedCreators.length} saved` }] : []),
+          ]).map(({ mode, label, desc }) => (
             <button key={mode} type="button"
               onClick={() => patch({ creator: { ...brief.creator, mode } })}
-              className={`flex-1 rounded-2xl border p-4 text-left transition-all ${
+              className={`rounded-2xl border p-4 text-left transition-all ${
                 brief.creator.mode === mode ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
               }`}>
-              <p className="font-bold text-ink">{mode === 'generated' ? 'Generate AI Creator' : 'Upload Seed Image'}</p>
-              <p className="mt-1 text-xs text-ink-muted">
-                {mode === 'generated' ? 'AI builds a creator from your attributes' : 'Use a reference photo to guide the look'}
-              </p>
+              <p className="font-bold text-ink text-sm">{label}</p>
+              <p className="mt-1 text-xs text-ink-muted">{desc}</p>
             </button>
           ))}
         </div>
@@ -727,6 +803,47 @@ export default function CommercialStudio() {
             </div>
             <p className="mt-3 text-sm font-semibold text-ink">Seed image upload</p>
             <p className="mt-1 text-xs text-ink-muted">Coming soon — use AI creator for now.</p>
+          </div>
+        )}
+
+        {brief.creator.mode === 'saved' && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {savedCreators.map(c => {
+              const attrs = (c.attributes ?? {}) as Record<string, string>
+              const initials = c.name.split(' ').slice(0, 2).map((w: string) => w[0] ?? '').join('').toUpperCase() || '?'
+              const selected = brief.creator.savedCreatorId === c.id
+              return (
+                <button key={c.id} type="button"
+                  onClick={() => patch({ creator: {
+                    ...brief.creator,
+                    mode: 'saved',
+                    savedCreatorId: c.id,
+                    attributes: {
+                      gender: attrs.gender ?? '',
+                      ageRange: attrs.ageRange ?? '',
+                      ethnicity: attrs.ethnicity ?? '',
+                      bodyType: '',
+                      hair: attrs.hairStyle ?? '',
+                      wardrobe: attrs.wardrobe ?? '',
+                      expression: attrs.personality ?? '',
+                      energyLevel: (attrs.energyLevel as 'low' | 'medium' | 'high') ?? 'medium',
+                      cameraConfidence: attrs.cameraConfidence ?? '',
+                    },
+                  }})}
+                  className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition-all ${
+                    selected ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
+                  }`}>
+                  <div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl font-bold text-white" style={{ background: '#FF6B35' }}>
+                    {initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-ink">{c.name}</p>
+                    <p className="text-xs text-ink-muted">{attrs.creatorType ?? 'AI Creator'}</p>
+                  </div>
+                  {selected && <Check className="h-4 w-4 flex-shrink-0 text-fire-start" />}
+                </button>
+              )
+            })}
           </div>
         )}
 

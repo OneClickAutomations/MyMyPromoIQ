@@ -7,6 +7,9 @@ import Dashboard from './pages/Dashboard'
 import Studio from './pages/Studio'
 import CommercialStudio from './pages/CommercialStudio'
 import History from './pages/History'
+import CreatorStudio from './pages/CreatorStudio'
+import ProductStudio from './pages/ProductStudio'
+import BrandKit from './pages/BrandKit'
 import PrivacyPolicy from './pages/legal/Privacy'
 import TermsOfService from './pages/legal/Terms'
 import DataProcessingAgreement from './pages/legal/DPA'
@@ -58,6 +61,31 @@ export default function App() {
         element={
           <Protected>
             <History />
+          </Protected>
+        }
+      />
+      {/* Creative Studio */}
+      <Route
+        path="/creators"
+        element={
+          <Protected>
+            <CreatorStudio />
+          </Protected>
+        }
+      />
+      <Route
+        path="/products"
+        element={
+          <Protected>
+            <ProductStudio />
+          </Protected>
+        }
+      />
+      <Route
+        path="/brand"
+        element={
+          <Protected>
+            <BrandKit />
           </Protected>
         }
       />
