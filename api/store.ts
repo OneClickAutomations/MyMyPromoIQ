@@ -117,6 +117,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ ok: true })
       }
 
+      case 'saveBrief': {
+        const b = (body.brief ?? {}) as Record<string, any>
+        const row = {
+          user_id: userId,
+          status: b.status ?? 'draft',
+          product: b.product ?? {},
+          creator: b.creator ?? {},
+          scene: b.scene ?? {},
+          style: b.style ?? {},
+          voice: b.voice ?? {},
+          script: b.script ?? {},
+          storyboard: b.storyboard ?? {},
+          render: b.render ?? {},
+          ...(b.id ? { id: b.id } : {}),
+        }
+        const { data, error } = await supabase
+          .from('creative_briefs').upsert(row).select('id').single()
+        if (error) throw new Error(error.message)
+        return res.status(200).json({ id: data.id })
+      }
+
+      case 'getBrief': {
+        const { briefId } = body
+        if (!briefId) return res.status(400).json({ error: 'briefId is required.' })
+        const { data, error } = await supabase
+          .from('creative_briefs').select('*').eq('id', briefId).eq('user_id', userId).single()
+        if (error) return res.status(404).json({ error: 'Brief not found.' })
+        return res.status(200).json({ brief: data })
+      }
+
+      case 'listBriefs': {
+        const { data } = await supabase
+          .from('creative_briefs').select('id,status,product,style,created_at,updated_at')
+          .eq('user_id', userId).order('updated_at', { ascending: false }).limit(40)
+        return res.status(200).json({ briefs: data ?? [] })
+      }
+
       default:
         return res.status(400).json({ error: `Unknown action: ${action}` })
     }

@@ -256,3 +256,43 @@ export async function pollUntilDone(
     await new Promise(r => setTimeout(r, intervalMs))
   }
 }
+
+// ── Creative Brief persistence ────────────────────────────────────────────────
+
+export type DirectorLogEntry = {
+  timestamp: string
+  stage: 'analyzing' | 'casting' | 'scripting' | 'storyboarding' | 'rendering'
+  message: string
+}
+
+export function saveBrief(
+  userId: string,
+  brief: Record<string, unknown>,
+): Promise<{ id: string }> {
+  return store({ action: 'saveBrief', userId, brief })
+}
+
+export function getBrief(
+  userId: string,
+  briefId: string,
+): Promise<{ brief: Record<string, unknown> | null }> {
+  return store({ action: 'getBrief', userId, briefId })
+}
+
+// ── Director feed ─────────────────────────────────────────────────────────────
+
+export async function runDirector(params: {
+  productName: string
+  description: string
+  style: string
+  creatorMode?: string
+  energyLevel?: string
+}): Promise<{ log: DirectorLogEntry[] }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}

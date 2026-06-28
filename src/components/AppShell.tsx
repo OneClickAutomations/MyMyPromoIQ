@@ -5,11 +5,11 @@ import { brand } from '../copy'
 import { Bolt, Clock, Grid, LogOut, Menu, Moon, Settings, Sun, Wand, Film, X } from './icons'
 
 const NAV = [
-  { label: 'Campaigns', href: '/dashboard', icon: Grid },
-  { label: 'Studio',    href: '/studio',    icon: Wand },
-  { label: 'History',   href: '/history',   icon: Clock },
-  { label: 'Queue',     href: '/queue',     icon: Film,     soon: true },
-  { label: 'Settings',  href: '/settings',  icon: Settings, soon: true },
+  { label: 'Campaigns', href: '/dashboard',  icon: Grid },
+  { label: 'Studio',    href: '/studio/new', icon: Wand },
+  { label: 'History',   href: '/history',    icon: Clock },
+  { label: 'Queue',     href: '/queue',      icon: Film,     soon: true },
+  { label: 'Settings',  href: '/settings',   icon: Settings, soon: true },
 ]
 
 function usePersistentTheme() {
@@ -91,7 +91,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="relative flex-1 space-y-0.5 px-3 pb-4" aria-label="Main navigation">
           {NAV.map(({ label, href, icon: Icon, soon }) => {
-            const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
+            const active = pathname === href ||
+              (href !== '/dashboard' && href !== '/studio/new' && pathname.startsWith(href)) ||
+              (href === '/studio/new' && (pathname === '/studio/new' || pathname === '/studio'))
             return (
               <div key={label}>
                 {soon ? (

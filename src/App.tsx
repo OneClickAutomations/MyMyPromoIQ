@@ -5,6 +5,7 @@ import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
 import Dashboard from './pages/Dashboard'
 import Studio from './pages/Studio'
+import CommercialStudio from './pages/CommercialStudio'
 import History from './pages/History'
 import PrivacyPolicy from './pages/legal/Privacy'
 import TermsOfService from './pages/legal/Terms'
@@ -41,6 +42,14 @@ export default function App() {
         element={
           <Protected>
             <Studio />
+          </Protected>
+        }
+      />
+      <Route
+        path="/studio/new"
+        element={
+          <Protected>
+            <CommercialStudio />
           </Protected>
         }
       />
