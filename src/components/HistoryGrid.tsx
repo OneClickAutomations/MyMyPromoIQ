@@ -7,9 +7,11 @@
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useUser } from '@clerk/clerk-react'
 import { Download, Edit, Film, Plus, RefreshCw, Trash } from './icons'
-import { useSupabaseClient } from '../hooks/useSupabaseClient'
-import type { Campaign } from '../lib/supabase'
+import { listCampaigns, deleteCampaignRemote, type StoredCampaign } from '../lib/api'
+
+type Campaign = StoredCampaign
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'text-ink-faint',
@@ -26,7 +28,7 @@ type Props = {
 }
 
 export default function HistoryGrid({ limit = 60, emptyState }: Props) {
-  const getClient = useSupabaseClient()
+  const { user } = useUser()
   const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,51 +36,30 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!user?.id) return
     let cancelled = false
     async function load() {
       try {
-        const db = await getClient()
-        const { data } = await db
-          .from('campaigns')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(limit)
-        if (!cancelled && data) setCampaigns(data)
-
-        const ids = (data ?? []).map(c => c.id)
-        if (ids.length) {
-          const { data: doneScenes } = await db
-            .from('scenes')
-            .select('campaign_id, video_url, updated_at')
-            .in('campaign_id', ids)
-            .eq('phase', 'done')
-            .not('video_url', 'is', null)
-            .order('updated_at', { ascending: false })
-          if (!cancelled && doneScenes) {
-            const map: Record<string, string> = {}
-            for (const s of doneScenes) {
-              if (s.campaign_id && s.video_url && !map[s.campaign_id]) map[s.campaign_id] = s.video_url
-            }
-            setVideoByCampaign(map)
-          }
-        }
+        const { campaigns: rows, videos } = await listCampaigns(user!.id)
+        if (cancelled) return
+        setCampaigns(rows.slice(0, limit))
+        setVideoByCampaign(videos)
       } catch {
-        // Supabase not configured — fail silently
+        // Persistence unavailable — fail silently (shows empty state)
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     load()
     return () => { cancelled = true }
-  }, [getClient, limit])
+  }, [user?.id, limit])
 
   async function deleteCampaign(id: string) {
+    if (!user?.id) return
     if (!window.confirm('Delete this campaign and all of its videos? This cannot be undone.')) return
     setDeletingId(id)
     try {
-      const db = await getClient()
-      await db.from('scenes').delete().eq('campaign_id', id)
-      await db.from('campaigns').delete().eq('id', id)
+      await deleteCampaignRemote(user.id, id)
       setCampaigns(prev => prev.filter(c => c.id !== id))
     } catch {
       window.alert('Could not delete the campaign. Please try again.')

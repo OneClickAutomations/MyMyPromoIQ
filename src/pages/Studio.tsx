@@ -14,10 +14,11 @@ import {
   presignUpload,
   uploadDirectToStorage,
   dataUrlToBlob,
+  saveCampaign,
+  saveScene,
+  getCampaign,
   type StatusResponse,
 } from '../lib/api'
-import { useSupabaseClient } from '../hooks/useSupabaseClient'
-import { type SupabaseDb } from '../lib/supabase'
 import { generator } from '../copy'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -289,7 +290,6 @@ export default function Studio() {
   const [searchParams] = useSearchParams()
   const defaultStyle = searchParams.get('style') || generator.styles[0].id
   const { user } = useUser()
-  const getClient = useSupabaseClient()
 
   // ── Navigation
   const [workflowStep, setWorkflowStep] = useState<WorkflowStep>(1)
@@ -319,6 +319,7 @@ export default function Studio() {
   const [genStepIdx, setGenStepIdx]   = useState(0)
   const [directorPrompt, setDirectorPrompt] = useState('')
   const [genError, setGenError]       = useState('')
+  const [saveFailed, setSaveFailed]   = useState(false)
   const [scenes, setScenes]           = useState<Scene[]>(SCENE_TEMPLATES.map(t => blankScene(t.label, t.style)))
   const [activeSceneIdx, setActiveSceneIdx] = useState(0)
 
@@ -329,20 +330,14 @@ export default function Studio() {
   // ── Load an existing campaign (History → open/edit/regenerate) ─────────────
   useEffect(() => {
     const campaignParam = searchParams.get('campaign')
-    if (!campaignParam || loadedCampaignRef.current === campaignParam) return
+    if (!campaignParam || !user?.id || loadedCampaignRef.current === campaignParam) return
     loadedCampaignRef.current = campaignParam
     let cancelled = false
 
     ;(async () => {
       try {
-        const db = await getClient()
-        const { data: campaign } = await db
-          .from('campaigns').select('*').eq('id', campaignParam).single()
+        const { campaign, scenes: dbScenes } = await getCampaign(user.id, campaignParam)
         if (cancelled || !campaign) return
-
-        const { data: dbScenes } = await db
-          .from('scenes').select('*').eq('campaign_id', campaignParam).order('order_index')
-        if (cancelled) return
 
         campaignIdRef.current = campaign.id
         if (campaign.product_image_url) {
@@ -389,7 +384,7 @@ export default function Studio() {
     })()
 
     return () => { cancelled = true }
-  }, [searchParams, getClient])
+  }, [searchParams, user?.id])
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -397,19 +392,17 @@ export default function Studio() {
     setScenes(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
   }
 
-  async function upsertCampaign(db: SupabaseDb) {
-    if (campaignIdRef.current) return campaignIdRef.current
-    const { data, error } = await db.from('campaigns').insert({
-      user_id: user!.id,
+  async function upsertCampaign() {
+    const { id } = await saveCampaign(user!.id, {
+      ...(campaignIdRef.current ? { id: campaignIdRef.current } : {}),
       name: description.slice(0, 60) || 'Untitled Campaign',
       product_image_url: productApiUrl || null,
       product_description: description.trim() || null,
       style, quality,
       status: 'rendering',
-    }).select('id').single()
-    if (error || !data) throw new Error('Could not create campaign: ' + error?.message)
-    campaignIdRef.current = data.id
-    return data.id
+    })
+    campaignIdRef.current = id
+    return id
   }
 
   function applyFile(file: File) {
@@ -509,26 +502,26 @@ export default function Studio() {
     setGenError('')
     setWorkflowStep(3)
 
-    // Persistence (best-effort — never blocks the render)
-    let db: SupabaseDb | null = null
+    // Persistence via server API (service key — bypasses RLS, so it works
+    // regardless of the Clerk↔Supabase JWT bridge).
     let campaignId: string | null = null
     let sceneDbId = scenes[idx].dbId
+    let canPersist = true
     try {
-      db = await getClient()
-      campaignId = await upsertCampaign(db)
-      if (!sceneDbId) {
-        const { data } = await db.from('scenes').insert({
-          campaign_id: campaignId, user_id: user!.id,
-          label: scenes[idx].label, style, order_index: idx, phase: 'working',
-        }).select('id').single()
-        sceneDbId = data?.id ?? null
-        updateScene(idx, { dbId: sceneDbId })
-      } else {
-        await db.from('scenes').update({ phase: 'working', error_message: null, video_url: null }).eq('id', sceneDbId)
-      }
+      campaignId = await upsertCampaign()
+      const { id } = await saveScene(user!.id, {
+        ...(sceneDbId ? { id: sceneDbId } : {}),
+        campaign_id: campaignId,
+        label: scenes[idx].label, style, order_index: idx, phase: 'working',
+        error_message: null, video_url: null,
+      })
+      sceneDbId = id
+      updateScene(idx, { dbId: sceneDbId })
+      setSaveFailed(false)
     } catch (e) {
-      console.warn('[Studio] DB persistence unavailable:', e)
-      db = null
+      console.warn('[Studio] Persistence unavailable:', e)
+      canPersist = false
+      setSaveFailed(true)
     }
 
     // Generation — always runs
@@ -541,8 +534,8 @@ export default function Studio() {
       })
       setDirectorPrompt(dp)
       updateScene(idx, { directorPrompt: dp })
-      if (db && sceneDbId) {
-        try { await db.from('scenes').update({ director_prompt: dp, request_id: requestId }).eq('id', sceneDbId) } catch {}
+      if (canPersist && sceneDbId && campaignId) {
+        try { await saveScene(user!.id, { id: sceneDbId, campaign_id: campaignId, director_prompt: dp, request_id: requestId }) } catch {}
       }
       // Step 1: submitted to render engine; Step 2: rendering
       setGenStepIdx(1)
@@ -559,11 +552,14 @@ export default function Studio() {
       if (final.status === 'completed' && final.videoUrl) {
         updateScene(idx, { phase: 'done', videoUrl: final.videoUrl })
         setGenPhase('done')
-        if (db && sceneDbId) {
-          try { await db.from('scenes').update({ phase: 'done', video_url: final.videoUrl }).eq('id', sceneDbId) } catch {}
-          if (campaignId) {
+        if (canPersist && sceneDbId && campaignId) {
+          try {
+            await saveScene(user!.id, { id: sceneDbId, campaign_id: campaignId, phase: 'done', video_url: final.videoUrl })
             const allDone = scenes.every((s, i) => i === idx || s.phase === 'done')
-            if (allDone) try { await db.from('campaigns').update({ status: 'ready' }).eq('id', campaignId) } catch {}
+            if (allDone) await saveCampaign(user!.id, { id: campaignId, status: 'ready' })
+          } catch (e) {
+            console.warn('[Studio] Could not save finished video:', e)
+            setSaveFailed(true)
           }
         }
         setWorkflowStep(4)
@@ -572,8 +568,8 @@ export default function Studio() {
         updateScene(idx, { phase: 'error', error: msg })
         setGenPhase('error')
         setGenError(msg)
-        if (db && sceneDbId) {
-          try { await db.from('scenes').update({ phase: 'error', error_message: msg }).eq('id', sceneDbId) } catch {}
+        if (canPersist && sceneDbId && campaignId) {
+          try { await saveScene(user!.id, { id: sceneDbId, campaign_id: campaignId, phase: 'error', error_message: msg }) } catch {}
         }
       }
     } catch (err) {
@@ -1137,6 +1133,16 @@ export default function Studio() {
             <RefreshCw className="h-3.5 w-3.5" /> Start over
           </button>
         </div>
+
+        {/* Couldn't-save warning — so a generated video is never silently lost */}
+        {saveFailed && doneScene?.videoUrl && (
+          <div className="rounded-2xl border border-gold/30 bg-gold/[0.06] p-4">
+            <p className="text-sm font-semibold text-gold">Heads up — this video wasn't saved to your History.</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+              Storage isn't fully connected yet, so download it now to keep it. Your video is ready below.
+            </p>
+          </div>
+        )}
 
         {/* Result video */}
         {doneScene?.videoUrl && (

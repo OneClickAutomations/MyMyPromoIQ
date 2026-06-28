@@ -45,6 +45,64 @@ export type PresignResponse = {
   publicUrl: string
 }
 
+// ── Persistence (server-side via service key, bypasses RLS) ──────────────────────
+
+export type StoredCampaign = {
+  id: string
+  user_id: string
+  name: string
+  product_image_url: string | null
+  product_description: string | null
+  style: string | null
+  quality: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export type StoredScene = {
+  id: string
+  campaign_id: string
+  label: string
+  style: string
+  order_index: number
+  phase: string
+  request_id: string | null
+  director_prompt: string | null
+  video_url: string | null
+  error_message: string | null
+}
+
+async function store<T>(payload: Record<string, unknown>): Promise<T> {
+  const res = await fetch('/api/store', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export function saveCampaign(userId: string, campaign: Partial<StoredCampaign>): Promise<{ id: string }> {
+  return store({ action: 'saveCampaign', userId, campaign })
+}
+
+export function saveScene(userId: string, scene: Partial<StoredScene> & { campaign_id: string }): Promise<{ id: string }> {
+  return store({ action: 'saveScene', userId, scene })
+}
+
+export function getCampaign(userId: string, campaignId: string): Promise<{ campaign: StoredCampaign | null; scenes: StoredScene[] }> {
+  return store({ action: 'get', userId, campaignId })
+}
+
+export function listCampaigns(userId: string): Promise<{ campaigns: StoredCampaign[]; videos: Record<string, string>; videoCount: number }> {
+  return store({ action: 'list', userId })
+}
+
+export function deleteCampaignRemote(userId: string, campaignId: string): Promise<{ ok: boolean }> {
+  return store({ action: 'delete', userId, campaignId })
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 async function readError(res: Response): Promise<string> {
