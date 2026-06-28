@@ -24,6 +24,9 @@ export type GenerateInput = {
   productDescription: string
   style: string
   quality: string
+  brandVoice?: string
+  brandTaglines?: string[]
+  brandCta?: string
 }
 
 export type GenerateResponse = {

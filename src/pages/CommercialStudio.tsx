@@ -13,7 +13,7 @@ import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
-  PlayIcon, RefreshCw, Spark, Upload, Users, Wand,
+  Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand,
 } from '../components/icons'
 import {
   startGeneration,
@@ -25,10 +25,12 @@ import {
   runDirector,
   listCreators,
   listProducts,
+  getBrand,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
+  type StoredBrand,
 } from '../lib/api'
 import {
   createEmptyBrief,
@@ -283,6 +285,7 @@ export default function CommercialStudio() {
   // ── Creative Studio library (loaded once on mount)
   const [savedCreators, setSavedCreators] = useState<StoredCreator[]>([])
   const [savedProducts, setSavedProducts] = useState<StoredProduct[]>([])
+  const [savedBrand, setSavedBrand] = useState<StoredBrand | null>(null)
 
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -316,8 +319,13 @@ export default function CommercialStudio() {
     Promise.all([
       listCreators(user.id).catch(() => ({ creators: [] as StoredCreator[] })),
       listProducts(user.id).catch(() => ({ products: [] as StoredProduct[] })),
-    ]).then(([c, p]) => {
-      if (!cancelled) { setSavedCreators(c.creators); setSavedProducts(p.products) }
+      getBrand(user.id).catch(() => ({ brand: null as StoredBrand | null })),
+    ]).then(([c, p, b]) => {
+      if (!cancelled) {
+        setSavedCreators(c.creators)
+        setSavedProducts(p.products)
+        setSavedBrand(b.brand)
+      }
     })
     return () => { cancelled = true }
   }, [user?.id])
@@ -471,6 +479,9 @@ export default function CommercialStudio() {
         productDescription: brief.product.description ?? descInput,
         style: brief.style.commercialStyle || 'testimonial',
         quality: 'turbo',
+        brandVoice: savedBrand?.brand_voice ?? undefined,
+        brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
+        brandCta: savedBrand?.cta_preferences ?? undefined,
       })
       setDirectorNote(directorPrompt)
 
@@ -1234,6 +1245,16 @@ export default function CommercialStudio() {
                 ))}
               </ul>
             </div>
+            {savedBrand && (
+              <div className="flex items-center gap-2 rounded-xl border border-fire-start/20 bg-fire-start/[0.06] px-4 py-2.5">
+                <Palette className="h-3.5 w-3.5 flex-shrink-0 text-fire-start" />
+                <p className="text-xs text-ink-muted">
+                  <span className="font-semibold text-fire-start">Brand Kit active</span>
+                  {savedBrand.brand_voice ? ` · ${savedBrand.brand_voice}` : ''}
+                  {savedBrand.cta_preferences ? ` · CTA: "${savedBrand.cta_preferences}"` : ''}
+                </p>
+              </div>
+            )}
             <button onClick={handleGenerate} className="btn-fire w-full">
               <Spark className="h-4 w-4" /> Start Generation
             </button>

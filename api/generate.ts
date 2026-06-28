@@ -61,14 +61,32 @@ function higgsfieldAuth(): string {
   return `Key ${key}:${secret}`
 }
 
-async function writeDirectorPrompt(productDescription: string, styleId: StyleId): Promise<string> {
+interface BrandContext {
+  voice?: string
+  taglines?: string[]
+  cta?: string
+}
+
+async function writeDirectorPrompt(
+  productDescription: string,
+  styleId: StyleId,
+  brand?: BrandContext,
+): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
+
+  const brandLines: string[] = []
+  if (brand?.voice) brandLines.push(`Brand voice: ${brand.voice}.`)
+  if (brand?.taglines?.length) brandLines.push(`Brand taglines: ${brand.taglines.join(' / ')}.`)
+  if (brand?.cta) brandLines.push(`Preferred CTA: "${brand.cta}".`)
+  const brandSection = brandLines.length
+    ? `\nBrand context (honour this voice and weave the CTA naturally into the scene if it fits):\n${brandLines.join('\n')}\n`
+    : ''
 
   const system = `You are an expert UGC ad director writing prompts for an image-to-video model. You are given a product and a creative style. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
 
 Style direction: ${style.brief}
-
+${brandSection}
 Rules:
 - Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation.
 - 2-4 sentences. Describe camera movement, subject action, lighting, and mood.
@@ -152,7 +170,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productDescription,
       style,
       quality = 'turbo',
-    } = (req.body ?? {}) as Record<string, string>
+      brandVoice,
+      brandTaglines,
+      brandCta,
+    } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
     if (!productImageUrl || !/^https?:\/\//i.test(productImageUrl)) {
       return res.status(400).json({ error: 'Provide a public product image URL (https://…).' })
@@ -167,7 +188,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: `Unknown quality. Pick one of: ${QUALITIES.join(', ')}.` })
     }
 
-    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), style as StyleId)
+    const brand: BrandContext = {
+      voice: brandVoice || undefined,
+      taglines: Array.isArray(brandTaglines) ? brandTaglines : undefined,
+      cta: brandCta || undefined,
+    }
+
+    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), style as StyleId, brand)
     const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality)
     return res.status(200).json({ requestId, status, directorPrompt })
   } catch (err) {
