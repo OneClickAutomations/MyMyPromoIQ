@@ -2,9 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/*.ts": { "maxDuration": 60 },
-    "api/mux.ts":    { "maxDuration": 60, "includeFiles": "node_modules/ffmpeg-static/**" },
-    "api/stitch.ts": { "maxDuration": 60, "includeFiles": "node_modules/ffmpeg-static/**" }
+    "api/*.ts": { "maxDuration": 60, "includeFiles": "node_modules/ffmpeg-static/**" }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
