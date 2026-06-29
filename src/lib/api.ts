@@ -186,6 +186,19 @@ export async function uploadDirectToStorage(
   }
 }
 
+/**
+ * One-shot upload: presign → PUT to Supabase → return the public https URL.
+ * Accepts a File/Blob or a data: URL (generated images come back as data URLs,
+ * so this is how we turn a generated seed image into a durable hosted asset).
+ */
+export async function uploadAsset(input: Blob | string): Promise<string> {
+  const blob = typeof input === 'string' ? dataUrlToBlob(input) : input
+  const mimeType = blob.type || 'image/png'
+  const { token, path, publicUrl } = await presignUpload(mimeType)
+  await uploadDirectToStorage(path, token, blob, mimeType)
+  return publicUrl
+}
+
 // ── Generation ─────────────────────────────────────────────────────────────────
 
 export async function startGeneration(input: GenerateInput): Promise<GenerateResponse> {
@@ -273,6 +286,33 @@ export type ModelSheetInput = {
 
 /** Turn one reference photo into a 2x3 multi-angle turnaround model sheet. */
 export async function generateModelSheet(input: ModelSheetInput): Promise<{ sheetDataUrl: string; subject: string; prompt: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export type ImageGenInput = {
+  /** 'generate' = from text only; 'edit' = transform the supplied reference image. */
+  mode: 'generate' | 'edit'
+  subjectType: 'product' | 'character'
+  /** The instruction (edit) or description (generate). */
+  editPrompt: string
+  /** Reference image for edit mode (one of these). */
+  imageUrl?: string
+  imageBase64?: string
+  mimeType?: string
+}
+
+/**
+ * Generate or edit a seed image via Gemini ("nano-banana"). Used by the Creator
+ * and Product studios to produce/refine a reference image before video.
+ * Returns the result as a data URL.
+ */
+export async function generateImage(input: ImageGenInput): Promise<{ imageDataUrl: string; prompt: string }> {
   const res = await fetch('/api/modelsheet', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

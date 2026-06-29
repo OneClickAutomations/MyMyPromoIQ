@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AppShell from '../components/AppShell'
-import { Plus, Edit, Trash, X, Package, Check, Upload, LinkIcon } from '../components/icons'
+import { Plus, Edit, Trash, X, Package } from '../components/icons'
 import { listProducts, saveProduct, deleteProduct, type StoredProduct } from '../lib/api'
+import SeedImageStudio, { type SeedImage } from '../components/SeedImageStudio'
 
 // ── Option catalogs ───────────────────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ function ProductPanel({
   onClose,
 }: {
   initial: StoredProduct | null
-  onSave: (draft: ProductDraft, id?: string) => Promise<void>
+  onSave: (draft: ProductDraft, images: SeedImage[], id?: string) => Promise<void>
   onClose: () => void
 }) {
   const [draft, setDraft] = useState<ProductDraft>(() =>
@@ -147,9 +148,14 @@ function ProductPanel({
       benefitsText: (initial.benefits ?? []).join('\n'),
     } : emptyDraft()
   )
+  // Seed with existing images (and the primary image, if it isn't already in the list).
+  const [images, setImages] = useState<SeedImage[]>(() => {
+    const list = initial?.images ?? []
+    const primary = initial?.primary_image_url
+    if (primary && !list.some(i => i.url === primary)) return [{ url: primary, label: 'Primary' }, ...list]
+    return list
+  })
   const [saving, setSaving] = useState(false)
-  const [imgOk, setImgOk] = useState(false)
-  const [urlMode, setUrlMode] = useState<'url' | 'upload'>('url')
 
   function set(key: keyof ProductDraft, val: string) {
     setDraft(prev => ({ ...prev, [key]: val }))
@@ -159,7 +165,7 @@ function ProductPanel({
     if (!draft.name.trim()) return
     setSaving(true)
     try {
-      await onSave(draft, initial?.id)
+      await onSave(draft, images, initial?.id)
     } finally {
       setSaving(false)
     }
@@ -227,51 +233,16 @@ function ProductPanel({
             <Chips options={PRODUCT_CATEGORIES} value={draft.category} onChange={v => set('category', v)} />
           </div>
 
-          {/* Product Image */}
+          {/* Product Images — upload, generate, or edit */}
           <div>
-            <label className="block text-sm font-semibold text-ink mb-2">Primary Product Image</label>
-            <div className="flex rounded-xl border border-void-600 bg-void-800 p-1 mb-3">
-              {(['url', 'upload'] as const).map(m => (
-                <button key={m} type="button" onClick={() => setUrlMode(m)}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-all ${
-                    urlMode === m ? 'bg-fire-start text-white shadow-fire-soft' : 'text-ink-muted hover:text-ink'
-                  }`}>
-                  {m === 'url' ? <><LinkIcon className="h-3.5 w-3.5" /> Image URL</> : <><Upload className="h-3.5 w-3.5" /> Upload</>}
-                </button>
-              ))}
-            </div>
-            {urlMode === 'url' ? (
-              <div className="space-y-2">
-                <input
-                  type="url"
-                  value={draft.primary_image_url}
-                  onChange={e => { set('primary_image_url', e.target.value); setImgOk(false) }}
-                  placeholder="https://example.com/product.jpg"
-                  className="w-full rounded-xl border border-white/[0.10] bg-void-700/50 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/20 transition-colors"
-                />
-                {draft.primary_image_url && (
-                  <div className="overflow-hidden rounded-xl border border-white/[0.08]">
-                    <img
-                      src={draft.primary_image_url}
-                      alt="Product preview"
-                      className="max-h-36 w-full object-contain bg-void-800"
-                      onLoad={() => setImgOk(true)}
-                      onError={() => setImgOk(false)}
-                    />
-                    {imgOk && (
-                      <div className="flex items-center gap-1 px-3 py-1.5 bg-void-800/80 text-xs text-fire-start">
-                        <Check className="h-3 w-3" /> Image loaded
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-void-500 py-10 text-center">
-                <Upload className="h-6 w-6 text-ink-faint" />
-                <p className="text-sm text-ink-faint">Upload coming soon — use Image URL for now</p>
-              </div>
-            )}
+            <label className="block text-sm font-semibold text-ink mb-2">Product Images</label>
+            <p className="mb-3 text-xs text-ink-faint">Upload a product photo or generate one. Restage it, swap the background, or recolor it — the primary image becomes the reference for every video.</p>
+            <SeedImageStudio
+              subjectType="product"
+              subjectHint={[draft.name, draft.brand, draft.category].filter(Boolean).join(', ') || undefined}
+              images={images}
+              onChange={setImages}
+            />
           </div>
 
           {/* Description */}
@@ -402,14 +373,16 @@ export default function ProductStudio() {
     setDeleting(null)
   }
 
-  async function handleSave(draft: ProductDraft, id?: string) {
+  async function handleSave(draft: ProductDraft, images: SeedImage[], id?: string) {
     if (!user?.id) return
     await saveProduct(user.id, {
       ...(id ? { id } : {}),
       name: draft.name,
       brand: draft.brand || null,
       category: draft.category || null,
-      primary_image_url: draft.primary_image_url || null,
+      // The first seed image is the primary product shot used as the video reference.
+      primary_image_url: images[0]?.url || draft.primary_image_url || null,
+      images,
       description: draft.description || null,
       target_audience: draft.target_audience || null,
       features: draft.featuresText.split('\n').map(l => l.trim()).filter(Boolean),

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import { Plus, Edit, Trash, X, Users, Check, Wand } from '../components/icons'
 import { listCreators, saveCreator, deleteCreator, type StoredCreator } from '../lib/api'
+import SeedImageStudio, { type SeedImage } from '../components/SeedImageStudio'
 
 // ── Option catalogs ───────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ function CreatorCard({
   const attrs = creator.attributes as Record<string, string>
   const initials = getInitials(creator.name)
   const avatarBg = getAvatarColor(creator.name)
+  const seedFace = creator.seed_images?.[0]?.url
 
   return (
     <motion.div
@@ -96,12 +98,16 @@ function CreatorCard({
     >
       {/* Avatar + name */}
       <div className="mb-4 flex items-center gap-3">
-        <div
-          className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-xl text-white text-lg font-black shadow-lg"
-          style={{ background: avatarBg }}
-        >
-          {initials}
-        </div>
+        {seedFace ? (
+          <img src={seedFace} alt={creator.name} className="h-12 w-12 flex-shrink-0 rounded-xl object-cover shadow-lg ring-1 ring-white/10" />
+        ) : (
+          <div
+            className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-xl text-white text-lg font-black shadow-lg"
+            style={{ background: avatarBg }}
+          >
+            {initials}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-ink">{creator.name}</p>
           <p className="text-xs text-ink-muted">{attrs?.creatorType || 'AI Creator'}</p>
@@ -175,10 +181,11 @@ function CreatorPanel({
   onClose,
 }: {
   initial: StoredCreator | null
-  onSave: (draft: CreatorDraft, id?: string) => Promise<void>
+  onSave: (draft: CreatorDraft, seedImages: SeedImage[], id?: string) => Promise<void>
   onClose: () => void
 }) {
   const attrs = initial?.attributes as Record<string, string> | undefined
+  const [seedImages, setSeedImages] = useState<SeedImage[]>(initial?.seed_images ?? [])
   const [draft, setDraft] = useState<CreatorDraft>(() =>
     initial ? {
       name: initial.name,
@@ -205,7 +212,7 @@ function CreatorPanel({
     if (!draft.name.trim()) return
     setSaving(true)
     try {
-      await onSave(draft, initial?.id)
+      await onSave(draft, seedImages, initial?.id)
     } finally {
       setSaving(false)
     }
@@ -254,6 +261,18 @@ function CreatorPanel({
               onChange={e => set('name', e.target.value)}
               placeholder="e.g. Emma Chen"
               className="w-full rounded-xl border border-white/[0.10] bg-void-700/50 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/20 transition-colors"
+            />
+          </div>
+
+          {/* Appearance — seed images (upload or generate) */}
+          <div>
+            <label className="block text-sm font-semibold text-ink mb-2">Appearance</label>
+            <p className="mb-3 text-xs text-ink-faint">Upload a reference photo or generate what this creator looks like. The primary seed image becomes the reference for every video.</p>
+            <SeedImageStudio
+              subjectType="character"
+              subjectHint={[draft.name, draft.creatorType, draft.gender, draft.ageRange, draft.ethnicity].filter(Boolean).join(', ') || undefined}
+              images={seedImages}
+              onChange={setSeedImages}
             />
           </div>
 
@@ -435,12 +454,13 @@ export default function CreatorStudio() {
     setDeleting(null)
   }
 
-  async function handleSave(draft: CreatorDraft, id?: string) {
+  async function handleSave(draft: CreatorDraft, seedImages: SeedImage[], id?: string) {
     if (!user?.id) return
     await saveCreator(user.id, {
       ...(id ? { id } : {}),
       name: draft.name,
-      mode: 'generated',
+      mode: seedImages.length ? 'uploaded_seed' : 'generated',
+      seed_images: seedImages,
       attributes: {
         creatorType: draft.creatorType,
         gender: draft.gender,
