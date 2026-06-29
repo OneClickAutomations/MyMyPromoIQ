@@ -81,6 +81,25 @@ function daysSince(iso: string): number {
   return Math.max(0, Math.round(ms / 86_400_000))
 }
 
+/**
+ * Clean ad creative text. Meta dynamic/catalog ads use template variables like
+ * "{{product.name}}" or "{{product.brand}}" that the scraper captures UNRENDERED
+ * (they're filled per-viewer at serve time). Surfacing raw template syntax is
+ * useless, so treat any value containing {{…}} as absent.
+ */
+function cleanText(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  if (!t || /\{\{.*?\}\}/.test(t)) return undefined
+  return t
+}
+
+/** First defined string from a list of candidate fields. */
+function firstStr(...vals: unknown[]): string | undefined {
+  for (const v of vals) if (typeof v === 'string' && v.trim()) return v
+  return undefined
+}
+
 // ── Scoring (0.5) ─────────────────────────────────────────────────────────────
 function clamp(n: number): number { return Math.max(0, Math.min(100, n)) }
 
@@ -394,31 +413,53 @@ const META_ACTOR = {
     params.set('search_type', 'keyword_unordered')
     return `https://www.facebook.com/ads/library/?${params.toString()}`
   },
-  /** ⚠️ Output mapping — confirm field names against a real dataset item. */
+  /** Map one apify/facebook-ads-scraper dataset item → RawAd. */
   mapItem(item: any): RawAd | null {
     const snap = item?.snapshot ?? item?.snapShot ?? {}
     const externalAdId = String(item?.adArchiveID ?? item?.adArchiveId ?? item?.ad_archive_id ?? item?.id ?? '')
     if (!externalAdId) return null
 
-    const bodyText = snap?.body?.text ?? snap?.body ?? item?.adText ?? undefined
-    const headline = snap?.title ?? snap?.linkTitle ?? item?.title ?? undefined
-    const cta = snap?.ctaText ?? snap?.cta_text ?? snap?.cta ?? undefined
-    const pageName = item?.pageName ?? item?.page_name ?? snap?.pageName ?? 'Unknown advertiser'
+    // The scraper returns snake_case fields. Body can be a string or { text }.
+    const bodyText = cleanText(snap?.body?.text ?? snap?.body ?? item?.adText)
+    const headline = cleanText(firstStr(snap?.title, snap?.link_title, snap?.linkTitle, item?.title))
+    const cta = firstStr(snap?.cta_text, snap?.ctaText, snap?.cta)
+    const pageName = firstStr(item?.page_name, item?.pageName, snap?.page_name, snap?.pageName) ?? 'Unknown advertiser'
 
-    const images: string[] = (snap?.images ?? snap?.cards ?? [])
-      .map((m: any) => m?.resizedImageUrl ?? m?.originalImageUrl ?? m?.imageUrl ?? m?.url)
-      .filter(Boolean)
-    const videos: string[] = (snap?.videos ?? [])
-      .map((v: any) => v?.videoSdUrl ?? v?.videoHdUrl ?? v?.url)
-      .filter(Boolean)
-    const mediaUrls = videos.length ? videos : images
+    // Still images (snake_case primary, camelCase fallback).
+    const imageUrls: string[] = []
+    for (const m of (snap?.images ?? [])) {
+      const u = firstStr(m?.original_image_url, m?.resized_image_url, m?.originalImageUrl, m?.resizedImageUrl, m?.url)
+      if (u) imageUrls.push(u)
+    }
+    for (const c of (snap?.cards ?? [])) {
+      const u = firstStr(c?.original_image_url, c?.resized_image_url, c?.video_preview_image_url, c?.originalImageUrl, c?.url)
+      if (u) imageUrls.push(u)
+    }
+    // Videos + their preview posters (a poster renders in an <img> thumbnail; the
+    // raw .mp4 does not).
+    const videoUrls: string[] = []
+    const videoPosters: string[] = []
+    for (const v of (snap?.videos ?? [])) {
+      const u = firstStr(v?.video_hd_url, v?.video_sd_url, v?.videoHdUrl, v?.videoSdUrl, v?.url)
+      if (u) videoUrls.push(u)
+      const poster = firstStr(v?.video_preview_image_url, v?.videoPreviewImageUrl)
+      if (poster) videoPosters.push(poster)
+    }
+    const hasVideo = videoUrls.length > 0
     const mediaType: SourceAd['creative']['mediaType'] =
-      videos.length ? 'video' : images.length > 1 ? 'carousel' : 'image'
+      hasVideo ? 'video' : imageUrls.length > 1 ? 'carousel' : 'image'
+    // Put a displayable still first (video poster, then images) so card thumbnails
+    // render; keep the actual video URLs available after them.
+    const mediaUrls = [...videoPosters, ...imageUrls, ...videoUrls]
 
     const startRaw = item?.startDate ?? item?.start_date ?? item?.startDateFormatted ?? snap?.startDate
     const startMs = typeof startRaw === 'number' ? startRaw * 1000 : Date.parse(startRaw ?? '')
     const startDate = isFinite(startMs) ? new Date(startMs).toISOString() : new Date().toISOString()
     const isActive = item?.isActive ?? item?.is_active ?? true
+
+    // Best product label: a real (non-template) headline, else the link title text,
+    // else the advertiser name — never the raw "{{product.name}}" template.
+    const productName = headline ?? cleanText(snap?.caption) ?? pageName
 
     return {
       id: `apify-${externalAdId}`,
@@ -426,18 +467,18 @@ const META_ACTOR = {
       externalAdId,
       pageOrShopName: pageName,
       keywords: [],
-      creative: { headline, bodyText, cta, mediaUrls: mediaUrls.length ? mediaUrls : [], mediaType },
+      creative: { headline, bodyText, cta, mediaUrls, mediaType },
       delivery: {
         startDate,
         isActive: !!isActive,
-        impressionsRange: item?.impressionsWithIndex?.impressionsText ?? item?.impressions ?? undefined,
-        spendRange: item?.spend ?? undefined,
+        impressionsRange: firstStr(item?.impressionsWithIndex?.impressionsText, item?.impressions),
+        spendRange: firstStr(item?.spend),
       },
       // Sourcing is a separate call (/api/sourcing) — left unmatched here so the
       // score reflects "not yet sourced" until the sourcing lookup runs.
-      product: { name: headline || pageName },
-      sceneCount: mediaType === 'video' ? 3 : 1,
-      durationSeconds: mediaType === 'video' ? 20 : 8,
+      product: { name: productName },
+      sceneCount: hasVideo ? 3 : 1,
+      durationSeconds: hasVideo ? 20 : 8,
     }
   },
 }
