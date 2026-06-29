@@ -66,6 +66,19 @@ const QUALITY_MODEL: Record<Quality, string> = {
   standard: 'dop-standard',
 }
 
+// ── Video provider ────────────────────────────────────────────────────────────
+// VIDEO_PROVIDER selects the engine without touching call sites:
+//   'veo3'       (default) — Google Veo 3 via the Gemini API. Generates video
+//                            WITH native audio, reuses GEMINI_API_KEY (already set
+//                            for model sheets), and needs no second vendor.
+//   'higgsfield'           — the original Higgsfield image-to-video path.
+// Veo job ids are returned prefixed with "veo:" so /api/status can route the poll.
+const VIDEO_PROVIDER = (process.env.VIDEO_PROVIDER || 'veo3').toLowerCase()
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+// Fast variant by default — a UGC tool renders many short clips, so cost/latency
+// matter more than the marginal quality of the full model. Override with VEO_MODEL.
+const VEO_MODEL = process.env.VEO_MODEL || 'veo-3.0-fast-generate-001'
+
 function higgsfieldAuth(): string {
   const combined = process.env.HF_CREDENTIALS || process.env.HF_KEY
   let key = process.env.HF_API_KEY
@@ -203,6 +216,56 @@ async function submitVideoJob(
   return { requestId, status }
 }
 
+/**
+ * Submit an image-to-video job to Google Veo 3 (Gemini API). Veo is a
+ * long-running operation: we POST and get back an operation name, then
+ * /api/status polls it. Veo renders the clip WITH synchronized audio, so the
+ * finished video is not silent the way a Higgsfield render is.
+ *
+ * Veo wants the reference image as inline base64 (not a URL), so we fetch and
+ * encode the product photo here.
+ */
+async function submitVeoJob(
+  prompt: string,
+  imageUrl: string,
+  opts?: { negativePrompt?: string },
+) {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
+
+  const imgResp = await fetch(imageUrl)
+  if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}).`)
+  const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
+  const bytesBase64Encoded = Buffer.from(await imgResp.arrayBuffer()).toString('base64')
+
+  const parameters: Record<string, unknown> = {
+    // Vertical, social-native by default. Veo 3 supports '9:16' and '16:9'.
+    aspectRatio: process.env.VEO_ASPECT_RATIO || '9:16',
+  }
+  const avoid = opts?.negativePrompt?.trim()
+  if (avoid) parameters.negativePrompt = avoid.slice(0, 400)
+
+  const resp = await fetch(`${GEMINI_BASE}/models/${VEO_MODEL}:predictLongRunning`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      instances: [{ prompt, image: { bytesBase64Encoded, mimeType } }],
+      parameters,
+    }),
+  })
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '')
+    throw new Error(`Veo submit failed (${resp.status}): ${detail.slice(0, 300)}`)
+  }
+  const data = (await resp.json()) as Record<string, unknown>
+  const opName = data.name as string | undefined
+  if (!opName) {
+    throw new Error(`Veo submit returned no operation name. Raw: ${JSON.stringify(data).slice(0, 300)}`)
+  }
+  // Prefix so /api/status knows to poll the Veo operation endpoint.
+  return { requestId: `veo:${opName}`, status: 'queued' }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== 'POST') {
@@ -212,9 +275,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set. Add it in Vercel → Settings → Environment Variables.' })
     }
-    const hfReady = process.env.HF_CREDENTIALS || (process.env.HF_API_KEY && process.env.HF_API_SECRET)
-    if (!hfReady) {
-      return res.status(503).json({ error: 'Higgsfield credentials missing. Set HF_API_KEY + HF_API_SECRET in Vercel → Settings → Environment Variables.' })
+    if (VIDEO_PROVIDER === 'higgsfield') {
+      const hfReady = process.env.HF_CREDENTIALS || (process.env.HF_API_KEY && process.env.HF_API_SECRET)
+      if (!hfReady) {
+        return res.status(503).json({ error: 'Higgsfield credentials missing. Set HF_API_KEY + HF_API_SECRET in Vercel → Settings → Environment Variables.' })
+      }
+    } else if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it in Vercel → Settings → Environment Variables to enable Veo video generation.' })
     }
 
     const {
@@ -252,13 +319,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand, composedPrompt, sceneLabel)
-    const { requestId, status } = await submitVideoJob(directorPrompt, productImageUrl, quality as Quality, {
-      negativePrompt,
-      // Disable Higgsfield's own prompt rewrite when we already supplied a strong,
-      // identity-locked composed prompt — keeps ethnicity/scale from drifting.
-      enhance: composedPrompt ? false : true,
-    })
-    return res.status(200).json({ requestId, status, directorPrompt })
+
+    const { requestId, status } = VIDEO_PROVIDER === 'higgsfield'
+      ? await submitVideoJob(directorPrompt, productImageUrl, quality as Quality, {
+          negativePrompt,
+          // Disable Higgsfield's own prompt rewrite when we already supplied a strong,
+          // identity-locked composed prompt — keeps ethnicity/scale from drifting.
+          enhance: composedPrompt ? false : true,
+        })
+      : await submitVeoJob(directorPrompt, productImageUrl, { negativePrompt })
+
+    return res.status(200).json({ requestId, status, directorPrompt, provider: VIDEO_PROVIDER })
   } catch (err) {
     console.error('[/api/generate]', err)
     const message = err instanceof Error ? err.message : 'Generation failed.'
