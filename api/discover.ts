@@ -357,16 +357,152 @@ function finalize(ad: RawAd): SourceAd {
   }
 }
 
+// ── Apify Meta Ad Library adapter ─────────────────────────────────────────────
+// Driven by apify/facebook-ads-scraper. Everything actor-specific is isolated in
+// this one config so it's correctable in a single place. The actor scrapes from a
+// Facebook Ad Library URL you hand it via `startUrls` — that URL interface has
+// been the actor's stable contract across versions, so we build the search URL
+// rather than guessing at a keyword field.
+//
+// Output field names DO drift; mapItem is deliberately defensive (tries several
+// field-name variants and returns null when an item can't be mapped). If the
+// mapping is wrong, items map to null → the endpoint falls back to the labeled
+// demo set (live:false) rather than breaking or inventing data. Confirm the real
+// output shape with GET /api/apify-schema?actor=meta and by inspecting one
+// dataset item, then tighten mapItem below.
+const APIFY_BASE = 'https://api.apify.com/v2'
+
+const META_ACTOR = {
+  actorId: 'apify~facebook-ads-scraper',
+  enabled: true, // official actor; safe to attempt — degrades to demo set on miss.
+  maxResults: 20,
+  /** Build a Facebook Ad Library search URL for the query. */
+  searchUrl(type: string, value: string): string {
+    const params = new URLSearchParams({
+      active_status: 'all',
+      ad_type: 'all',
+      country: 'ALL',
+      media_type: 'all',
+    })
+    if (type === 'product_url') {
+      // No direct URL search in Ad Library; fall back to loose keyword tokens.
+      const kw = value.replace(/https?:\/\//, '').split(/[^a-zA-Z0-9]+/).filter(t => t.length > 3).slice(0, 4).join(' ')
+      params.set('q', kw || value)
+    } else {
+      params.set('q', value)
+    }
+    params.set('search_type', 'keyword_unordered')
+    return `https://www.facebook.com/ads/library/?${params.toString()}`
+  },
+  /** ⚠️ Output mapping — confirm field names against a real dataset item. */
+  mapItem(item: any): RawAd | null {
+    const snap = item?.snapshot ?? item?.snapShot ?? {}
+    const externalAdId = String(item?.adArchiveID ?? item?.adArchiveId ?? item?.ad_archive_id ?? item?.id ?? '')
+    if (!externalAdId) return null
+
+    const bodyText = snap?.body?.text ?? snap?.body ?? item?.adText ?? undefined
+    const headline = snap?.title ?? snap?.linkTitle ?? item?.title ?? undefined
+    const cta = snap?.ctaText ?? snap?.cta_text ?? snap?.cta ?? undefined
+    const pageName = item?.pageName ?? item?.page_name ?? snap?.pageName ?? 'Unknown advertiser'
+
+    const images: string[] = (snap?.images ?? snap?.cards ?? [])
+      .map((m: any) => m?.resizedImageUrl ?? m?.originalImageUrl ?? m?.imageUrl ?? m?.url)
+      .filter(Boolean)
+    const videos: string[] = (snap?.videos ?? [])
+      .map((v: any) => v?.videoSdUrl ?? v?.videoHdUrl ?? v?.url)
+      .filter(Boolean)
+    const mediaUrls = videos.length ? videos : images
+    const mediaType: SourceAd['creative']['mediaType'] =
+      videos.length ? 'video' : images.length > 1 ? 'carousel' : 'image'
+
+    const startRaw = item?.startDate ?? item?.start_date ?? item?.startDateFormatted ?? snap?.startDate
+    const startMs = typeof startRaw === 'number' ? startRaw * 1000 : Date.parse(startRaw ?? '')
+    const startDate = isFinite(startMs) ? new Date(startMs).toISOString() : new Date().toISOString()
+    const isActive = item?.isActive ?? item?.is_active ?? true
+
+    return {
+      id: `apify-${externalAdId}`,
+      platform: 'meta',
+      externalAdId,
+      pageOrShopName: pageName,
+      keywords: [],
+      creative: { headline, bodyText, cta, mediaUrls: mediaUrls.length ? mediaUrls : [], mediaType },
+      delivery: {
+        startDate,
+        isActive: !!isActive,
+        impressionsRange: item?.impressionsWithIndex?.impressionsText ?? item?.impressions ?? undefined,
+        spendRange: item?.spend ?? undefined,
+      },
+      // Sourcing is a separate call (/api/sourcing) — left unmatched here so the
+      // score reflects "not yet sourced" until the sourcing lookup runs.
+      product: { name: headline || pageName },
+      sceneCount: mediaType === 'video' ? 3 : 1,
+      durationSeconds: mediaType === 'video' ? 20 : 8,
+    }
+  },
+}
+
+/** Submit an async actor run, poll until it finishes, return dataset items. */
+async function runApifyActorAsync(actorId: string, input: Record<string, unknown>, token: string): Promise<any[]> {
+  const startResp = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!startResp.ok) {
+    const detail = await startResp.text().catch(() => '')
+    throw new Error(`Apify run start failed (${startResp.status}): ${detail.slice(0, 200)}`)
+  }
+  const started = (await startResp.json()) as any
+  const runId = started?.data?.id
+  const datasetId = started?.data?.defaultDatasetId
+  if (!runId) throw new Error('Apify did not return a run id.')
+
+  // Poll run status. Cap well under the function timeout so we never hang the
+  // request; if it's still running we bail to the demo set rather than block.
+  const deadline = Date.now() + 45_000
+  let finalDatasetId = datasetId
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3_000))
+    const statusResp = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${encodeURIComponent(token)}`)
+    if (!statusResp.ok) continue
+    const run = (await statusResp.json()) as any
+    const status = run?.data?.status
+    finalDatasetId = run?.data?.defaultDatasetId ?? finalDatasetId
+    if (status === 'SUCCEEDED') break
+    if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+      throw new Error(`Apify run ${status}.`)
+    }
+  }
+  if (!finalDatasetId) return []
+
+  const itemsResp = await fetch(`${APIFY_BASE}/datasets/${finalDatasetId}/items?token=${encodeURIComponent(token)}&clean=true&limit=${META_ACTOR.maxResults}`)
+  if (!itemsResp.ok) return []
+  const items = (await itemsResp.json()) as any[]
+  return Array.isArray(items) ? items : []
+}
+
 /**
- * Real scraper adapter. Stubbed until an Apify actor ID is confirmed — when
- * APIFY_TOKEN is present this is where the Meta/TikTok actor runs are kicked off
- * and polled. Returning null falls back to the seed set so the UI never breaks.
+ * Real scraper adapter. When APIFY_TOKEN is present and the actor is enabled,
+ * runs the Meta Ad Library actor and maps its dataset into RawAd[]. Returns null
+ * (→ demo-set fallback) on any failure or empty result, so the UI never breaks.
+ *
+ * Only Meta is wired (per the chosen actor). TikTok stays on the demo set.
  */
-async function runApifyAdapter(_type: string, _value: string, _platform: string): Promise<RawAd[] | null> {
-  // TODO: replace with a real Apify run + poll once the actor is selected:
-  //   const run = await fetch(`https://api.apify.com/v2/acts/<actor>/runs?token=${process.env.APIFY_TOKEN}`, ...)
-  //   poll run status, map dataset items → RawAd[]
-  return null
+async function runApifyAdapter(type: string, value: string, platform: string): Promise<RawAd[] | null> {
+  const token = process.env.APIFY_TOKEN
+  if (!token || !META_ACTOR.enabled) return null
+  if (platform === 'tiktok') return null // Meta-only actor; let TikTok use the seed set.
+
+  try {
+    const input = { startUrls: [{ url: META_ACTOR.searchUrl(type, value) }], count: META_ACTOR.maxResults }
+    const items = await runApifyActorAsync(META_ACTOR.actorId, input, token)
+    const mapped = items.map(it => META_ACTOR.mapItem(it)).filter((a): a is RawAd => a !== null)
+    return mapped.length ? mapped : null
+  } catch (err) {
+    console.error('[/api/discover] Apify adapter error — falling back to demo set:', err)
+    return null
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

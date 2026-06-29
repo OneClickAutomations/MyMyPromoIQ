@@ -9,17 +9,17 @@
  *   A — has a product: browse scored ads → clone → upload own product in wizard
  *   B — find a product: keyword/URL search → same scored list → same clone flow
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import {
   Compass, Search, TrendingUp, Wand, X, Check, ArrowRight, Spark,
-  Package, Clock, Bolt,
+  Package, Clock, Bolt, RefreshCw, LinkIcon,
 } from '../components/icons'
-import { runDiscoverySearch, analyzeSourceAd } from '../lib/discovery/api'
+import { runDiscoverySearch, analyzeSourceAd, runSourcingLookup, type SourcingResponse } from '../lib/discovery/api'
 import type {
-  SourceAd, AdPlatform, ScoreRating, AdAnalysis, ClonePrefill, AdSearchResponse,
+  SourceAd, AdPlatform, ScoreRating, AdAnalysis, ClonePrefill, AdSearchResponse, SourcingResult,
 } from '../lib/discovery/types'
 
 type Workflow = 'has_product' | 'find_product'
@@ -162,9 +162,123 @@ function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
 }
 
 // ── Detail drawer ─────────────────────────────────────────────────────────────
+// ── Sourcing panel — live AliExpress lookup + CJ fulfillment handoff ──────────
+function ConfidenceBadge({ confidence }: { confidence: SourcingResult['confidence'] }) {
+  const styles: Record<SourcingResult['confidence'], string> = {
+    high:   'bg-emerald-400/15 text-emerald-300 ring-emerald-400/30',
+    medium: 'bg-amber-400/15 text-amber-300 ring-amber-400/30',
+    low:    'bg-rose-400/15 text-rose-300 ring-rose-400/30',
+  }
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ring-1 ${styles[confidence]}`}>
+      {confidence} confidence
+    </span>
+  )
+}
+
+function SourcingPanel({ ad }: { ad: SourceAd }) {
+  // Seed from any match already attached to the ad; otherwise run a live lookup.
+  const seeded = ad.product.matchedSourcingResult ?? null
+  const [result, setResult] = useState<SourcingResult | null>(seeded)
+  const [fulfillUrl, setFulfillUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [looked, setLooked] = useState(!!seeded)
+
+  const adProductShot = ad.creative.mediaUrls[0]
+
+  async function lookup() {
+    if (!ad.product.name) { setError('No product name on this ad to search with.'); return }
+    setLoading(true); setError(''); setNotice('')
+    try {
+      const r: SourcingResponse = await runSourcingLookup(ad.product.name, ad.creative.mediaUrls[0])
+      setResult(r.sourcingResult)
+      setFulfillUrl(r.fulfillUrl)
+      if (r.notice) setNotice(r.notice)
+      setLooked(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sourcing lookup failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Auto-run a lookup the first time the drawer opens with no seeded match.
+  useEffect(() => { if (!seeded && ad.product.name) lookup() /* eslint-disable-next-line */ }, [])
+
+  const cjUrl = fulfillUrl ?? `https://cjdropshipping.com/list/search?searchText=${encodeURIComponent(ad.product.name ?? '')}`
+
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-void-800/60 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Sourcing match</p>
+        {looked && (
+          <button onClick={lookup} disabled={loading} className="inline-flex items-center gap-1 text-[11px] font-semibold text-fire-start hover:text-fire-end disabled:opacity-50">
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> Re-check
+          </button>
+        )}
+      </div>
+
+      {loading && !result && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-ink-muted">
+          <RefreshCw className="h-4 w-4 animate-spin text-fire-start" /> Searching marketplaces…
+        </div>
+      )}
+
+      {/* Matched result — side-by-side: ad product shot vs marketplace match */}
+      {result && (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Ad product</p>
+              {adProductShot
+                ? <img src={adProductShot} alt="" className="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10" />
+                : <div className="grid aspect-square w-full place-items-center rounded-lg bg-void-700 text-ink-faint"><Package className="h-6 w-6" /></div>}
+            </div>
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Marketplace match</p>
+              {result.matchedImageUrl
+                ? <img src={result.matchedImageUrl} alt="" className="aspect-square w-full rounded-lg object-cover ring-1 ring-white/10" />
+                : <div className="grid aspect-square w-full place-items-center rounded-lg bg-void-700 text-ink-faint"><Package className="h-6 w-6" /></div>}
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-base font-bold text-ink">
+              {result.currency === 'USD' ? '$' : ''}{result.unitCost.toFixed(2)}
+              <span className="ml-1 text-xs font-normal text-ink-muted">{result.currency !== 'USD' ? result.currency : ''} / unit</span>
+            </p>
+            <ConfidenceBadge confidence={result.confidence} />
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">
+            {result.provider === 'aliexpress' ? 'AliExpress' : 'CJ Dropshipping'}
+            {result.shippingEstimateDays ? ` · ~${result.shippingEstimateDays}d shipping` : ''}
+            {result.supplierRating ? ` · ${result.supplierRating}★` : ''}
+          </p>
+          <p className="mt-2 text-[11px] text-ink-faint">Confirm the two images match before trusting the cost — matters most for medium confidence.</p>
+        </>
+      )}
+
+      {/* No match — plain, non-blocking */}
+      {looked && !result && !loading && (
+        <p className="mt-3 text-sm text-ink-muted">No sourcing match found. You can still proceed and upload your own product in the next step.</p>
+      )}
+
+      {notice && <p className="mt-2 text-[11px] text-ink-faint">{notice}</p>}
+      {error && <p className="mt-2 text-[11px] text-amber-300">{error}</p>}
+
+      {/* CJ Dropshipping fulfillment handoff — separate concern from the price-check */}
+      <a href={cjUrl} target="_blank" rel="noreferrer"
+        className="btn-ghost mt-3 flex w-full items-center justify-center gap-2 py-2.5 text-sm">
+        <LinkIcon className="h-4 w-4" /> Fulfill via CJ Dropshipping
+      </a>
+    </div>
+  )
+}
+
 function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => void; onClone: () => void }) {
   const f = ad.score.factors
-  const src = ad.product.matchedSourcingResult
   return (
     <>
       <motion.div
@@ -213,21 +327,8 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
             <p className="text-[11px] text-ink-faint">Estimated from public signals — not a guarantee of performance.</p>
           </div>
 
-          {/* Sourcing match */}
-          {src && (
-            <div className="rounded-xl border border-white/[0.06] bg-void-800/60 p-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Sourcing match</p>
-              <div className="mt-3 flex items-center gap-3">
-                {src.matchedImageUrl && <img src={src.matchedImageUrl} alt="" className="h-14 w-14 flex-shrink-0 rounded-lg object-cover" />}
-                <div className="min-w-0 text-sm">
-                  <p className="font-semibold text-ink">${src.unitCost.toFixed(2)} <span className="font-normal text-ink-muted">/ unit</span></p>
-                  <p className="text-xs text-ink-muted">{src.provider === 'aliexpress' ? 'AliExpress' : 'CJ Dropshipping'} · {src.confidence} confidence</p>
-                  {src.shippingEstimateDays && <p className="text-xs text-ink-faint">~{src.shippingEstimateDays}d shipping{src.supplierRating ? ` · ${src.supplierRating}★` : ''}</p>}
-                </div>
-              </div>
-              <p className="mt-2 text-[11px] text-ink-faint">Confirm the image matches before trusting the cost.</p>
-            </div>
-          )}
+          {/* Sourcing match — live lookup + CJ fulfillment handoff */}
+          <SourcingPanel ad={ad} />
         </div>
 
         <div className="border-t border-white/[0.06] p-4">
