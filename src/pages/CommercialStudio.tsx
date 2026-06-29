@@ -586,6 +586,16 @@ export default function CommercialStudio() {
     if (stepNum === 8) loadVoices()
   }, [stepNum, loadVoices])
 
+  // Auto-combine the rendered scene with its voiceover the moment both are ready,
+  // so the finished clip actually plays with sound — no manual "combine" click
+  // (that extra step was why generated videos seemed silent). The guards make this
+  // fire exactly once per scene.
+  useEffect(() => {
+    if (directorPhase === 'done' && videoUrl && voiceoverUrl && !muxedUrl && !muxing) {
+      handleMux()
+    }
+  }, [directorPhase, videoUrl, voiceoverUrl, muxedUrl, muxing]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function previewVoice(v: ElevenVoice) {
     if (!v.previewUrl) return
     // Toggle off if the same preview is playing.
@@ -1855,10 +1865,22 @@ export default function CommercialStudio() {
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
                 </div>
                 <audio src={voiceoverUrl} controls className="mt-3 w-full" />
-                {!muxedUrl && <p className="mt-1.5 text-[11px] text-ink-faint">Combine with the video below, or continue generating scenes and stitch them all at the end.</p>}
+                {muxing
+                  ? <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-fire-start"><RefreshCw className="h-3 w-3 animate-spin" /> Adding the voiceover to your video…</p>
+                  : !muxedUrl && <p className="mt-1.5 text-[11px] text-ink-faint">Combining with your video automatically — or continue generating scenes and stitch them all at the end.</p>}
               </div>
             )}
             {voiceoverError && <p className="text-xs text-amber-300">Voiceover: {voiceoverError}</p>}
+
+            {/* No voice was picked → the clip is silent. Tell the user why and how to fix it. */}
+            {!voiceoverUrl && !voiceoverError && (
+              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
+                <p className="text-sm font-semibold text-amber-200">This clip has no voiceover</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
+                  Pick a voice in the Voice step and add a script so your ad speaks. The video renders without sound until a voice is selected.
+                </p>
+              </div>
+            )}
 
             {muxedUrl && (
               <div className="overflow-hidden rounded-2xl border border-gold/30 bg-void-900">
