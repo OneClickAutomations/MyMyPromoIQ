@@ -28,6 +28,15 @@ type SortKey = 'score' | 'days' | 'newest'
 
 const CLONE_PREFILL_KEY = 'promoiq_clone_prefill'
 
+// Meta/Instagram CDN images are hotlink-protected (403 cross-origin), so route
+// them through our server-side proxy (GET /api/discover?img=). Non-Meta URLs
+// (e.g. Unsplash demo images) are passed through untouched.
+const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|\.facebook\.com)/i
+function proxiedMedia(url?: string): string | undefined {
+  if (!url) return undefined
+  return META_CDN.test(url) ? `/api/discover?img=${encodeURIComponent(url)}` : url
+}
+
 // ── Score visual language — small semantic badges, never full-card fills ──────
 const RATING_STYLES: Record<ScoreRating, { dot: string; text: string; ring: string; label: string }> = {
   green:  { dot: 'bg-emerald-400', text: 'text-emerald-300', ring: 'ring-emerald-400/30 bg-emerald-400/10', label: 'Strong' },
@@ -134,7 +143,7 @@ function FactorRow({ label, value, signal }: { label: string; value: number; sig
 
 // ── Result card ───────────────────────────────────────────────────────────────
 function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
-  const media = ad.creative.mediaUrls[0]
+  const media = proxiedMedia(ad.creative.mediaUrls[0])
   return (
     <button
       type="button"
@@ -304,7 +313,7 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
           {ad.creative.mediaUrls[0] && (
-            <img src={ad.creative.mediaUrls[0]} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
+            <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
           )}
 
           <div className="flex items-center justify-between gap-3">
