@@ -55,7 +55,12 @@ async function pollVeo(opName: string, res: VercelResponse) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required to poll Veo).')
 
-  const opResp = await fetch(`${GEMINI_BASE}/${opName}`, { headers: { 'x-goog-api-key': apiKey } })
+  // The `name` field from Veo's predictLongRunning varies across API versions:
+  //   "operations/abc123"                      → append to base
+  //   "models/veo-3.../operations/abc123"      → append to base
+  //   "https://generativelanguage.../..."       → use as-is (full URL)
+  const opUrl = opName.startsWith('http') ? opName : `${GEMINI_BASE}/${opName}`
+  const opResp = await fetch(opUrl, { headers: { 'x-goog-api-key': apiKey } })
   if (!opResp.ok) {
     const detail = await opResp.text().catch(() => '')
     throw new Error(`Veo status failed (${opResp.status}): ${detail.slice(0, 300)}`)
