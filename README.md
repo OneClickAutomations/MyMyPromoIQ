@@ -53,11 +53,15 @@ src/
     icons.tsx              # inline SVG icon set (no emoji as UI)
   lib/api.ts               # front-end client for /api/generate + /api/status
 
-netlify/
-  functions/generate.ts    # Claude directs + Higgsfield submit
-  functions/status.ts      # poll render status by id
-  lib/director.ts          # shared: styles, Claude director, Higgsfield calls
-netlify.toml               # build, functions dir, /api/* redirects, SPA fallback
+api/                       # Vercel serverless functions (the production backend)
+  generate.ts              # Claude directs + Veo 3 / Higgsfield submit
+  status.ts                # poll render status by id
+  modelsheet.ts            # Gemini image gen/edit + turnaround sheets
+  voiceover.ts             # ElevenLabs voices (GET) + TTS (POST)
+  discover.ts              # ad search + Meta CDN image proxy
+  sourcing.ts              # AliExpress sourcing + actor schema introspection
+  mux.ts · stitch.ts · presign.ts · store.ts · director.ts · analyze-ad.ts
+vercel.json                # build, function config, /api/* + SPA routing
 ```
 
 ## Hero visual
@@ -74,54 +78,55 @@ generation in progress.
 
 ## Live generation pipeline
 
-The page ships with a **real, working** generation flow (`#generate`,
-`src/components/Generator.tsx`) backed by Netlify Functions. Keys stay
-**server-side only** — they never reach the React bundle.
+The app ships with a **real, working** generation flow backed by **Vercel
+serverless functions** (`api/`). Keys stay **server-side only** — they never
+reach the React bundle.
 
 ```
-Browser (Generator.tsx)
+Browser
   │  POST /api/generate { productImageUrl, productDescription, style, quality }
   ▼
-netlify/functions/generate.ts
-  │  1. Claude (claude-opus-4-8) writes the cinematic motion prompt   ← ANTHROPIC_API_KEY
-  │  2. Submit Higgsfield image-to-video job (non-blocking)           ← HF_API_KEY / HF_API_SECRET
+api/generate.ts
+  │  1. Claude writes the cinematic motion prompt                     ← ANTHROPIC_API_KEY
+  │  2. Submit the video job (non-blocking):
+  │       VIDEO_PROVIDER=veo3 (default) → Veo 3, native audio         ← GEMINI_API_KEY
+  │       VIDEO_PROVIDER=higgsfield     → Higgsfield                  ← HF_API_KEY / HF_API_SECRET
   ▼  → { requestId, directorPrompt }
 Browser polls  GET /api/status?id=<requestId>
   ▼
-netlify/functions/status.ts → GET platform.higgsfield.ai/requests/{id}/status
+api/status.ts → polls the provider; re-hosts the finished clip to Supabase
   ▼  → { status, videoUrl }  →  <video> + Download
 ```
 
 Why async? Renders take 1–3 minutes — far longer than a serverless function
 may run — so submit and poll are split into two endpoints.
 
-Shared provider logic (Claude director prompt, Higgsfield submit/poll, the
-UGC style presets) lives in `netlify/lib/director.ts`.
-
 ### Environment variables (server-side only)
 
-Set these in **Netlify → Site settings → Environment variables**, and in a
-local `.env` (gitignored) for `netlify dev`. See [`.env.example`](./.env.example).
+Set these in **Vercel → Settings → Environment Variables**, and in a local
+`.env` (gitignored). See [`.env.example`](./.env.example).
 
 | Var | Purpose |
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude "director" that writes the video prompt |
-| `HF_API_KEY` + `HF_API_SECRET` | Higgsfield image-to-video (or `HF_CREDENTIALS="id:secret"`) |
+| `GEMINI_API_KEY` | Veo 3 video **and** Gemini image generation (model sheets, Creator/Product studios) |
+| `ELEVENLABS_API_KEY` | AI voiceovers |
+| `SUPABASE_SERVICE_KEY` | Image/video uploads + re-hosting renders |
+| `APIFY_TOKEN` | Discovery (Meta Ad Library) + AliExpress sourcing |
+| `HF_API_KEY` + `HF_API_SECRET` | Only if `VIDEO_PROVIDER=higgsfield` |
 
-### Run with the functions locally
+> Vercel Hobby caps deployments at **12 serverless functions** and **60s**
+> max duration — the `api/` set is kept at exactly 12 (some endpoints fold
+> multiple modes into one function) for this reason.
+
+### Run locally
 
 ```bash
-npm i -g netlify-cli   # once
-netlify dev            # serves the SPA + /api/* functions together
+npm run dev            # front end (Vite)
+npm run dev:vercel     # SPA + /api/* functions together (vercel dev)
 ```
 
 `npm run dev` alone runs the front end only; the `/api/*` calls need
-`netlify dev` (or a deploy) to reach the functions.
-
-### Notes / next phase
-
-- The generator takes a **public image URL**. To accept direct uploads,
-  add a storage step (S3, Cloudinary, Netlify Blobs) that returns a public
-  URL, then pass it as `productImageUrl`.
+`vercel dev` (or a deploy) to reach the functions.
 - `src/components/HowItWorks.tsx` is the *explainer*; `Generator.tsx` is the
   real thing. The "push to Meta/TikTok" step is left for the app-shell phase.
