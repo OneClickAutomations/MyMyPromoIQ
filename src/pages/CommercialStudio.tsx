@@ -6,7 +6,7 @@
  *           Lighting → Voice → Script → Storyboard → Director (generation)
  */
 import { useState, useRef, useCallback, useTransition, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
@@ -451,6 +451,9 @@ export default function CommercialStudio() {
   const SCENE_LABELS = ['Hook', 'Problem / Agitation', 'Solution', 'Social Proof', 'Call to Action', 'Outro'] as const
   const [completedScenes, setCompletedScenes] = useState<SceneResult[]>([])
   const [currentSceneIdx, setCurrentSceneIdx] = useState(0)
+  // 'quick' = one video in a chosen format; 'full' = build up to 6 scenes into a
+  // complete commercial. Seeded from the dashboard entry point (?mode=).
+  const [adMode, setAdMode] = useState<'quick' | 'full'>('full')
   const [genProgress, setGenProgress] = useState(0)
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -502,6 +505,23 @@ export default function CommercialStudio() {
     })
     return () => { cancelled = true }
   }, [user?.id])
+
+  // ── Entry params from the dashboard: ?style=<preset>&mode=quick|full ────────
+  // Quick Create cards pass the chosen format so the studio opens pre-set on it;
+  // 'full' opens the multi-scene commercial builder.
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const mode = searchParams.get('mode')
+    if (mode === 'quick' || mode === 'full') setAdMode(mode)
+    const style = searchParams.get('style')
+    if (style && STYLE_PRESETS[style]) {
+      setBrief(prev => {
+        const next = { ...prev, ...applyStylePreset(prev, style) }
+        scheduleSave(next)
+        return next
+      })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Clone bridge: hydrate the brief from a discovered-ad analysis (once) ────
   useEffect(() => {
@@ -1671,16 +1691,44 @@ export default function CommercialStudio() {
     const isGenerating = directorPhase === 'directing' || directorPhase === 'generating'
     const currentLabel = SCENE_LABELS[currentSceneIdx] ?? `Scene ${currentSceneIdx + 1}`
     const scenesDone = completedScenes.length
-    const canAddMore = scenesDone < SCENE_LABELS.length
+    // Quick Create = a single video; Full Ad = build up to all six beats.
+    const canAddMore = adMode === 'full' && scenesDone < SCENE_LABELS.length
     const canStitch = scenesDone >= 2
 
     return (
       <div className="space-y-6">
         <StepHeader
-          title={scenesDone === 0 ? 'AI Director' : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${SCENE_LABELS.length}`}
-          desc={isGenerating ? `Generating — ${currentLabel}` : scenesDone > 0 ? 'Keep going or stitch your scenes into a full ad.' : 'Sit back — the director is working.'}
+          title={scenesDone === 0 ? (adMode === 'quick' ? 'Quick Create' : 'AI Director') : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${SCENE_LABELS.length}`}
+          desc={isGenerating ? `Generating — ${currentLabel}` : scenesDone > 0 ? (adMode === 'full' ? 'Keep going or stitch your scenes into a full ad.' : 'Your video is ready below.') : 'Sit back — the director is working.'}
           onBack={directorPhase === 'idle' ? goBack : undefined}
         />
+
+        {/* ── Ad structure — the six beats that make a full commercial (full mode) ─ */}
+        {adMode === 'full' && (
+        <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-3.5">
+          <div className="mb-2.5 flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-faint">Ad structure</p>
+            <span className="text-[10px] text-ink-faint">{scenesDone}/{SCENE_LABELS.length} beats · all six = a full commercial</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {SCENE_LABELS.map((label, i) => {
+              const done = i < scenesDone
+              const current = i === scenesDone
+              return (
+                <span key={label}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    done ? 'bg-emerald-500/15 text-emerald-300'
+                    : current ? 'bg-fire-start/15 text-fire-start ring-1 ring-fire-start/30'
+                    : 'bg-void-700/40 text-ink-faint'
+                  }`}>
+                  {done ? <Check className="h-3 w-3" /> : <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-black/20 text-[8px]">{i + 1}</span>}
+                  {label}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+        )}
 
         {/* ── Completed scenes gallery ──────────────────────────────────────── */}
         {completedScenes.length > 0 && (
@@ -1704,9 +1752,12 @@ export default function CommercialStudio() {
                   </div>
                 </div>
               ))}
-              {/* Empty slot placeholders */}
-              {Array.from({ length: Math.max(0, SCENE_LABELS.length - completedScenes.length) }).map((_, i) => (
-                <div key={`empty-${i}`} className="aspect-[9/16] rounded-xl border border-dashed border-white/[0.08] bg-void-900/30" />
+              {/* Empty slot placeholders — labeled with the upcoming scene beat (full mode) */}
+              {adMode === 'full' && SCENE_LABELS.slice(completedScenes.length).map((label, i) => (
+                <div key={`empty-${i}`} className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-white/[0.08] bg-void-900/30 p-2 text-center">
+                  <span className="grid h-5 w-5 place-items-center rounded-full bg-void-700/60 text-[10px] font-bold text-ink-faint">{completedScenes.length + i + 1}</span>
+                  <span className="text-[9px] font-semibold leading-tight text-ink-faint">{label}</span>
+                </div>
               ))}
             </div>
           </div>
@@ -1726,7 +1777,7 @@ export default function CommercialStudio() {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-3 text-xs text-ink-faint">You'll be able to generate up to 6 scenes and stitch them into one complete ad.</p>
+                <p className="mt-3 text-xs text-ink-faint">{adMode === 'full' ? "You'll be able to generate up to 6 scenes and stitch them into one complete ad." : 'Quick Create renders a single video in your chosen format.'}</p>
               </div>
             )}
             {savedBrand && scenesDone === 0 && (
