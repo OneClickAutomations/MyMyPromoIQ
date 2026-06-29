@@ -546,7 +546,47 @@ async function runApifyAdapter(type: string, value: string, platform: string): P
   }
 }
 
+// ── Ad-media image proxy (GET /api/discover?img=<url>) ────────────────────────
+// Facebook/Instagram CDN images are hotlink-protected and 403 when loaded
+// cross-origin from the browser. This streams them server-side with a browser-like
+// referer so card thumbnails render. Folded into this function (not a new file) to
+// stay under Vercel's 12-function limit. Restricted to Meta CDN hosts so it can't
+// be abused as an open proxy (SSRF guard).
+const PROXY_HOST_ALLOWLIST = ['fbcdn.net', 'facebook.com', 'cdninstagram.com', 'fbsbx.com']
+
+async function proxyImage(req: VercelRequest, res: VercelResponse) {
+  const raw = req.query.img
+  const url = Array.isArray(raw) ? raw[0] : raw
+  if (!url) return res.status(400).json({ error: 'img query parameter is required.' })
+
+  let host: string
+  try { host = new URL(url).hostname } catch { return res.status(400).json({ error: 'Invalid image URL.' }) }
+  if (!PROXY_HOST_ALLOWLIST.some(h => host === h || host.endsWith(`.${h}`))) {
+    return res.status(403).json({ error: 'Only Meta CDN image hosts may be proxied.' })
+  }
+
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        referer: 'https://www.facebook.com/',
+        accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
+      },
+    })
+    if (!upstream.ok) return res.status(502).json({ error: `Upstream image fetch failed (${upstream.status}).` })
+    const contentType = upstream.headers.get('content-type') || 'image/jpeg'
+    const buf = Buffer.from(await upstream.arrayBuffer())
+    res.setHeader('content-type', contentType)
+    res.setHeader('cache-control', 'public, max-age=86400, s-maxage=86400') // 24h CDN cache
+    return res.status(200).send(buf)
+  } catch (err) {
+    console.error('[/api/discover proxyImage]', err)
+    return res.status(502).json({ error: 'Image proxy failed.' })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET' && req.query.img) return proxyImage(req, res)
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const { type = 'keyword', value = '', platform = 'both' } = (req.body ?? {}) as Record<string, string>
