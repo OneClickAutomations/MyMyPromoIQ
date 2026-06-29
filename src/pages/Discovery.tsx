@@ -153,8 +153,13 @@ function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
       <div className="flex flex-1 flex-col p-3.5">
         <p className="truncate text-sm font-bold text-ink">{ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName}</p>
         <p className="truncate text-xs text-ink-muted">{ad.pageOrShopName}</p>
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-faint">
-          <Clock className="h-3 w-3" /> {ad.delivery.daysRunning}d running
+        {ad.creative.bodyText && (
+          <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-ink-faint">{ad.creative.bodyText}</p>
+        )}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
+          <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> {ad.delivery.daysRunning}d running</span>
+          {ad.delivery.impressionsRange && <span>· {ad.delivery.impressionsRange} impressions</span>}
+          {ad.creative.mediaType === 'video' && <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-semibold uppercase">Video</span>}
         </div>
       </div>
     </button>
