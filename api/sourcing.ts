@@ -18,13 +18,10 @@
  * repeated lookups don't burn Apify spend. AliExpress prices drift, so this TTL
  * is deliberately shorter than the 24h ad-search cache.
  *
- * ⚠️  ACTOR FIELD NAMES ARE UNVERIFIED AND THE ACTORS ARE GATED OFF.
- *     "scraper" actors are not standardized; their input AND output field names
- *     vary by maintainer. Do NOT enable an actor until you have confirmed its
- *     real schema with GET /api/apify-schema?actor=ali-keyword (and ali-image),
- *     corrected the `input`/`mapItem` functions below, and flipped `enabled`.
- *     Until then this endpoint returns null sourcing (honest "couldn't verify")
- *     rather than a fabricated price.
+ * Actor INPUT field names are verified against each actor's live schema and the
+ * actors are enabled. OUTPUT (dataset item) field names are parsed defensively —
+ * if a real run's fields differ, mapItem returns null and the endpoint reports
+ * "couldn't verify" rather than a fabricated price. Requires APIFY_TOKEN.
  *
  * Self-contained: no src/ imports.
  */
@@ -59,73 +56,78 @@ interface RawMatch {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ⚠️  ACTOR ADAPTERS — VERIFY BEFORE ENABLING
+//  ACTOR ADAPTERS
 //
 //  Each adapter isolates everything actor-specific in ONE place: the actor id,
-//  the input it's called with, and how a dataset item maps into RawMatch. The
-//  field names below are PLACEHOLDERS, not verified. Run /api/apify-schema for
-//  each actor, correct `input(...)` and `mapItem(...)`, then set `enabled: true`.
+//  the input it's called with, and how a dataset item maps into RawMatch.
+//
+//  INPUT field names are VERIFIED against each actor's live input schema
+//  (GET /api/sourcing?schema=ali-keyword | ali-image), so the actors are enabled.
+//  OUTPUT (dataset item) field names are still parsed DEFENSIVELY across the
+//  common variants — if none match, mapItem returns null and the endpoint reports
+//  "couldn't verify" rather than a wrong price. Tighten mapItem once a real run
+//  confirms the exact output keys.
 // ─────────────────────────────────────────────────────────────────────────────
 interface ActorAdapter {
   actorId: string
   enabled: boolean
-  /** Build the actor's run input. ⚠️ confirm field names via /api/apify-schema. */
+  /** Build the actor's run input (field names verified against the live schema). */
   input: (args: { productName: string; productImageUrl?: string }) => Record<string, unknown>
-  /** Map ONE dataset item → RawMatch, or null to skip. ⚠️ confirm output fields. */
+  /** Map ONE dataset item → RawMatch, or null to skip. */
   mapItem: (item: any) => RawMatch | null
+}
+
+// Residential US proxy — AliExpress geo-blocks/datacentre-blocks scrapers, so the
+// keyword actor effectively requires this to return results.
+const APIFY_PROXY = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'], apifyProxyCountry: 'US' }
+
+/**
+ * Defensive output mapping shared by both AliExpress actors. Pulls price + a
+ * product URL (building one from a product id when no direct URL is present);
+ * returns null when neither can be found so we never surface a fabricated price.
+ */
+function mapAliExpressItem(item: any): RawMatch | null {
+  const unitCost = num(item?.price ?? item?.salePrice ?? item?.minPrice ?? item?.appSalePrice ?? item?.originalPrice)
+  let productUrl = str(item?.productUrl ?? item?.detailUrl ?? item?.url ?? item?.link ?? item?.productDetailUrl)
+  if (!productUrl) {
+    const id = str(item?.productId ?? item?.product_id ?? item?.itemId ?? item?.id)
+    if (id) productUrl = `https://www.aliexpress.com/item/${id}.html`
+  }
+  if (unitCost == null || !productUrl) return null
+  return {
+    productUrl,
+    imageUrl: str(item?.imageUrl ?? item?.image ?? item?.imageURL ?? item?.thumbnail ?? item?.mainImage) || undefined,
+    unitCost,
+    currency: str(item?.currency ?? item?.currencyCode) || 'USD',
+    supplierRating: num(item?.rating ?? item?.storeRating ?? item?.evaluateRate ?? item?.starRating) ?? undefined,
+    shippingEstimateDays: num(item?.shippingDays ?? item?.deliveryDays ?? item?.deliveryTime) ?? undefined,
+  }
 }
 
 const ALIEXPRESS_ACTORS: { keyword: ActorAdapter; image: ActorAdapter } = {
   // thirdwatch/aliexpress-product-scraper — keyword/title match.
   keyword: {
     actorId: 'thirdwatch~aliexpress-product-scraper',
-    enabled: false, // ⚠️ flip true ONLY after verifying the schema.
+    enabled: true,
+    // Verified input schema: queries (string[]), maxResults, country, sortBy,
+    // trending, proxyConfiguration.
     input: ({ productName }) => ({
-      // ⚠️ UNVERIFIED placeholder. Could be searchTerms / keyword / query / urls.
-      //    Confirm with: GET /api/apify-schema?actor=ali-keyword
-      search: productName,
-      maxItems: 5,
+      queries: [productName],
+      maxResults: 5,
+      country: 'US',
+      sortBy: 'default',
+      trending: false,
+      proxyConfiguration: APIFY_PROXY,
     }),
-    mapItem: (item) => {
-      // ⚠️ UNVERIFIED placeholder output mapping. Confirm price/currency/url field
-      //    names against a real dataset item before trusting this.
-      const unitCost = num(item?.price ?? item?.salePrice ?? item?.minPrice)
-      const productUrl = str(item?.url ?? item?.productUrl ?? item?.link)
-      if (unitCost == null || !productUrl) return null
-      return {
-        productUrl,
-        imageUrl: str(item?.image ?? item?.imageUrl ?? item?.thumbnail) || undefined,
-        unitCost,
-        currency: str(item?.currency) || 'USD',
-        supplierRating: num(item?.rating ?? item?.storeRating) ?? undefined,
-        shippingEstimateDays: num(item?.shippingDays ?? item?.deliveryDays) ?? undefined,
-      }
-    },
+    mapItem: mapAliExpressItem,
   },
   // freecamp008/aliexpress-search-by-image-actor — reverse-image match.
   image: {
     actorId: 'freecamp008~aliexpress-search-by-image-actor',
-    enabled: false, // ⚠️ flip true ONLY after verifying the schema.
-    input: ({ productImageUrl }) => ({
-      // ⚠️ UNVERIFIED placeholder. Could be imageUrl / image / imageUrls / url.
-      //    Confirm with: GET /api/apify-schema?actor=ali-image
-      imageUrl: productImageUrl,
-      maxItems: 5,
-    }),
-    mapItem: (item) => {
-      // ⚠️ UNVERIFIED placeholder output mapping.
-      const unitCost = num(item?.price ?? item?.salePrice ?? item?.minPrice)
-      const productUrl = str(item?.url ?? item?.productUrl ?? item?.link)
-      if (unitCost == null || !productUrl) return null
-      return {
-        productUrl,
-        imageUrl: str(item?.image ?? item?.imageUrl ?? item?.thumbnail) || undefined,
-        unitCost,
-        currency: str(item?.currency) || 'USD',
-        supplierRating: num(item?.rating ?? item?.storeRating) ?? undefined,
-        shippingEstimateDays: num(item?.shippingDays ?? item?.deliveryDays) ?? undefined,
-      }
-    },
+    enabled: true,
+    // Verified input schema: a single imageUrl string.
+    input: ({ productImageUrl }) => ({ imageUrl: productImageUrl }),
+    mapItem: mapAliExpressItem,
   },
 }
 
@@ -216,7 +218,68 @@ async function writeCache(supabase: SupabaseClient, key: string, result: Sourcin
   })
 }
 
+// ── Actor schema introspection (GET /api/sourcing?schema=<alias>) ─────────────
+// Verification helper, NOT part of the request path. Pulls an actor's LIVE input
+// schema from Apify so the real field names can be confirmed before any call code
+// is written against them. (Folded in from the old /api/apify-schema endpoint to
+// stay under Vercel's 12-function Hobby limit.) Run once on a deployed env that
+// can reach Apify, read inputFieldNames, then correct the adapters above.
+const SCHEMA_ALIASES: Record<string, string> = {
+  meta:          'apify~facebook-ads-scraper',
+  'ali-keyword': 'thirdwatch~aliexpress-product-scraper',
+  'ali-image':   'freecamp008~aliexpress-search-by-image-actor',
+}
+
+async function handleSchema(req: VercelRequest, res: VercelResponse) {
+  const token = process.env.APIFY_TOKEN
+  if (!token) {
+    return res.status(503).json({ error: 'APIFY_TOKEN is not set. Add it in Vercel → Settings → Environment Variables.' })
+  }
+  const raw = (req.query.schema as string | undefined)?.trim()
+  if (!raw) {
+    return res.status(400).json({ error: 'Pass ?schema=<username~actor-name> or a shorthand.', shorthands: SCHEMA_ALIASES })
+  }
+  const actorId = (SCHEMA_ALIASES[raw] ?? raw).replace('/', '~')
+
+  const actorResp = await fetch(`${APIFY_BASE}/acts/${actorId}?token=${encodeURIComponent(token)}`)
+  if (!actorResp.ok) {
+    const detail = await actorResp.text().catch(() => '')
+    return res.status(actorResp.status).json({ error: `Apify returned ${actorResp.status} for actor "${actorId}".`, detail: detail.slice(0, 400) })
+  }
+  const actor = (await actorResp.json()) as any
+  const data = actor?.data ?? actor
+
+  let inputSchema: unknown = null
+  try {
+    const schemaResp = await fetch(`${APIFY_BASE}/acts/${actorId}/input-schema?token=${encodeURIComponent(token)}`)
+    if (schemaResp.ok) inputSchema = await schemaResp.json()
+  } catch { /* best-effort */ }
+
+  const properties = (inputSchema as any)?.properties ?? (inputSchema as any)?.data?.properties
+  const fieldNames = properties ? Object.keys(properties) : null
+
+  return res.status(200).json({
+    actorId,
+    name: data?.name,
+    username: data?.username,
+    title: data?.title,
+    inputFieldNames: fieldNames,
+    inputSchema,
+    exampleInput: data?.exampleRunInput?.body ?? data?.defaultRunOptions ?? null,
+    note: 'Use inputFieldNames as the source of truth. Confirm output field names by running the actor once and inspecting a dataset item.',
+  })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    try {
+      return await handleSchema(req, res)
+    } catch (err) {
+      console.error('[/api/sourcing schema]', err)
+      const message = err instanceof Error ? err.message : 'Schema fetch failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const { productName, productImageUrl } = (req.body ?? {}) as Record<string, string>
@@ -244,7 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!token || !actorsEnabled) {
       const notice = !token
         ? 'APIFY_TOKEN not set — sourcing lookup unavailable.'
-        : 'Sourcing actors not yet verified/enabled. Confirm schemas via /api/apify-schema and enable them in api/sourcing.ts.'
+        : 'Sourcing actors not yet verified/enabled. Confirm schemas via GET /api/sourcing?schema= and enable them in api/sourcing.ts.'
       return res.status(200).json({ sourcingResult: null, cached: false, notice, fulfillUrl: buildCjFulfillUrl(productName) })
     }
 

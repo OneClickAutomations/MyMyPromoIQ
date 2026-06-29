@@ -63,7 +63,7 @@ const QUICK_STARTS = [
   {
     label: 'Testimonial',
     desc: 'Creator to camera · warm & authentic',
-    style: 'testimonial',
+    style: 'ugc_testimonial',
     duration: '20s',
     category: 'UGC',
     catClass: 'bg-fire-start/10 text-fire-start',
@@ -83,7 +83,7 @@ const QUICK_STARTS = [
   {
     label: 'Day-in-the-Life',
     desc: 'Lifestyle b-roll · golden ambient light',
-    style: 'day-in-life',
+    style: 'cinematic_brand',
     duration: '45s',
     category: 'Lifestyle',
     catClass: 'bg-fire-start/10 text-fire-start',
@@ -93,7 +93,7 @@ const QUICK_STARTS = [
   {
     label: 'Fast-Cut Hook',
     desc: 'Kinetic · scroll-stopping opener',
-    style: 'fast-cut',
+    style: 'fast_cut_hook',
     duration: '8s',
     category: 'Hook',
     catClass: 'bg-fire-end/10 text-fire-end',
@@ -106,7 +106,7 @@ const QUICK_STARTS = [
 const WORKFLOW = [
   { icon: Wand,    label: 'Upload Product',     desc: 'Drop in a product image URL' },
   { icon: Spark,   label: 'Claude Directs',     desc: 'AI writes the cinematic brief' },
-  { icon: Film,    label: 'Video Renders',       desc: 'Higgsfield renders your scene' },
+  { icon: Film,    label: 'Video Renders',       desc: 'Veo 3 renders your scene with sound' },
   { icon: Bolt,    label: 'Publish',             desc: 'Export & run your commercial' },
 ]
 
@@ -225,9 +225,14 @@ export default function Dashboard() {
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-ink-faint md:text-[11px]">
-            Start with a format
+            Quick Create
           </h2>
+          <Link to="/studio/new?mode=full" className="flex items-center gap-1.5 text-[11px] font-semibold text-fire-start hover:text-fire-end transition-colors">
+            <Film className="h-3.5 w-3.5" /> Generate full ad (1–6 scenes)
+            <ArrowRight className="h-3 w-3" />
+          </Link>
         </div>
+        <p className="mb-4 -mt-2 text-xs text-ink-faint">Pick a format to generate a single video, or build a full commercial scene by scene.</p>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {QUICK_STARTS.map((q, i) => (
             <motion.div
@@ -237,7 +242,7 @@ export default function Dashboard() {
               transition={stagger(i + 3)}
             >
               <Link
-                to="/studio/new"
+                to={`/studio/new?style=${q.style}&mode=quick`}
                 className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
               >
                 {/* Cinematic thumbnail */}
