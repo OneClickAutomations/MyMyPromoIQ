@@ -11,8 +11,8 @@
  * onChange, so they can be reused as the seed/reference image in any project.
  *
  * All generation goes through /api/modelsheet (Gemini "nano-banana"): mode
- * 'generate' for text-only, 'edit' for reference transforms, and the turnaround
- * toggle reuses mode 'sheet'.
+ * 'generate' for text-only, 'edit' for reference transforms, and turnaround
+ * uses mode 'sheet'.
  */
 import { useRef, useState } from 'react'
 import { generateImage, generateModelSheet, uploadAsset } from '../lib/api'
@@ -60,6 +60,12 @@ export default function SeedImageStudio({
   const [error, setError] = useState('')
   const [makeTurnaround, setMakeTurnaround] = useState(true)
 
+  // Turnaround-specific state (separate flow from generate/edit)
+  const [turnaroundBusy, setTurnaroundBusy] = useState(false)
+  const [turnaroundResult, setTurnaroundResult] = useState<string | null>(null)
+  const [turnaroundError, setTurnaroundError] = useState('')
+  const [turnaroundSaving, setTurnaroundSaving] = useState(false)
+
   const mode: 'generate' | 'edit' = refUrl ? 'edit' : 'generate'
   const presets = PRESETS[subjectType]
 
@@ -68,7 +74,12 @@ export default function SeedImageStudio({
     if (file.size > 20 * 1024 * 1024) { setError('Image must be under 20 MB.'); return }
     setError('')
     const reader = new FileReader()
-    reader.onload = () => { setRefUrl(String(reader.result)); setResult(null) }
+    reader.onload = () => {
+      setRefUrl(String(reader.result))
+      setResult(null)
+      setTurnaroundResult(null)
+      setTurnaroundError('')
+    }
     reader.readAsDataURL(file)
   }
 
@@ -96,6 +107,33 @@ export default function SeedImageStudio({
     }
   }
 
+  /** Generate a turnaround sheet from a given image (uploaded ref or existing seed). */
+  async function handleTurnaround(args: { imageBase64?: string; imageUrl?: string }) {
+    setTurnaroundBusy(true); setTurnaroundError(''); setTurnaroundResult(null)
+    try {
+      const { sheetDataUrl } = await generateModelSheet({ subjectType, subjectHint, ...args })
+      setTurnaroundResult(sheetDataUrl)
+    } catch (e) {
+      setTurnaroundError(e instanceof Error ? e.message : 'Turnaround generation failed. Try a clearer reference photo.')
+    } finally {
+      setTurnaroundBusy(false)
+    }
+  }
+
+  async function saveTurnaround() {
+    if (!turnaroundResult) return
+    setTurnaroundSaving(true); setTurnaroundError('')
+    try {
+      const hosted = await uploadAsset(turnaroundResult)
+      onChange([...images, { url: hosted, label: 'Turnaround sheet' }])
+      setTurnaroundResult(null)
+    } catch (e) {
+      setTurnaroundError(e instanceof Error ? e.message : 'Could not save the turnaround.')
+    } finally {
+      setTurnaroundSaving(false)
+    }
+  }
+
   /** Approve the previewed image: host it, add it (plus optional turnaround) to seeds. */
   async function useResult() {
     if (!result) return
@@ -109,11 +147,13 @@ export default function SeedImageStudio({
           const { sheetDataUrl } = await generateModelSheet({ subjectType, imageBase64: result, subjectHint })
           const sheetHosted = await uploadAsset(sheetDataUrl)
           additions.push({ url: sheetHosted, label: 'Turnaround sheet' })
-        } catch { /* turnaround is best-effort — don't block the main asset */ }
+        } catch (e) {
+          // Show the turnaround error but still save the main image.
+          setError(`Image saved, but turnaround failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+        }
       }
 
       onChange([...images, ...additions])
-      // Reset the workshop for the next asset.
       setResult(null); setPrompt(''); setRefUrl(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the image.')
@@ -127,7 +167,7 @@ export default function SeedImageStudio({
   }
 
   function editExisting(url: string) {
-    setRefUrl(url); setResult(null); setPrompt('')
+    setRefUrl(url); setResult(null); setPrompt(''); setTurnaroundResult(null); setTurnaroundError('')
   }
 
   return (
@@ -146,6 +186,15 @@ export default function SeedImageStudio({
                 <div className="absolute inset-x-0 bottom-0 flex justify-between gap-1 bg-gradient-to-t from-black/80 to-transparent p-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <button type="button" onClick={() => editExisting(img.url)} title="Edit this image"
                     className="rounded-md bg-white/15 p-1 text-white hover:bg-white/25"><Wand className="h-3 w-3" /></button>
+                  <button
+                    type="button"
+                    onClick={() => handleTurnaround({ imageUrl: img.url })}
+                    title="Generate turnaround sheet"
+                    disabled={turnaroundBusy}
+                    className="rounded-md bg-white/15 p-1 text-white hover:bg-white/25 disabled:opacity-40"
+                  >
+                    {turnaroundBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Grid className="h-3 w-3" />}
+                  </button>
                   <button type="button" onClick={() => removeImage(i)} title="Remove"
                     className="rounded-md bg-white/15 p-1 text-white hover:bg-fire-start/60"><Trash className="h-3 w-3" /></button>
                 </div>
@@ -158,11 +207,11 @@ export default function SeedImageStudio({
       {/* Workshop */}
       <div className="rounded-2xl border border-white/[0.08] bg-void-800/50 p-4">
         {/* Reference row */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           {refUrl ? (
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               <img src={refUrl} alt="Reference" className="h-16 w-16 rounded-xl object-cover ring-1 ring-fire-start/40" />
-              <button type="button" onClick={() => { setRefUrl(null); setResult(null) }}
+              <button type="button" onClick={() => { setRefUrl(null); setResult(null); setTurnaroundResult(null); setTurnaroundError('') }}
                 className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-void-700 text-ink-faint ring-1 ring-white/10 hover:text-ink">✕</button>
             </div>
           ) : (
@@ -173,25 +222,73 @@ export default function SeedImageStudio({
           )}
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-ink">
-              {refUrl ? 'Editing a reference image' : 'Generate from a description'}
+              {refUrl ? 'Reference image loaded' : 'Generate from a description'}
             </p>
             <p className="text-xs text-ink-faint">
               {refUrl
-                ? 'Pick a preset or describe the change, then generate.'
+                ? 'Edit it below, or generate a turnaround sheet directly from this photo.'
                 : 'Upload a reference photo to edit it, or just describe the image to create one.'}
             </p>
+
+            {/* Turnaround button — visible as soon as a reference is loaded */}
+            {refUrl && (
+              <button
+                type="button"
+                onClick={() => handleTurnaround(refImageArgs())}
+                disabled={turnaroundBusy}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-void-700/60 px-3 py-1.5 text-xs font-semibold text-ink hover:border-fire-start/40 hover:text-fire-start disabled:opacity-50 transition-colors"
+              >
+                {turnaroundBusy
+                  ? <><RefreshCw className="h-3 w-3 animate-spin" /> Generating turnaround…</>
+                  : <><Grid className="h-3 w-3" /> Generate turnaround sheet</>}
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Turnaround result preview */}
+        {(turnaroundResult || turnaroundError) && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-void-900 p-3 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-ink-faint">Turnaround sheet</p>
+            {turnaroundResult && (
+              <>
+                <img src={turnaroundResult} alt="Turnaround" className="w-full rounded-lg object-contain" />
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => handleTurnaround(refImageArgs())} disabled={turnaroundBusy}
+                    className="btn-ghost flex items-center justify-center gap-2 py-2 text-xs disabled:opacity-50">
+                    <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+                  </button>
+                  <button type="button" onClick={saveTurnaround} disabled={turnaroundSaving}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-gradient-fire py-2 text-xs font-bold text-white shadow-fire-soft disabled:opacity-50">
+                    {turnaroundSaving
+                      ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                      : <><Check className="h-3.5 w-3.5" /> Save to seeds</>}
+                  </button>
+                </div>
+              </>
+            )}
+            {turnaroundError && <p className="text-xs text-amber-300">{turnaroundError}</p>}
+          </div>
+        )}
+
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) pickFile(f); e.target.value = '' }} />
+
+        {/* Divider between turnaround and edit flows */}
+        {refUrl && (
+          <div className="my-4 flex items-center gap-2">
+            <div className="h-px flex-1 bg-white/[0.06]" />
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">or edit</span>
+            <div className="h-px flex-1 bg-white/[0.06]" />
+          </div>
+        )}
 
         {/* Preset dropdown (edit mode) */}
         {refUrl && (
           <select
             value=""
             onChange={e => { if (e.target.value) setPrompt(e.target.value) }}
-            className="mt-3 w-full rounded-xl border border-white/[0.10] bg-void-700/50 px-3 py-2.5 text-sm text-ink focus:border-fire-start/50 focus:outline-none"
+            className="w-full rounded-xl border border-white/[0.10] bg-void-700/50 px-3 py-2.5 text-sm text-ink focus:border-fire-start/50 focus:outline-none"
           >
             <option value="">Choose a quick edit…</option>
             {presets.map(p => <option key={p.label} value={p.instruction}>{p.label}</option>)}
@@ -208,7 +305,7 @@ export default function SeedImageStudio({
             : subjectType === 'character'
               ? 'e.g. a friendly 30-something woman with warm energy, casual sweater'
               : 'e.g. a matte black insulated water bottle with a bamboo lid'}
-          className="mt-3 w-full resize-none rounded-xl border border-white/[0.10] bg-void-700/50 px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/20"
+          className={`w-full resize-none rounded-xl border border-white/[0.10] bg-void-700/50 px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/20 ${refUrl ? 'mt-3' : 'mt-3'}`}
         />
 
         <button type="button" onClick={handleGenerate} disabled={busy || !prompt.trim()}
