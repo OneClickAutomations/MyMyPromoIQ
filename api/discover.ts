@@ -495,7 +495,7 @@ async function runApifyAdapter(type: string, value: string, platform: string): P
   if (platform === 'tiktok') return null // Meta-only actor; let TikTok use the seed set.
 
   try {
-    const input = { startUrls: [{ url: META_ACTOR.searchUrl(type, value) }], count: META_ACTOR.maxResults }
+    const input = { startUrls: [{ url: META_ACTOR.searchUrl(type, value) }], resultsLimit: META_ACTOR.maxResults }
     const items = await runApifyActorAsync(META_ACTOR.actorId, input, token)
     const mapped = items.map(it => META_ACTOR.mapItem(it)).filter((a): a is RawAd => a !== null)
     return mapped.length ? mapped : null
