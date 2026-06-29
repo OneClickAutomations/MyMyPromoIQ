@@ -21,7 +21,7 @@
  * ⚠️  ACTOR FIELD NAMES ARE UNVERIFIED AND THE ACTORS ARE GATED OFF.
  *     "scraper" actors are not standardized; their input AND output field names
  *     vary by maintainer. Do NOT enable an actor until you have confirmed its
- *     real schema with GET /api/apify-schema?actor=ali-keyword (and ali-image),
+ *     real schema with GET /api/sourcing?schema=ali-keyword (and ali-image),
  *     corrected the `input`/`mapItem` functions below, and flipped `enabled`.
  *     Until then this endpoint returns null sourcing (honest "couldn't verify")
  *     rather than a fabricated price.
@@ -63,13 +63,13 @@ interface RawMatch {
 //
 //  Each adapter isolates everything actor-specific in ONE place: the actor id,
 //  the input it's called with, and how a dataset item maps into RawMatch. The
-//  field names below are PLACEHOLDERS, not verified. Run /api/apify-schema for
+//  field names below are PLACEHOLDERS, not verified. Run GET /api/sourcing?schema= for
 //  each actor, correct `input(...)` and `mapItem(...)`, then set `enabled: true`.
 // ─────────────────────────────────────────────────────────────────────────────
 interface ActorAdapter {
   actorId: string
   enabled: boolean
-  /** Build the actor's run input. ⚠️ confirm field names via /api/apify-schema. */
+  /** Build the actor's run input. ⚠️ confirm field names via GET /api/sourcing?schema=. */
   input: (args: { productName: string; productImageUrl?: string }) => Record<string, unknown>
   /** Map ONE dataset item → RawMatch, or null to skip. ⚠️ confirm output fields. */
   mapItem: (item: any) => RawMatch | null
@@ -82,7 +82,7 @@ const ALIEXPRESS_ACTORS: { keyword: ActorAdapter; image: ActorAdapter } = {
     enabled: false, // ⚠️ flip true ONLY after verifying the schema.
     input: ({ productName }) => ({
       // ⚠️ UNVERIFIED placeholder. Could be searchTerms / keyword / query / urls.
-      //    Confirm with: GET /api/apify-schema?actor=ali-keyword
+      //    Confirm with: GET /api/sourcing?schema=ali-keyword
       search: productName,
       maxItems: 5,
     }),
@@ -108,7 +108,7 @@ const ALIEXPRESS_ACTORS: { keyword: ActorAdapter; image: ActorAdapter } = {
     enabled: false, // ⚠️ flip true ONLY after verifying the schema.
     input: ({ productImageUrl }) => ({
       // ⚠️ UNVERIFIED placeholder. Could be imageUrl / image / imageUrls / url.
-      //    Confirm with: GET /api/apify-schema?actor=ali-image
+      //    Confirm with: GET /api/sourcing?schema=ali-image
       imageUrl: productImageUrl,
       maxItems: 5,
     }),
@@ -216,7 +216,68 @@ async function writeCache(supabase: SupabaseClient, key: string, result: Sourcin
   })
 }
 
+// ── Actor schema introspection (GET /api/sourcing?schema=<alias>) ─────────────
+// Verification helper, NOT part of the request path. Pulls an actor's LIVE input
+// schema from Apify so the real field names can be confirmed before any call code
+// is written against them. (Folded in from the old /api/apify-schema endpoint to
+// stay under Vercel's 12-function Hobby limit.) Run once on a deployed env that
+// can reach Apify, read inputFieldNames, then correct the adapters above.
+const SCHEMA_ALIASES: Record<string, string> = {
+  meta:          'apify~facebook-ads-scraper',
+  'ali-keyword': 'thirdwatch~aliexpress-product-scraper',
+  'ali-image':   'freecamp008~aliexpress-search-by-image-actor',
+}
+
+async function handleSchema(req: VercelRequest, res: VercelResponse) {
+  const token = process.env.APIFY_TOKEN
+  if (!token) {
+    return res.status(503).json({ error: 'APIFY_TOKEN is not set. Add it in Vercel → Settings → Environment Variables.' })
+  }
+  const raw = (req.query.schema as string | undefined)?.trim()
+  if (!raw) {
+    return res.status(400).json({ error: 'Pass ?schema=<username~actor-name> or a shorthand.', shorthands: SCHEMA_ALIASES })
+  }
+  const actorId = (SCHEMA_ALIASES[raw] ?? raw).replace('/', '~')
+
+  const actorResp = await fetch(`${APIFY_BASE}/acts/${actorId}?token=${encodeURIComponent(token)}`)
+  if (!actorResp.ok) {
+    const detail = await actorResp.text().catch(() => '')
+    return res.status(actorResp.status).json({ error: `Apify returned ${actorResp.status} for actor "${actorId}".`, detail: detail.slice(0, 400) })
+  }
+  const actor = (await actorResp.json()) as any
+  const data = actor?.data ?? actor
+
+  let inputSchema: unknown = null
+  try {
+    const schemaResp = await fetch(`${APIFY_BASE}/acts/${actorId}/input-schema?token=${encodeURIComponent(token)}`)
+    if (schemaResp.ok) inputSchema = await schemaResp.json()
+  } catch { /* best-effort */ }
+
+  const properties = (inputSchema as any)?.properties ?? (inputSchema as any)?.data?.properties
+  const fieldNames = properties ? Object.keys(properties) : null
+
+  return res.status(200).json({
+    actorId,
+    name: data?.name,
+    username: data?.username,
+    title: data?.title,
+    inputFieldNames: fieldNames,
+    inputSchema,
+    exampleInput: data?.exampleRunInput?.body ?? data?.defaultRunOptions ?? null,
+    note: 'Use inputFieldNames as the source of truth. Confirm output field names by running the actor once and inspecting a dataset item.',
+  })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    try {
+      return await handleSchema(req, res)
+    } catch (err) {
+      console.error('[/api/sourcing schema]', err)
+      const message = err instanceof Error ? err.message : 'Schema fetch failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const { productName, productImageUrl } = (req.body ?? {}) as Record<string, string>
@@ -244,7 +305,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!token || !actorsEnabled) {
       const notice = !token
         ? 'APIFY_TOKEN not set — sourcing lookup unavailable.'
-        : 'Sourcing actors not yet verified/enabled. Confirm schemas via /api/apify-schema and enable them in api/sourcing.ts.'
+        : 'Sourcing actors not yet verified/enabled. Confirm schemas via GET /api/sourcing?schema= and enable them in api/sourcing.ts.'
       return res.status(200).json({ sourcingResult: null, cached: false, notice, fulfillUrl: buildCjFulfillUrl(productName) })
     }
 

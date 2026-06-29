@@ -212,7 +212,9 @@ export type ElevenVoice = {
 }
 
 export async function listVoices(): Promise<{ voices: ElevenVoice[] }> {
-  const res = await fetch('/api/voices')
+  // Voice listing is the GET side of /api/voiceover (merged from /api/voices to
+  // stay under Vercel's 12-function Hobby limit).
+  const res = await fetch('/api/voiceover')
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

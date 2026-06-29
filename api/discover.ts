@@ -368,7 +368,7 @@ function finalize(ad: RawAd): SourceAd {
 // field-name variants and returns null when an item can't be mapped). If the
 // mapping is wrong, items map to null → the endpoint falls back to the labeled
 // demo set (live:false) rather than breaking or inventing data. Confirm the real
-// output shape with GET /api/apify-schema?actor=meta and by inspecting one
+// output shape with GET /api/sourcing?schema=meta and by inspecting one
 // dataset item, then tighten mapItem below.
 const APIFY_BASE = 'https://api.apify.com/v2'
 
