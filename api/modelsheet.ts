@@ -50,7 +50,7 @@ async function describeSubject(img: { data: string; mime: string }, subjectType:
     const anthropic = new Anthropic()
     const noun = subjectType === 'character' ? 'person/character' : 'product/object'
     const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-opus-4-8',
       max_tokens: 120,
       messages: [{
         role: 'user',
