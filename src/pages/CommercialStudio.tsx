@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, Film, ImageIcon, Info, Layers, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers, LinkIcon,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -427,6 +427,7 @@ export default function CommercialStudio() {
   const [directorLog, setDirectorLog]           = useState<DirectorLogEntry[]>([])
   const [visibleLogCount, setVisibleLogCount]   = useState(0)
   const [directorNote, setDirectorNote]         = useState('')
+  const [expandedStages, setExpandedStages]     = useState<Set<string>>(new Set())
   const [videoUrl, setVideoUrl]                 = useState<string | null>(null)
   const [genError, setGenError]                 = useState('')
   const [voiceoverUrl, setVoiceoverUrl]         = useState<string | null>(null)
@@ -800,6 +801,7 @@ export default function CommercialStudio() {
     setDirectorPhase('directing')
     setDirectorLog([])
     setVisibleLogCount(0)
+    setExpandedStages(new Set())
     setVideoUrl(null)
     setGenError('')
     setVoiceoverUrl(null)
@@ -1763,11 +1765,11 @@ export default function CommercialStudio() {
 
   // Step 11: Director feed (Phase 0.3)
   const STAGE_LABELS: Record<string, string> = {
-    analyzing:    'Analyzing brief',
-    casting:      'Casting creator',
-    scripting:    'Writing script',
-    storyboarding:'Blocking scenes',
-    rendering:    'Rendering video',
+    analyzing:    'Brief reviewed',
+    casting:      'Creator chosen',
+    scripting:    'Script written',
+    storyboarding:'Scenes planned',
+    rendering:    'Video rendered',
   }
 
   function renderDirector() {
@@ -1902,7 +1904,7 @@ export default function CommercialStudio() {
                 label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${SCENE_LABELS.length}`}
               />
 
-              <div className="w-full space-y-3">
+              <div className="w-full space-y-2">
                 {allStages.map((stage, i) => {
                   const logEntry = directorLog.find(e => e.stage === stage)
                   const isVisible = doneStages.includes(stage as DirectorLogEntry['stage'])
@@ -1910,37 +1912,59 @@ export default function CommercialStudio() {
                     (directorPhase === 'directing' && i === doneStages.length) ||
                     (directorPhase === 'generating' && stage === 'rendering')
                   )
+                  const isExpanded = expandedStages.has(stage)
+                  const toggleExpand = () => setExpandedStages(prev => {
+                    const next = new Set(prev)
+                    next.has(stage) ? next.delete(stage) : next.add(stage)
+                    return next
+                  })
                   return (
-                    <div key={stage} className="flex gap-3">
-                      <div className={`relative mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
-                        isVisible ? 'bg-gradient-fire shadow-fire-soft' :
-                        isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
-                        'bg-void-600/50'
-                      }`}>
-                        {isVisible  ? <Check className="h-3 w-3 text-white" />
-                        : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-                        : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
-                            {STAGE_LABELS[stage]}
-                          </span>
-                          {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
+                    <div key={stage} className={`overflow-hidden rounded-xl transition-colors duration-300 ${
+                      isVisible ? 'border border-white/[0.08] bg-void-800/50' :
+                      isActive  ? 'border border-fire-start/20 bg-fire-start/[0.04]' :
+                      'border border-transparent'
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={isVisible && logEntry ? toggleExpand : undefined}
+                        className={`flex w-full items-center gap-3 px-3 py-2.5 ${isVisible && logEntry ? 'cursor-pointer' : 'cursor-default'}`}
+                      >
+                        {/* Status dot */}
+                        <div className={`relative grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
+                          isVisible ? 'bg-gradient-fire shadow-fire-soft' :
+                          isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
+                          'bg-void-600/50'
+                        }`}>
+                          {isVisible  ? <Check className="h-3 w-3 text-white" />
+                          : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
+                          : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
                         </div>
-                        <AnimatePresence>
-                          {logEntry && isVisible && (
-                            <motion.p
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              transition={{ duration: 0.4 }}
-                              className="mt-0.5 text-[11px] leading-relaxed text-ink-muted"
-                            >
+                        {/* Label */}
+                        <span className={`flex-1 text-left text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
+                          {STAGE_LABELS[stage]}
+                        </span>
+                        {/* Right side: pulse or chevron */}
+                        {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
+                        {isVisible && logEntry && (
+                          <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-ink-faint transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                        )}
+                      </button>
+                      {/* Expandable detail */}
+                      <AnimatePresence>
+                        {isVisible && logEntry && isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.25 }}
+                            className="overflow-hidden"
+                          >
+                            <p className="border-t border-white/[0.06] px-3 pb-3 pt-2 text-[11px] leading-relaxed text-ink-muted">
                               {logEntry.message}
-                            </motion.p>
-                          )}
-                        </AnimatePresence>
-                      </div>
+                            </p>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )
                 })}
