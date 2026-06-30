@@ -9,7 +9,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { Download, Edit, Film, Plus, RefreshCw, Trash } from './icons'
-import { listCampaigns, deleteCampaignRemote, type StoredCampaign } from '../lib/api'
+import { listCampaigns, deleteCampaignRemote, listBriefs, type StoredCampaign, type StoredBriefSummary } from '../lib/api'
 
 type Campaign = StoredCampaign
 
@@ -31,6 +31,7 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
   const { user } = useUser()
   const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [drafts, setDrafts] = useState<StoredBriefSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [videoByCampaign, setVideoByCampaign] = useState<Record<string, string>>({})
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -40,10 +41,15 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
     let cancelled = false
     async function load() {
       try {
-        const { campaigns: rows, videos } = await listCampaigns(user!.id)
+        const [{ campaigns: rows, videos }, { briefs }] = await Promise.all([
+          listCampaigns(user!.id),
+          listBriefs(user!.id).catch(() => ({ briefs: [] as StoredBriefSummary[] })),
+        ])
         if (cancelled) return
         setCampaigns(rows.slice(0, limit))
         setVideoByCampaign(videos)
+        // Only show briefs that are still in draft status (not yet rendered)
+        setDrafts(briefs.filter(b => b.status === 'draft').slice(0, 20))
       } catch {
         // Persistence unavailable — fail silently (shows empty state)
       } finally {
@@ -82,7 +88,7 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
     )
   }
 
-  if (campaigns.length === 0) {
+  if (campaigns.length === 0 && drafts.length === 0) {
     return (
       <>
         {emptyState ?? (
@@ -104,6 +110,49 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
   }
 
   return (
+    <div className="space-y-8">
+
+      {/* ── Drafts section ── */}
+      {drafts.length > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-widest text-ink-faint">Drafts</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {drafts.map(d => {
+              const prod = d.product as Record<string, unknown>
+              const name = (prod?.productName as string) || 'Untitled draft'
+              const imgUrl = prod?.productImageUrl as string | undefined
+              const lastEdited = new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+              return (
+                <div key={d.id} className="flex items-center gap-4 rounded-2xl border border-white/[0.08] bg-void-800/50 p-4">
+                  {imgUrl ? (
+                    <img src={imgUrl} alt={name} className="h-14 w-14 flex-shrink-0 rounded-xl object-cover" />
+                  ) : (
+                    <div className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-xl bg-void-700">
+                      <Film className="h-6 w-6 text-ink-faint/40" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-ink">{name}</p>
+                    <p className="mt-0.5 text-[11px] text-ink-faint">Last edited {lastEdited}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/studio/new?brief=${d.id}`)}
+                    className="flex-shrink-0 rounded-xl border border-fire-start/40 bg-fire-start/10 px-3.5 py-2 text-xs font-bold text-fire-start transition-colors hover:bg-fire-start/20"
+                  >
+                    Resume
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {campaigns.length > 0 && drafts.length > 0 && (
+        <h2 className="text-sm font-bold uppercase tracking-widest text-ink-faint">Published</h2>
+      )}
+
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {campaigns.map((c) => {
         const videoUrl = videoByCampaign[c.id]
@@ -195,6 +244,8 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
         </div>
         <p className="mt-2.5 text-sm font-medium text-ink-faint group-hover:text-ink transition-colors">New campaign</p>
       </Link>
+    </div>
+
     </div>
   )
 }

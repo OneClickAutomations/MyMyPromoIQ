@@ -22,6 +22,7 @@ import {
   uploadDirectToStorage,
   dataUrlToBlob,
   saveBrief,
+  getBrief,
   runDirector,
   listCreators,
   listProducts,
@@ -467,6 +468,10 @@ export default function CommercialStudio() {
   const [stitchedUrl, setStitchedUrl] = useState<string | null>(null)
   const [stitchError, setStitchError] = useState('')
 
+  // ── Draft save toast
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
+  const draftToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleSave = useCallback((b: CreativeBrief) => {
@@ -476,7 +481,7 @@ export default function CommercialStudio() {
       try {
         const { id } = await saveBrief(user.id, {
           ...(briefIdRef.current ? { id: briefIdRef.current } : {}),
-          status: b.status,
+          status: 'draft',
           product: b.product,
           creator: b.creator,
           scene: b.scene,
@@ -488,6 +493,9 @@ export default function CommercialStudio() {
           ...(b.sourceAd ? { sourceAd: b.sourceAd } : {}),
         })
         briefIdRef.current = id
+        setDraftSavedAt(Date.now())
+        if (draftToastTimer.current) clearTimeout(draftToastTimer.current)
+        draftToastTimer.current = setTimeout(() => setDraftSavedAt(null), 3000)
       } catch {
         // Autosave failure is silent — user data isn't lost, just not persisted yet
       }
@@ -527,6 +535,41 @@ export default function CommercialStudio() {
       })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Resume a saved draft: ?brief=<id> ───────────────────────────────────────
+  useEffect(() => {
+    const briefId = searchParams.get('brief')
+    if (!briefId || !user?.id) return
+    getBrief(user.id, briefId).then(({ brief }) => {
+      if (!brief) return
+      briefIdRef.current = briefId
+      const b = brief as Record<string, unknown>
+      setBrief(prev => ({
+        ...prev,
+        status: (b.status as CreativeBrief['status']) ?? 'draft',
+        product:     (b.product as CreativeBrief['product'])     ?? prev.product,
+        creator:     (b.creator as CreativeBrief['creator'])     ?? prev.creator,
+        scene:       (b.scene as CreativeBrief['scene'])         ?? prev.scene,
+        style:       (b.style as CreativeBrief['style'])         ?? prev.style,
+        voice:       (b.voice as CreativeBrief['voice'])         ?? prev.voice,
+        script:      (b.script as CreativeBrief['script'])       ?? prev.script,
+        storyboard:  (b.storyboard as CreativeBrief['storyboard']) ?? prev.storyboard,
+        render:      (b.render as CreativeBrief['render'])       ?? prev.render,
+        sourceAd:    (b.source_ad as CreativeBrief['sourceAd'])  ?? prev.sourceAd,
+      }))
+      // Restore product image preview if one was saved
+      const prod = b.product as Record<string, unknown> | undefined
+      const imgUrl = prod?.productImageUrl as string | undefined
+      if (imgUrl) {
+        setInputMethod('url')
+        setUrlInput(imgUrl)
+        setProductPreview(imgUrl)
+        setUrlPreviewOk(true)
+      }
+      const descText = prod?.productName as string | undefined
+      if (descText) setDescInput(descText)
+    }).catch(() => {})
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Clone bridge: hydrate the brief from a discovered-ad analysis (once) ────
   useEffect(() => {
@@ -2155,10 +2198,25 @@ export default function CommercialStudio() {
           </div>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink md:text-3xl">Commercial Studio</h1>
         </div>
-        <span className="eyebrow hidden sm:inline-flex">
-          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-          Step {stepNum} of 11
-        </span>
+        <div className="flex items-center gap-3">
+          <AnimatePresence>
+            {draftSavedAt && (
+              <motion.span
+                key="draft-toast"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-400/25"
+              >
+                <Check className="h-3 w-3" /> Draft saved
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <span className="eyebrow hidden sm:inline-flex">
+            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
+            Step {stepNum} of 11
+          </span>
+        </div>
       </div>
 
       {/* Cloned-from-ad banner */}

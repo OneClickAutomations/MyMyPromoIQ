@@ -432,6 +432,21 @@ export function getBrief(
   return store({ action: 'getBrief', userId, briefId })
 }
 
+export type StoredBriefSummary = {
+  id: string
+  status: string
+  product: Record<string, unknown>
+  style: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export function listBriefs(
+  userId: string,
+): Promise<{ briefs: StoredBriefSummary[] }> {
+  return store({ action: 'listBriefs', userId })
+}
+
 // ── Creative Studio asset types ───────────────────────────────────────────────
 
 export type StoredCreator = {
