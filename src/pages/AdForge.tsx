@@ -79,10 +79,10 @@ export default function AdForge() {
             badgeClass="bg-fire-start/10 text-fire-start"
           />
 
-          {/* Build From Scratch (quick) */}
+          {/* Build From Scratch — 11-step wizard */}
           <PathCard
-            to="/forge/review"
-            icon={Wand}
+            to="/studio/new"
+            icon={Bolt}
             iconBg="bg-gold/10 ring-gold/15 group-hover:bg-gold/20"
             iconColor="text-gold"
             accentBorder="hover:border-gold/30"
@@ -94,18 +94,18 @@ export default function AdForge() {
             ctaColor="text-gold"
           />
 
-          {/* Full wizard */}
+          {/* Quick Generate */}
           <PathCard
-            to="/studio/new"
-            icon={Bolt}
+            to="/forge/review"
+            icon={Wand}
             iconBg="bg-void-700 ring-white/[0.08] group-hover:bg-void-600"
             iconColor="text-ink-muted"
             accentBorder="hover:border-white/20"
             accentHover="hover:bg-void-700/40"
-            title={adForge.wizard.title}
-            subtitle={adForge.wizard.subtitle}
-            detail={adForge.wizard.detail}
-            cta={adForge.wizard.cta}
+            title={adForge.quick.title}
+            subtitle={adForge.quick.subtitle}
+            detail={adForge.quick.detail}
+            cta={adForge.quick.cta}
             ctaColor="text-ink-muted group-hover:text-ink"
           />
         </div>
@@ -120,11 +120,11 @@ export default function AdForge() {
             </div>
             <div>
               <p className="font-semibold text-gold mb-1">Build From Scratch</p>
-              <p className="text-ink-faint leading-relaxed text-xs">Best when you know your product well. Fastest path from idea to rendered video — 5 fields, one click.</p>
+              <p className="text-ink-faint leading-relaxed text-xs">Best when you want full control. 11 guided steps cover product, creator, brand, scenes, and voiceover — upload your image and Veo 3 animates it.</p>
             </div>
             <div>
-              <p className="font-semibold text-ink-muted mb-1">Full Wizard</p>
-              <p className="text-ink-faint leading-relaxed text-xs">Best for multi-scene campaigns. 11 steps let you define every creative, brand, and casting detail explicitly.</p>
+              <p className="font-semibold text-ink-muted mb-1">Quick Generate</p>
+              <p className="text-ink-faint leading-relaxed text-xs">Best for fast iteration. Five fields, one click — upload a product photo and Veo 3 renders image-to-video in minutes.</p>
             </div>
           </div>
         </div>

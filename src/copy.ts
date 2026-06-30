@@ -325,15 +325,15 @@ export const adForge = {
   },
   build: {
     title: 'Build From Scratch',
-    subtitle: 'Quick AI brief, no reference needed.',
-    detail: 'Tell us about your product and the kind of ad you want. Claude writes the direction, Veo 3 renders the video in minutes.',
-    cta: 'Start quick build',
+    subtitle: '11 guided steps. Full creative control.',
+    detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — Veo 3 animates it into a video with native audio.',
+    cta: 'Start building',
   },
-  wizard: {
-    title: 'Full Wizard',
-    subtitle: 'Step-by-step with maximum control.',
-    detail: 'Walk through 11 guided steps — product, creator, brand, scenes, voiceover, and more. Best when you want to set every detail yourself.',
-    cta: 'Open wizard',
+  quick: {
+    title: 'Quick Generate',
+    subtitle: 'Fastest path from product to video.',
+    detail: 'Five fields, one click. Upload your product photo and Claude writes the director brief — Veo 3 renders the video in minutes.',
+    cta: 'Quick generate',
   },
   review: {
     title: 'Review & Adjust',

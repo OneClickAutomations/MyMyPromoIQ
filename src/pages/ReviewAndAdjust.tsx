@@ -222,7 +222,7 @@ export default function ReviewAndAdjust() {
           <div className="space-y-1.5">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
               Product image
-              <span className="text-[10px] font-normal normal-case tracking-normal text-ink-faint">(optional — improves output)</span>
+              <span className="text-[10px] font-normal normal-case tracking-normal text-ink-faint">(recommended — Veo 3 animates your photo into video)</span>
               {isFromClone && productImageUrl && (
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
