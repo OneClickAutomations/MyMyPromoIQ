@@ -31,6 +31,7 @@ import {
   muxVideoAudio,
   stitchVideos,
   generateModelSheet,
+  extractProductFromUrl,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
@@ -379,7 +380,7 @@ function PresetCard({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-type InputMethod = 'upload' | 'camera' | 'url'
+type InputMethod = 'upload' | 'camera' | 'url' | 'product-url'
 type DirectorPhase = 'idle' | 'directing' | 'generating' | 'done' | 'error'
 
 const STYLE_IMAGES: Record<string, string> = {
@@ -411,6 +412,9 @@ export default function CommercialStudio() {
   const [productPreview, setProductPreview] = useState('')
   const [urlInput, setUrlInput]           = useState('')
   const [urlPreviewOk, setUrlPreviewOk]   = useState(false)
+  const [productPageUrl, setProductPageUrl] = useState('')
+  const [productPageExtracting, setProductPageExtracting] = useState(false)
+  const [productPageError, setProductPageError] = useState('')
   const [descInput, setDescInput]         = useState('')
   const [isDragOver, setIsDragOver]       = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -713,12 +717,44 @@ export default function CommercialStudio() {
   function clearProduct() {
     setProductFile(null); setProductPreview(''); setUrlPreviewOk(false)
     setUrlInput(''); setStep1Error('')
+    setProductPageUrl(''); setProductPageError('')
     patch({ product: { ...brief.product, rawImages: [], processedImages: [] } })
+  }
+
+  async function handleProductUrlExtract() {
+    const url = productPageUrl.trim()
+    if (!url || !/^https?:\/\//i.test(url)) {
+      setProductPageError('Paste a full product page URL (https://…).')
+      return
+    }
+    setProductPageError('')
+    setProductPageExtracting(true)
+    try {
+      const result = await extractProductFromUrl(url)
+      if (result.title) patch({ product: { ...brief.product, productName: result.title } })
+      if (result.description) {
+        const trimmed = result.description.slice(0, 400)
+        setDescInput(trimmed)
+        patch({ product: { ...brief.product, productName: result.title ?? brief.product.productName, description: trimmed } })
+      }
+      if (result.imageUrl) {
+        setUrlInput(result.imageUrl)
+        setProductPreview(result.imageUrl)
+        setUrlPreviewOk(true)
+      }
+      if (!result.title && !result.imageUrl) {
+        setProductPageError('Could not extract product info from that page. Try pasting a direct image URL in the "Image URL" tab instead.')
+      }
+    } catch (err) {
+      setProductPageError(err instanceof Error ? err.message : 'Extraction failed.')
+    } finally {
+      setProductPageExtracting(false)
+    }
   }
 
   async function handleProductNext() {
     setStep1Error('')
-    if (inputMethod === 'url') {
+    if (inputMethod === 'url' || inputMethod === 'product-url') {
       patch({ product: { ...brief.product, productName: brief.product.productName, rawImages: [], processedImages: [] } })
       goForward()
       return
@@ -748,7 +784,9 @@ export default function CommercialStudio() {
       ? urlInput.trim()
       : brief.product.rawImages[0]?.url ?? productPreview
 
-  const canAdvanceStep1 = !!productPreview && !!descInput.trim()
+  const canAdvanceStep1 = inputMethod === 'product-url'
+    ? (urlPreviewOk || !!brief.product.productName) && !!descInput.trim()
+    : !!productPreview && !!descInput.trim()
 
   // ── Director feed / generation ────────────────────────────────────────────
 
@@ -941,13 +979,14 @@ export default function CommercialStudio() {
   // Step 1: Product
   function renderProduct() {
     const tabs: { id: InputMethod; label: string; Icon: typeof Upload }[] = [
-      { id: 'upload', label: 'Upload',       Icon: Upload },
-      { id: 'camera', label: 'Take a Photo', Icon: Camera },
-      { id: 'url',    label: 'Image URL',    Icon: LinkIcon },
+      { id: 'upload',      label: 'Upload',       Icon: Upload },
+      { id: 'camera',      label: 'Take a Photo', Icon: Camera },
+      { id: 'url',         label: 'Image URL',    Icon: LinkIcon },
+      { id: 'product-url', label: 'Product URL',  Icon: Wand },
     ]
     return (
       <div className="space-y-5">
-        <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, or paste an image URL." />
+        <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, paste an image URL, or scan a product page URL to auto-fill everything." />
 
         <BestResults tips={[
           'Use a clear, sharp photo on a plain, uncluttered background with even lighting.',
@@ -1087,6 +1126,52 @@ export default function CommercialStudio() {
                     <img src={productPreview} alt="Product preview" className="max-h-48 w-full object-contain"
                       onError={() => { setUrlPreviewOk(false); setStep1Error('Could not load image from that URL.') }}
                     />
+                  </motion.div>
+                )}
+              </div>
+            )}
+
+            {inputMethod === 'product-url' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
+                  <p className="text-xs text-ink-faint leading-relaxed">
+                    Paste any product page URL — Shopify, WooCommerce, Amazon, DTC brands. We'll extract the title, description, and hero image automatically.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={productPageUrl}
+                    onChange={e => { setProductPageUrl(e.target.value); setProductPageError('') }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleProductUrlExtract() }}
+                    placeholder="https://mystore.com/products/amazing-serum"
+                    className="flex-1 rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
+                  />
+                  <button
+                    onClick={handleProductUrlExtract}
+                    disabled={productPageExtracting}
+                    className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-fire-start px-5 py-3 text-sm font-semibold text-white shadow-fire-soft disabled:opacity-60 hover:bg-fire-end transition-colors"
+                  >
+                    {productPageExtracting
+                      ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning…</>
+                      : <><Wand className="h-4 w-4" /> Extract</>
+                    }
+                  </button>
+                </div>
+                {productPageError && (
+                  <p className="text-sm text-rose-400">{productPageError}</p>
+                )}
+                {urlPreviewOk && productPreview && (
+                  <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-center gap-4 rounded-xl border border-fire-start/30 bg-fire-start/5 p-4">
+                    <img src={productPreview} alt="Extracted product" className="h-16 w-16 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10"
+                      onError={() => { setUrlPreviewOk(false) }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-ink">{brief.product.productName || 'Product extracted'}</p>
+                      <span className="mt-1 inline-flex items-center gap-1 text-xs text-fire-start"><Check className="h-3 w-3" /> Auto-filled from product page</span>
+                    </div>
+                    <button onClick={clearProduct} className="flex-shrink-0 rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors">✕</button>
                   </motion.div>
                 )}
               </div>

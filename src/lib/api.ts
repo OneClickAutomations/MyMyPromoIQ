@@ -201,6 +201,25 @@ export async function uploadAsset(input: Blob | string): Promise<string> {
   return publicUrl
 }
 
+// ── Product URL extraction ─────────────────────────────────────────────────────
+
+export type ProductExtract = {
+  title: string | null
+  description: string | null
+  imageUrl: string | null
+}
+
+/** Scrape a product page URL and return title, description, and hero image. */
+export async function extractProductFromUrl(pageUrl: string): Promise<ProductExtract> {
+  const res = await fetch('/api/sourcing', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ productUrl: pageUrl }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 // ── Generation ─────────────────────────────────────────────────────────────────
 
 export async function startGeneration(input: GenerateInput): Promise<GenerateResponse> {

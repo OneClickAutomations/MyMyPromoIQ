@@ -270,6 +270,91 @@ async function handleSchema(req: VercelRequest, res: VercelResponse) {
   })
 }
 
+// ── Product page URL extraction ───────────────────────────────────────────────
+// Fetches a product page (Shopify, WooCommerce, Amazon, most D2C brands) and
+// pulls title, description, and hero image from Open Graph tags + JSON-LD.
+// No external service required — works on any SSR-rendered product page.
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+}
+
+/** Read a meta tag value regardless of attribute order. */
+function metaContent(html: string, attrName: string, attrValue: string): string | null {
+  const esc = attrValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:property|name)=["']${esc}["'][^>]+content=["']([^"']*?)["']`, 'i'),
+    new RegExp(`<meta[^>]+content=["']([^"']*?)["'][^>]+(?:property|name)=["']${esc}["']`, 'i'),
+  ]
+  void attrName
+  for (const p of patterns) {
+    const m = html.match(p)
+    if (m?.[1]?.trim()) return decodeHtmlEntities(m[1].trim())
+  }
+  return null
+}
+
+async function extractProductFromUrl(pageUrl: string): Promise<{ title: string | null; description: string | null; imageUrl: string | null }> {
+  const resp = await fetch(pageUrl, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      'accept': 'text/html,application/xhtml+xml',
+      'accept-language': 'en-US,en;q=0.9',
+    },
+    redirect: 'follow',
+  })
+  if (!resp.ok) throw new Error(`Could not fetch product page (${resp.status}).`)
+  const html = await resp.text()
+
+  // 1. Open Graph (most reliable on Shopify/D2C)
+  let title = metaContent(html, 'property', 'og:title')
+  let description = metaContent(html, 'property', 'og:description')
+  let imageUrl = metaContent(html, 'property', 'og:image')
+
+  // 2. Twitter card fallback
+  if (!title) title = metaContent(html, 'name', 'twitter:title')
+  if (!description) description = metaContent(html, 'name', 'twitter:description')
+  if (!imageUrl) imageUrl = metaContent(html, 'name', 'twitter:image')
+
+  // 3. Standard meta fallback
+  if (!description) description = metaContent(html, 'name', 'description')
+
+  // 4. Page <title> fallback (strip site suffix like " | My Store")
+  if (!title) {
+    const t = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim()
+    if (t) title = decodeHtmlEntities(t.split(/\s*[|\-–—]\s*/)[0].trim())
+  }
+
+  // 5. JSON-LD structured data (Shopify, WooCommerce, schema.org Product)
+  const ldMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+  for (const [, json] of ldMatches) {
+    try {
+      const parsed = JSON.parse(json.trim())
+      const items: any[] = Array.isArray(parsed) ? parsed : parsed['@graph'] ?? [parsed]
+      for (const item of items) {
+        if (item?.['@type'] === 'Product') {
+          if (!title && item.name) title = String(item.name)
+          if (!description && item.description) description = String(item.description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
+          if (!imageUrl) {
+            const img = Array.isArray(item.image) ? item.image[0] : item.image
+            if (typeof img === 'string') imageUrl = img
+            else if (img?.url) imageUrl = img.url
+          }
+        }
+      }
+    } catch { /* malformed JSON-LD — skip */ }
+  }
+
+  // Ensure imageUrl is absolute
+  if (imageUrl && imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl
+  if (imageUrl && !imageUrl.startsWith('http')) imageUrl = null
+
+  return { title, description, imageUrl }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
     try {
@@ -282,7 +367,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { productName, productImageUrl } = (req.body ?? {}) as Record<string, string>
+  const { productName, productImageUrl, productUrl } = (req.body ?? {}) as Record<string, string>
+
+  // URL extraction mode — returns { title, description, imageUrl }
+  if (productUrl?.trim()) {
+    if (!/^https?:\/\//i.test(productUrl)) {
+      return res.status(400).json({ error: 'productUrl must start with https://' })
+    }
+    try {
+      const result = await extractProductFromUrl(productUrl.trim())
+      return res.status(200).json(result)
+    } catch (err) {
+      console.error('[/api/sourcing extract]', err)
+      const message = err instanceof Error ? err.message : 'Extraction failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
   if (!productName?.trim()) {
     return res.status(400).json({ error: 'productName is required.' })
   }
