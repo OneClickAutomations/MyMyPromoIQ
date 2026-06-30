@@ -63,7 +63,7 @@ function resolveStyle(style: string): StyleId | null {
 // Google Veo 3 via the Gemini API. Generates video WITH native audio, reuses
 // GEMINI_API_KEY (already set for model sheets), and needs no second vendor.
 // Veo job ids are returned prefixed with "veo:" so /api/status can route the poll.
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1alpha'
 // Fast variant by default — a UGC tool renders many short clips, so cost/latency
 // matter more than the marginal quality of the full model. Override with VEO_MODEL.
 const VEO_MODEL = process.env.VEO_MODEL || 'veo-3.0-fast-generate-001'

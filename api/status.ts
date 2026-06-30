@@ -15,7 +15,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1alpha'
 const BUCKET = 'product-images'
 
 /** Re-host a finished render in the public bucket → returns a plain https URL (or null). */
