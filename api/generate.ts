@@ -195,16 +195,11 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
  */
 async function submitVeoJob(
   prompt: string,
-  imageUrl: string,
+  imageUrl?: string,
   opts?: { negativePrompt?: string },
 ) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
-
-  const imgResp = await fetch(imageUrl)
-  if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}).`)
-  const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
-  const bytesBase64Encoded = Buffer.from(await imgResp.arrayBuffer()).toString('base64')
 
   const parameters: Record<string, unknown> = {
     // Vertical, social-native by default. Veo 3 supports '9:16' and '16:9'.
@@ -213,11 +208,21 @@ async function submitVeoJob(
   const avoid = opts?.negativePrompt?.trim()
   if (avoid) parameters.negativePrompt = avoid.slice(0, 400)
 
+  const instance: Record<string, unknown> = { prompt }
+
+  if (imageUrl) {
+    const imgResp = await fetch(imageUrl)
+    if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}).`)
+    const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
+    const bytesBase64Encoded = Buffer.from(await imgResp.arrayBuffer()).toString('base64')
+    instance.image = { bytesBase64Encoded, mimeType }
+  }
+
   const resp = await fetch(`${GEMINI_BASE}/models/${VEO_MODEL}:predictLongRunning`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({
-      instances: [{ prompt, image: { bytesBase64Encoded, mimeType } }],
+      instances: [instance],
       parameters,
     }),
   })
@@ -261,8 +266,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       script,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
-    if (!productImageUrl || !/^https?:\/\//i.test(productImageUrl)) {
-      return res.status(400).json({ error: 'Provide a public product image URL (https://…).' })
+    if (productImageUrl && !/^https?:\/\//i.test(productImageUrl)) {
+      return res.status(400).json({ error: 'Product image URL must start with https://.' })
     }
     if (!productDescription?.trim()) {
       return res.status(400).json({ error: 'Describe the product in a sentence.' })
@@ -291,7 +296,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       script,
     )
 
-    const { requestId, status } = await submitVeoJob(directorPrompt, productImageUrl, { negativePrompt })
+    const { requestId, status } = await submitVeoJob(directorPrompt, productImageUrl || undefined, { negativePrompt })
 
     return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
   } catch (err) {
