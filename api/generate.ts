@@ -211,8 +211,17 @@ async function submitVeoJob(
   const instance: Record<string, unknown> = { prompt }
 
   if (imageUrl) {
-    const imgResp = await fetch(imageUrl)
-    if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}).`)
+    // Meta CDN URLs (fbcdn.net, cdninstagram.com) require browser-like headers
+    // or they 403. Add them unconditionally — harmless on non-Meta URLs.
+    const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
+    const fetchHeaders: Record<string, string> = {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
+    }
+    if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
+
+    const imgResp = await fetch(imageUrl, { headers: fetchHeaders })
+    if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}). If you copied this from Facebook/Meta, the URL may have expired — upload the image directly instead.`)
     const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
     const bytesBase64Encoded = Buffer.from(await imgResp.arrayBuffer()).toString('base64')
     instance.image = { bytesBase64Encoded, mimeType }

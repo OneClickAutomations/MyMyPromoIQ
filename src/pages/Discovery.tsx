@@ -461,6 +461,10 @@ export default function Discovery() {
         sourcedProduct: workflow === 'find_product'
           ? { name: ad.product.name ?? '', imageUrl: ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0], sourceUrl: ad.product.sourceUrl }
           : undefined,
+        // Always carry the ad's creative image so ReviewAndAdjust can pre-fill even
+        // when sourcedProduct is absent. Prefer the AliExpress matched image (a stable
+        // URL that Veo can fetch); fall back to the ad creative (Meta CDN, proxied).
+        adImageUrl: ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0],
         appliedAt: new Date().toISOString(),
       }
       try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(prefill)) } catch {}

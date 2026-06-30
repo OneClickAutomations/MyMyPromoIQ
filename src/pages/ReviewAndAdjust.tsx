@@ -85,10 +85,11 @@ export default function ReviewAndAdjust() {
         setStyle(resolveStyleId(analysis.suggestedCommercialStyle))
         setScript(analysis.improvedScript ?? '')
         setCreatorDescription(buildCreatorDescription(analysis.suggestedCreatorAttributes as Record<string, string>))
-        // If a sourced product has an image, pre-fill image URL
-        if (data.sourcedProduct?.imageUrl) {
-          setProductImageUrl(data.sourcedProduct.imageUrl)
-        }
+        // Pre-fill image: prefer AliExpress match (stable URL), then ad creative.
+        // adImageUrl is always set by Discovery; sourcedProduct is only set for
+        // the "find_product" workflow and may carry a Meta CDN URL as fallback.
+        const imageUrl = data.sourcedProduct?.imageUrl || data.adImageUrl
+        if (imageUrl) setProductImageUrl(imageUrl)
         if (data.sourcedProduct?.name) {
           setProductDescription(data.sourcedProduct.name)
         }
