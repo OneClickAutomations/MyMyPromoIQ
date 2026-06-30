@@ -312,7 +312,7 @@ export default function Dashboard() {
               </div>
               <h3 className="text-xl font-bold text-ink md:text-2xl">Your AI studio is ready.</h3>
               <p className="mx-auto mt-2 max-w-sm text-sm text-ink-muted leading-relaxed">
-                Create your first commercial in minutes. Drop a product, Claude directs the shot, Higgsfield renders the video.
+                Create your first commercial in minutes. Drop a product, Claude directs the shot, Veo 3 renders the video with native audio.
               </p>
 
               {/* Workflow steps */}

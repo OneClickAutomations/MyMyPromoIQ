@@ -12,7 +12,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Campaigns',    href: '/dashboard',  icon: Grid },
       { label: 'Discover Ads', href: '/discover',   icon: Compass },
-      { label: 'New Campaign', href: '/studio/new', icon: Wand },
+      { label: 'New Campaign', href: '/forge',       icon: Wand },
     ],
   },
   {
@@ -116,8 +116,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="space-y-0.5 px-3">
                 {section.items.map(({ label, href, icon: Icon, soon }) => {
                   const active = pathname === href ||
-                    (href !== '/dashboard' && href !== '/studio/new' && pathname.startsWith(href)) ||
-                    (href === '/studio/new' && (pathname === '/studio/new' || pathname === '/studio'))
+                    (href !== '/dashboard' && pathname.startsWith(href))
                   return (
                     <div key={label}>
                       {soon ? (
