@@ -23,9 +23,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 
-// gemini-2.0-flash-preview-image-generation was a short-lived preview alias.
-// Override with GEMINI_IMAGE_MODEL if a newer stable model is released.
-const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-exp'
+// gemini-2.0-flash-preview-image-generation is the current stable alias for
+// native image output via generateContent. Override with GEMINI_IMAGE_MODEL.
+const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation'
 
 function buildPrompt(subjectType: 'product' | 'character', subject: string): string {
   if (subjectType === 'character') {
@@ -41,8 +41,15 @@ async function resolveImage(imageUrl?: string, imageBase64?: string, mimeType?: 
     return { data, mime }
   }
   if (imageUrl) {
-    const r = await fetch(imageUrl)
-    if (!r.ok) throw new Error(`Could not fetch reference image (${r.status}).`)
+    // Meta CDN (fbcdn.net, cdninstagram.com) blocks bare server fetches with 403.
+    const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
+    const fetchHeaders: Record<string, string> = {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
+    }
+    if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
+    const r = await fetch(imageUrl, { headers: fetchHeaders })
+    if (!r.ok) throw new Error(`Could not fetch reference image (${r.status}). If this is a Meta/Facebook URL it may have expired — upload the image directly instead.`)
     const mime = r.headers.get('content-type') || 'image/jpeg'
     const data = Buffer.from(await r.arrayBuffer()).toString('base64')
     return { data, mime }
