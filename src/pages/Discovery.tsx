@@ -456,7 +456,7 @@ export default function Discovery() {
       }
       try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(prefill)) } catch {}
       // Brief beat so the final stage reads as complete before routing.
-      setTimeout(() => navigate('/studio/new'), 600)
+      setTimeout(() => navigate('/forge/review'), 600)
     } catch (err) {
       clearInterval(ticker)
       setCloneError(err instanceof Error ? err.message : 'Analysis failed.')

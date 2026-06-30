@@ -32,6 +32,8 @@ export type GenerateInput = {
   brandCta?: string
   /** Scene focus label (Hook, Problem, Solution, etc.) for multi-scene generation. */
   sceneLabel?: string
+  /** Spoken script line — Claude writes it verbatim into the Veo prompt with delivery direction. */
+  script?: string
 }
 
 export type GenerateResponse = {

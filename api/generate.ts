@@ -1,9 +1,9 @@
 /**
  * POST /api/generate
- * Body: { productImageUrl, productDescription, style, quality }
+ * Body: { productImageUrl, productDescription, style, quality, script? }
  *
  * 1. Claude writes the cinematic motion prompt.
- * 2. Submits the image-to-video job to Higgsfield (non-blocking).
+ * 2. Submits the image-to-video job to Google Veo 3 (non-blocking).
  * 3. Returns { requestId, status, directorPrompt } for the client to poll.
  *
  * Self-contained on purpose: Vercel only reliably bundles files inside the
@@ -59,43 +59,27 @@ function resolveStyle(style: string): StyleId | null {
   return STYLE_ALIASES[style] ?? null
 }
 
-const HF_BASE = 'https://platform.higgsfield.ai'
-const QUALITY_MODEL: Record<Quality, string> = {
-  lite: 'dop-lite',
-  turbo: 'dop-turbo',
-  standard: 'dop-standard',
-}
-
 // ── Video provider ────────────────────────────────────────────────────────────
-// VIDEO_PROVIDER selects the engine without touching call sites:
-//   'veo3'       (default) — Google Veo 3 via the Gemini API. Generates video
-//                            WITH native audio, reuses GEMINI_API_KEY (already set
-//                            for model sheets), and needs no second vendor.
-//   'higgsfield'           — the original Higgsfield image-to-video path.
+// Google Veo 3 via the Gemini API. Generates video WITH native audio, reuses
+// GEMINI_API_KEY (already set for model sheets), and needs no second vendor.
 // Veo job ids are returned prefixed with "veo:" so /api/status can route the poll.
-const VIDEO_PROVIDER = (process.env.VIDEO_PROVIDER || 'veo3').toLowerCase()
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 // Fast variant by default — a UGC tool renders many short clips, so cost/latency
 // matter more than the marginal quality of the full model. Override with VEO_MODEL.
 const VEO_MODEL = process.env.VEO_MODEL || 'veo-3.0-fast-generate-001'
 
-function higgsfieldAuth(): string {
-  const combined = process.env.HF_CREDENTIALS || process.env.HF_KEY
-  let key = process.env.HF_API_KEY
-  let secret = process.env.HF_API_SECRET
-  if (combined?.includes(':')) {
-    ;[key, secret] = combined.split(':')
-  }
-  if (!key || !secret) {
-    throw new Error('Missing Higgsfield credentials. Set HF_API_KEY + HF_API_SECRET.')
-  }
-  return `Key ${key}:${secret}`
-}
-
 interface BrandContext {
   voice?: string
   taglines?: string[]
   cta?: string
+}
+
+// Per-style camera vocabulary embedded into the user message as direction hints.
+const STYLE_CAMERA: Record<StyleId, string> = {
+  testimonial:  'locked tripod, slow push-in starting at chest-level, hold face in center frame',
+  unboxing:     'overhead or 45-degree angle, tight on hands, product fills 60% of frame',
+  'day-in-life':'handheld with natural drift, following subject through environment, eye-level',
+  'fast-cut':   'rapid zoom-in to face, then pull to product at waist level, high energy physical motion',
 }
 
 async function writeDirectorPrompt(
@@ -104,6 +88,7 @@ async function writeDirectorPrompt(
   brand?: BrandContext,
   composedPrompt?: string,
   sceneLabel?: string,
+  script?: string,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -136,24 +121,54 @@ async function writeDirectorPrompt(
     ? `\n${sceneFocusMap[sceneLabel]}\n`
     : ''
 
-  const system = `You are an expert UGC ad director writing prompts for an image-to-video model. Write ONE vivid image-to-video motion prompt that turns a still product photo into a scroll-stopping ${style.label} ad clip.
+  const system = `You are an expert UGC video director writing image-to-video prompts for Google Veo 3 — a model that responds to physically specific, observable descriptions, NOT mood or vibe words.
 
-Style direction: ${style.brief}
-${brandSection}${sceneFocusSection}${identitySection}
-Rules:
-- Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation.
-- 2-4 sentences. Describe camera movement, subject action, lighting, and mood.
-- Keep it concrete and physical (what moves, how the camera moves). Avoid brand claims and text overlays.${composedPrompt ? '\n- Preserve the cast person\'s ethnicity and skin tone exactly as stated. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}
-- Vertical 9:16, social-native, authentic — not a glossy TV commercial.`
+RULES — violating any one of these produces unusable output:
+
+1. ACTIONS, not adjectives.
+   BAD: "an energetic woman excitedly presents the product"
+   GOOD: "She lifts the jar to shoulder height with her right hand, turns the label directly toward camera, holds for 2 seconds, then slowly lowers it — maintaining eye contact with the lens the entire time."
+
+2. ANCHOR the product in every sentence.
+   State the product's exact visual appearance (color, material, label text if known, shape) explicitly. Never assume Veo will infer it from a prior sentence.
+
+3. PRECISE camera language.
+   Use: "locked tripod, slow push-in", "handheld with slight natural drift", "overhead tight on hands", "fast zoom-in then smash to face close-up"
+   Never use: "cinematic", "professional", "high quality", "aesthetic"
+
+4. AUDIO is first-class.
+   Veo 3 generates audio and video together. If a script line is provided, write it verbatim into the prompt with delivery direction:
+   EXAMPLE: She says "I've tried six serums. This one actually works," in a calm, unhurried voice, pausing after 'six serums' for effect.
+
+5. ONE COHERENT SHOT — no cuts.
+   Describe one physically continuous scene. If multiple beats exist, generate them as separate calls.
+
+6. VERTICAL 9:16 framing. Creator fills center frame.
+
+7. NEVER write: "stunning", "beautiful", "seamless", "vibrant", "amazing", "incredible", "perfect", "cinematic", "professional", "high-quality".
+
+Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation. 3-5 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}`
+
+  const userLines: string[] = []
+  userLines.push(`Product: ${productDescription}`)
+  if (script?.trim()) {
+    userLines.push(`Script line to speak verbatim: "${script.trim()}"`)
+  }
+  userLines.push(`Style direction: ${style.brief}`)
+  userLines.push(`Camera direction: ${STYLE_CAMERA[styleId]}`)
+  if (brandSection.trim()) userLines.push(brandSection.trim())
+  if (sceneFocusSection.trim()) userLines.push(sceneFocusSection.trim())
+  if (identitySection.trim()) userLines.push(identitySection.trim())
+  userLines.push(`\nWrite the ${style.label} motion prompt.`)
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 320,
+    max_tokens: 400,
     system,
     messages: [
       {
         role: 'user',
-        content: `Product: ${productDescription}\n\nWrite the ${style.label} motion prompt.`,
+        content: userLines.join('\n\n'),
       },
     ],
   })
@@ -166,54 +181,6 @@ Rules:
 
   if (!text) throw new Error('Director returned an empty prompt.')
   return text
-}
-
-async function submitVideoJob(
-  prompt: string,
-  imageUrl: string,
-  quality: Quality,
-  opts?: { negativePrompt?: string; enhance?: boolean },
-) {
-  // Fold negatives inline as an "Avoid:" clause rather than a separate param —
-  // the dop endpoint only documents prompt/input_images/enhance_prompt, so an
-  // unknown field could 400 a request that otherwise works. Cap length to stay sane.
-  const avoid = opts?.negativePrompt?.trim()
-  const finalPrompt = avoid ? `${prompt} Avoid: ${avoid.slice(0, 400)}.` : prompt
-
-  const params: Record<string, unknown> = {
-    prompt: finalPrompt,
-    input_images: [{ type: 'image_url', image_url: imageUrl }],
-    // When we supply a strong composed prompt we disable enhancement so Higgsfield
-    // doesn't rewrite the cast identity away. Defaults to enhanced otherwise.
-    enhance_prompt: opts?.enhance ?? true,
-  }
-
-  const res = await fetch(`${HF_BASE}/v1/image2video/dop`, {
-    method: 'POST',
-    headers: { Authorization: higgsfieldAuth(), 'content-type': 'application/json' },
-    body: JSON.stringify({ model: QUALITY_MODEL[quality], params }),
-  })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`Higgsfield submit failed (${res.status}): ${detail.slice(0, 300)}`)
-  }
-
-  const data = (await res.json()) as Record<string, unknown>
-  // The id field name varies across Higgsfield API versions. Try the common
-  // variants; nested under `job`/`data` on some responses.
-  const nested = (data.job ?? data.data ?? data.result ?? {}) as Record<string, unknown>
-  const requestId =
-    (data.request_id ?? data.id ?? data.requestId ?? data.job_id ??
-      nested.request_id ?? nested.id ?? nested.requestId) as string | undefined
-  const status = (data.status ?? nested.status ?? 'queued') as string
-
-  if (!requestId) {
-    throw new Error(
-      `Higgsfield submit returned no job id. Raw response: ${JSON.stringify(data).slice(0, 400)}`,
-    )
-  }
-  return { requestId, status }
 }
 
 /**
@@ -275,12 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set. Add it in Vercel → Settings → Environment Variables.' })
     }
-    if (VIDEO_PROVIDER === 'higgsfield') {
-      const hfReady = process.env.HF_CREDENTIALS || (process.env.HF_API_KEY && process.env.HF_API_SECRET)
-      if (!hfReady) {
-        return res.status(503).json({ error: 'Higgsfield credentials missing. Set HF_API_KEY + HF_API_SECRET in Vercel → Settings → Environment Variables.' })
-      }
-    } else if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it in Vercel → Settings → Environment Variables to enable Veo video generation.' })
     }
 
@@ -295,6 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       brandTaglines,
       brandCta,
       sceneLabel,
+      script,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
     if (!productImageUrl || !/^https?:\/\//i.test(productImageUrl)) {
@@ -318,18 +281,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cta: brandCta || undefined,
     }
 
-    const directorPrompt = await writeDirectorPrompt(productDescription.trim(), styleId, brand, composedPrompt, sceneLabel)
+    const directorPrompt = await writeDirectorPrompt(
+      productDescription.trim(),
+      styleId,
+      brand,
+      composedPrompt,
+      sceneLabel,
+      script,
+    )
 
-    const { requestId, status } = VIDEO_PROVIDER === 'higgsfield'
-      ? await submitVideoJob(directorPrompt, productImageUrl, quality as Quality, {
-          negativePrompt,
-          // Disable Higgsfield's own prompt rewrite when we already supplied a strong,
-          // identity-locked composed prompt — keeps ethnicity/scale from drifting.
-          enhance: composedPrompt ? false : true,
-        })
-      : await submitVeoJob(directorPrompt, productImageUrl, { negativePrompt })
+    const { requestId, status } = await submitVeoJob(directorPrompt, productImageUrl, { negativePrompt })
 
-    return res.status(200).json({ requestId, status, directorPrompt, provider: VIDEO_PROVIDER })
+    return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
   } catch (err) {
     console.error('[/api/generate]', err)
     const message = err instanceof Error ? err.message : 'Generation failed.'
