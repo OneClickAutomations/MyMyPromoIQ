@@ -144,6 +144,7 @@ function FactorRow({ label, value, signal }: { label: string; value: number; sig
 // ── Result card ───────────────────────────────────────────────────────────────
 function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
   const media = proxiedMedia(ad.creative.mediaUrls[0])
+  const isVideo = ad.creative.mediaType === 'video'
   return (
     <button
       type="button"
@@ -152,7 +153,20 @@ function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
     >
       <div className="relative aspect-[4/5] overflow-hidden bg-void-700">
         {media
-          ? <img src={media} alt={ad.product.name ?? ad.pageOrShopName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
+          ? isVideo
+            ? (
+              <video
+                src={media}
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+                onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
+              />
+            )
+            : <img src={media} alt={ad.product.name ?? ad.pageOrShopName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
           : <div className="grid h-full place-items-center"><Package className="h-8 w-8 text-ink-faint" /></div>}
         <div className="absolute left-2 top-2"><ScoreBadge rating={ad.score.rating} total={ad.score.total} /></div>
         <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
@@ -322,7 +336,18 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
           {ad.creative.mediaUrls[0] && (
-            <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
+            ad.creative.mediaType === 'video'
+              ? (
+                <video
+                  src={proxiedMedia(ad.creative.mediaUrls[0])}
+                  controls
+                  muted
+                  loop
+                  playsInline
+                  className="aspect-[4/5] w-full rounded-xl object-cover"
+                />
+              )
+              : <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
           )}
 
           <div className="flex items-center justify-between gap-3">

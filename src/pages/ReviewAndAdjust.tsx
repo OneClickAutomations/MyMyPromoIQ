@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
@@ -52,8 +52,28 @@ const STEPS = [
   'Rendering video (1-3 min)…',
 ]
 
+/** Force-download a cross-origin video URL via a blob fetch. */
+async function downloadVideo(url: string) {
+  try {
+    const resp = await fetch(url)
+    const blob = await resp.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = `promo-video-${Date.now()}.mp4`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 8000)
+  } catch {
+    // Fallback: open in new tab if fetch fails (e.g. CORS restriction)
+    window.open(url, '_blank', 'noopener')
+  }
+}
+
 export default function ReviewAndAdjust() {
   const { user } = useUser()
+  const navigate = useNavigate()
   const [prefill, setPrefill] = useState<ClonePrefill | null>(null)
 
   const [productImageUrl, setProductImageUrl] = useState('')
@@ -72,6 +92,9 @@ export default function ReviewAndAdjust() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [directorPrompt, setDirectorPrompt] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [historySaved, setHistorySaved] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   // Read prefill on mount, then clear it
   useEffect(() => {
@@ -142,6 +165,8 @@ export default function ReviewAndAdjust() {
       return
     }
     setErrorMsg('')
+    setHistorySaved(false)
+    setHistoryError('')
     setPhase('working')
     setStepIndex(0)
     setVideoUrl(null)
@@ -170,12 +195,13 @@ export default function ReviewAndAdjust() {
       if (result.status === 'completed' && result.videoUrl) {
         setVideoUrl(result.videoUrl)
         setPhase('done')
-        // Save to history so it appears in Dashboard/History
+
+        // Save to history
         if (user?.id) {
           try {
             const { id: campaignId } = await saveCampaign(user.id, {
               name: productDescription.trim().slice(0, 80),
-              product_image_url: productImageUrl.trim(),
+              product_image_url: productImageUrl.trim() || null,
               product_description: productDescription.trim(),
               style,
               quality: 'turbo',
@@ -191,9 +217,13 @@ export default function ReviewAndAdjust() {
               director_prompt: dp,
               video_url: result.videoUrl,
             })
-          } catch {
-            // Non-blocking — video is still shown even if history save fails
+            setHistorySaved(true)
+          } catch (e) {
+            console.error('[ReviewAndAdjust] history save failed:', e)
+            setHistoryError(e instanceof Error ? e.message : 'History save failed.')
           }
+        } else {
+          console.warn('[ReviewAndAdjust] user not loaded — skipping history save')
         }
       } else {
         setErrorMsg(result.raw || 'Video generation failed.')
@@ -210,7 +240,37 @@ export default function ReviewAndAdjust() {
     setVideoUrl(null)
     setDirectorPrompt('')
     setErrorMsg('')
+    setHistorySaved(false)
+    setHistoryError('')
     setStepIndex(0)
+  }
+
+  /** Continue to the 11-step Studio wizard to generate all 6 scenes. */
+  function handleContinueToStudio() {
+    if (!prefill) return
+    // Re-save updated prefill so CommercialStudio's clone bridge picks it up.
+    const updated: ClonePrefill = {
+      ...prefill,
+      cloneMode: 'studio',
+      analysis: { ...prefill.analysis, improvedScript: script },
+      sourcedProduct: {
+        name: productDescription || prefill.sourcedProduct?.name || '',
+        imageUrl: productImageUrl || prefill.adImageUrl,
+        sourceUrl: prefill.sourcedProduct?.sourceUrl,
+      },
+    }
+    try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(updated)) } catch {}
+    navigate('/studio/new')
+  }
+
+  async function handleDownload() {
+    if (!videoUrl) return
+    setDownloading(true)
+    try {
+      await downloadVideo(videoUrl)
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const isFromClone = prefill !== null
@@ -451,6 +511,17 @@ export default function ReviewAndAdjust() {
                 className="w-full"
               />
             </div>
+
+            {/* History save status */}
+            {historySaved && (
+              <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Saved to history
+              </p>
+            )}
+            {historyError && (
+              <p className="text-xs text-amber-300">History save failed: {historyError}</p>
+            )}
+
             {directorPrompt && (
               <details className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-ink-faint">
@@ -459,23 +530,49 @@ export default function ReviewAndAdjust() {
                 <p className="mt-2 text-xs leading-relaxed text-ink-muted">{directorPrompt}</p>
               </details>
             )}
-            <div className="flex gap-3">
-              <a
-                href={videoUrl}
-                download
-                className="btn-fire flex items-center gap-2"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
-              <button
-                type="button"
-                onClick={handleReset}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Generate again
-              </button>
+
+            <div className="flex flex-col gap-3">
+              {/* Primary actions row */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="btn-fire flex items-center gap-2 disabled:opacity-60"
+                >
+                  {downloading
+                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Downloading…</>
+                    : <><Download className="h-4 w-4" /> Download</>
+                  }
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Generate again
+                </button>
+              </div>
+
+              {/* Continue to Studio — only shown when arriving from a clone */}
+              {isFromClone && (
+                <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.04] p-4">
+                  <p className="text-sm font-semibold text-ink mb-1">Want to generate all 6 scenes?</p>
+                  <p className="text-xs text-ink-muted mb-3">
+                    Open the full Studio wizard with your product and script pre-loaded. Generate the Hook, Problem, Solution, Social Proof, CTA, and Outro scenes back-to-back.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleContinueToStudio}
+                    className="btn-fire flex w-full items-center justify-center gap-2"
+                  >
+                    <Wand className="h-4 w-4" />
+                    Continue in Studio — generate next scene
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
