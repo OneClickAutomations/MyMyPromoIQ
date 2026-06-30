@@ -23,7 +23,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 
-const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation'
+// gemini-2.0-flash-preview-image-generation was a short-lived preview alias.
+// Override with GEMINI_IMAGE_MODEL if a newer stable model is released.
+const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-exp'
 
 function buildPrompt(subjectType: 'product' | 'character', subject: string): string {
   if (subjectType === 'character') {

@@ -394,7 +394,7 @@ const APIFY_BASE = 'https://api.apify.com/v2'
 const META_ACTOR = {
   actorId: 'apify~facebook-ads-scraper',
   enabled: true, // official actor; safe to attempt — degrades to demo set on miss.
-  maxResults: 20,
+  maxResults: 8, // smaller = faster actor run; fits inside the 42 s waitForFinish window
   /** Build a Facebook Ad Library search URL for the query. */
   searchUrl(type: string, value: string): string {
     const params = new URLSearchParams({
@@ -483,41 +483,39 @@ const META_ACTOR = {
   },
 }
 
-/** Submit an async actor run, poll until it finishes, return dataset items. */
+/**
+ * Submit an Apify actor run and block until it completes using the
+ * `waitForFinish` query parameter (Apify holds the HTTP connection open until
+ * the run ends or the wait expires, eliminating our own polling loop).
+ * Cap at 42 s so we leave a few seconds for dataset fetch before the 60 s
+ * Vercel function limit hits.
+ */
 async function runApifyActorAsync(actorId: string, input: Record<string, unknown>, token: string): Promise<any[]> {
-  const startResp = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${encodeURIComponent(token)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  })
+  const startResp = await fetch(
+    `${APIFY_BASE}/acts/${actorId}/runs?token=${encodeURIComponent(token)}&waitForFinish=42`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  )
   if (!startResp.ok) {
     const detail = await startResp.text().catch(() => '')
     throw new Error(`Apify run start failed (${startResp.status}): ${detail.slice(0, 200)}`)
   }
-  const started = (await startResp.json()) as any
-  const runId = started?.data?.id
-  const datasetId = started?.data?.defaultDatasetId
-  if (!runId) throw new Error('Apify did not return a run id.')
+  const run = (await startResp.json()) as any
+  const status: string = run?.data?.status ?? ''
+  const datasetId: string | undefined = run?.data?.defaultDatasetId
 
-  // Poll run status. Cap well under the function timeout so we never hang the
-  // request; if it's still running we bail to the demo set rather than block.
-  const deadline = Date.now() + 45_000
-  let finalDatasetId = datasetId
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 3_000))
-    const statusResp = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${encodeURIComponent(token)}`)
-    if (!statusResp.ok) continue
-    const run = (await statusResp.json()) as any
-    const status = run?.data?.status
-    finalDatasetId = run?.data?.defaultDatasetId ?? finalDatasetId
-    if (status === 'SUCCEEDED') break
-    if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
-      throw new Error(`Apify run ${status}.`)
-    }
+  if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+    throw new Error(`Apify run ended with status: ${status}`)
   }
-  if (!finalDatasetId) return []
+  // RUNNING means the actor didn't finish within 42 s; bail to the demo set.
+  if (status === 'RUNNING' || !datasetId) return []
 
-  const itemsResp = await fetch(`${APIFY_BASE}/datasets/${finalDatasetId}/items?token=${encodeURIComponent(token)}&clean=true&limit=${META_ACTOR.maxResults}`)
+  const itemsResp = await fetch(
+    `${APIFY_BASE}/datasets/${datasetId}/items?token=${encodeURIComponent(token)}&clean=true&limit=${META_ACTOR.maxResults}`,
+  )
   if (!itemsResp.ok) return []
   const items = (await itemsResp.json()) as any[]
   return Array.isArray(items) ? items : []

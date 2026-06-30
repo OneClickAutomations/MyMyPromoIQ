@@ -314,6 +314,28 @@ export const finalCta = {
   reassurance: 'Free to start · No card · Cancel in two clicks',
 }
 
+export const adForge = {
+  title: 'Ad Forge',
+  subtitle: 'Two ways to make a scroll-stopping ad. Same output, different starting point.',
+  clone: {
+    title: 'Clone a Winning Ad',
+    subtitle: 'Find what\'s already working and make it yours.',
+    detail: 'Search real running ads, see why they\'re winning, and let Claude rewrite the structure for your product — differentiated, never copied.',
+  },
+  build: {
+    title: 'Build From Scratch',
+    subtitle: 'Full creative control, no reference needed.',
+    detail: 'Tell us about your product and the kind of ad you want. Claude writes the direction, Veo 3 renders the video.',
+  },
+  review: {
+    title: 'Review & Adjust',
+    fromClone: 'Pre-filled from ad analysis — every field is editable.',
+    fromBuild: 'Fill in your product details and creative direction.',
+    generateCta: 'Generate Video',
+    filledLabel: 'from analysis',
+  },
+}
+
 export const footer = {
   tagline: 'UGC video ads on autopilot. You get the output. We hide the pipeline.',
   columns: [

@@ -174,7 +174,7 @@ export default function Dashboard() {
           </h1>
         </div>
         <Link
-          to="/studio/new"
+          to="/forge"
           className="btn-fire flex-shrink-0 gap-1.5 px-4 py-2.5 text-sm shadow-fire-soft md:gap-2 md:px-6 md:py-3.5"
         >
           <Plus className="h-4 w-4" />
@@ -227,7 +227,7 @@ export default function Dashboard() {
           <h2 className="text-xs font-semibold uppercase tracking-widest text-ink-faint md:text-[11px]">
             Quick Create
           </h2>
-          <Link to="/studio/new?mode=full" className="flex items-center gap-1.5 text-[11px] font-semibold text-fire-start hover:text-fire-end transition-colors">
+          <Link to="/forge" className="flex items-center gap-1.5 text-[11px] font-semibold text-fire-start hover:text-fire-end transition-colors">
             <Film className="h-3.5 w-3.5" /> Generate full ad (1–6 scenes)
             <ArrowRight className="h-3 w-3" />
           </Link>
@@ -242,7 +242,7 @@ export default function Dashboard() {
               transition={stagger(i + 3)}
             >
               <Link
-                to={`/studio/new?style=${q.style}&mode=quick`}
+                to={`/forge/review`}
                 className="group flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-void-800/50 transition-all duration-200 hover:border-white/[0.16] hover:-translate-y-0.5 hover:shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
               >
                 {/* Cinematic thumbnail */}
@@ -337,7 +337,7 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <Link to="/studio/new" className="btn-fire mx-auto mt-8 gap-2 inline-flex">
+              <Link to="/forge" className="btn-fire mx-auto mt-8 gap-2 inline-flex">
                 <Bolt className="h-4 w-4" />
                 Create your first campaign
               </Link>

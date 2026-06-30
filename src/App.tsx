@@ -11,6 +11,8 @@ import CreatorStudio from './pages/CreatorStudio'
 import ProductStudio from './pages/ProductStudio'
 import BrandKit from './pages/BrandKit'
 import Discovery from './pages/Discovery'
+import AdForge from './pages/AdForge'
+import ReviewAndAdjust from './pages/ReviewAndAdjust'
 import PrivacyPolicy from './pages/legal/Privacy'
 import TermsOfService from './pages/legal/Terms'
 import DataProcessingAgreement from './pages/legal/DPA'
@@ -96,6 +98,23 @@ export default function App() {
         element={
           <Protected>
             <BrandKit />
+          </Protected>
+        }
+      />
+      {/* Ad Forge */}
+      <Route
+        path="/forge"
+        element={
+          <Protected>
+            <AdForge />
+          </Protected>
+        }
+      />
+      <Route
+        path="/forge/review"
+        element={
+          <Protected>
+            <ReviewAndAdjust />
           </Protected>
         }
       />
