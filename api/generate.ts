@@ -63,10 +63,16 @@ function resolveStyle(style: string): StyleId | null {
 // Google Veo 3 via the Gemini API. Generates video WITH native audio, reuses
 // GEMINI_API_KEY (already set for model sheets), and needs no second vendor.
 // Veo job ids are returned prefixed with "veo:" so /api/status can route the poll.
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1alpha'
-// Fast variant by default — a UGC tool renders many short clips, so cost/latency
-// matter more than the marginal quality of the full model. Override with VEO_MODEL.
-const VEO_MODEL = process.env.VEO_MODEL || 'veo-3.0-fast-generate-001'
+// Model fallback chain: try each in order until one accepts.
+// veo-3.0-fast needs v1alpha; veo-2.0 is confirmed stable on v1beta.
+// An explicit VEO_MODEL env var skips the chain and uses that model directly.
+const VEO_CANDIDATES: Array<{ base: string; model: string }> = process.env.VEO_MODEL
+  ? [{ base: 'https://generativelanguage.googleapis.com/v1alpha', model: process.env.VEO_MODEL }]
+  : [
+    { base: 'https://generativelanguage.googleapis.com/v1alpha', model: 'veo-3.0-fast-generate-001' },
+    { base: 'https://generativelanguage.googleapis.com/v1alpha', model: 'veo-3.0-generate-001' },
+    { base: 'https://generativelanguage.googleapis.com/v1beta',  model: 'veo-2.0-generate-001'      },
+  ]
 
 interface BrandContext {
   voice?: string
@@ -202,7 +208,6 @@ async function submitVeoJob(
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
 
   const parameters: Record<string, unknown> = {
-    // Vertical, social-native by default. Veo 3 supports '9:16' and '16:9'.
     aspectRatio: process.env.VEO_ASPECT_RATIO || '9:16',
   }
   const avoid = opts?.negativePrompt?.trim()
@@ -211,15 +216,12 @@ async function submitVeoJob(
   const instance: Record<string, unknown> = { prompt }
 
   if (imageUrl) {
-    // Meta CDN URLs (fbcdn.net, cdninstagram.com) require browser-like headers
-    // or they 403. Add them unconditionally — harmless on non-Meta URLs.
     const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
     const fetchHeaders: Record<string, string> = {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
       'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
     }
     if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
-
     const imgResp = await fetch(imageUrl, { headers: fetchHeaders })
     if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}). If you copied this from Facebook/Meta, the URL may have expired — upload the image directly instead.`)
     const mimeType = imgResp.headers.get('content-type') || 'image/jpeg'
@@ -227,25 +229,35 @@ async function submitVeoJob(
     instance.image = { bytesBase64Encoded, mimeType }
   }
 
-  const resp = await fetch(`${GEMINI_BASE}/models/${VEO_MODEL}:predictLongRunning`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
-      instances: [instance],
-      parameters,
-    }),
-  })
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '')
-    throw new Error(`Veo submit failed (${resp.status}): ${detail.slice(0, 300)}`)
+  // Walk the candidate list — skip any model that returns 404 (not available for
+  // this API key/tier) and try the next one.
+  let lastError = ''
+  for (const { base, model } of VEO_CANDIDATES) {
+    const url = `${base}/models/${model}:predictLongRunning`
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ instances: [instance], parameters }),
+    })
+    if (resp.status === 404) {
+      // Model not available on this key/tier — try next candidate.
+      lastError = `${model} not available (404)`
+      console.warn(`[generate] ${model} returned 404 — trying next model`)
+      continue
+    }
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '')
+      throw new Error(`Veo submit failed (${resp.status}) with ${model}: ${detail.slice(0, 300)}`)
+    }
+    const data = (await resp.json()) as Record<string, unknown>
+    const opName = data.name as string | undefined
+    if (!opName) {
+      throw new Error(`Veo submit returned no operation name. Raw: ${JSON.stringify(data).slice(0, 300)}`)
+    }
+    console.info(`[generate] Using ${model} — operation ${opName}`)
+    return { requestId: `veo:${opName}`, status: 'queued', provider: model }
   }
-  const data = (await resp.json()) as Record<string, unknown>
-  const opName = data.name as string | undefined
-  if (!opName) {
-    throw new Error(`Veo submit returned no operation name. Raw: ${JSON.stringify(data).slice(0, 300)}`)
-  }
-  // Prefix so /api/status knows to poll the Veo operation endpoint.
-  return { requestId: `veo:${opName}`, status: 'queued' }
+  throw new Error(`No Veo model was available for this API key. Last error: ${lastError}. Check GEMINI_API_KEY has video generation access.`)
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
