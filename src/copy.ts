@@ -315,17 +315,25 @@ export const finalCta = {
 }
 
 export const adForge = {
-  title: 'Ad Forge',
-  subtitle: 'Two ways to make a scroll-stopping ad. Same output, different starting point.',
+  title: 'New Campaign',
+  subtitle: 'Three paths, one world-class output. Pick the one that fits how you work today.',
   clone: {
     title: 'Clone a Winning Ad',
     subtitle: 'Find what\'s already working and make it yours.',
     detail: 'Search real running ads, see why they\'re winning, and let Claude rewrite the structure for your product — differentiated, never copied.',
+    cta: 'Search ad library',
   },
   build: {
     title: 'Build From Scratch',
-    subtitle: 'Full creative control, no reference needed.',
-    detail: 'Tell us about your product and the kind of ad you want. Claude writes the direction, Veo 3 renders the video.',
+    subtitle: 'Quick AI brief, no reference needed.',
+    detail: 'Tell us about your product and the kind of ad you want. Claude writes the direction, Veo 3 renders the video in minutes.',
+    cta: 'Start quick build',
+  },
+  wizard: {
+    title: 'Full Wizard',
+    subtitle: 'Step-by-step with maximum control.',
+    detail: 'Walk through 11 guided steps — product, creator, brand, scenes, voiceover, and more. Best when you want to set every detail yourself.',
+    cta: 'Open wizard',
   },
   review: {
     title: 'Review & Adjust',
