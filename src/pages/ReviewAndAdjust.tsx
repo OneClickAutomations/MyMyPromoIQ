@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
-import { startGeneration, pollUntilDone, type StatusResponse } from '../lib/api'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -52,6 +53,7 @@ const STEPS = [
 ]
 
 export default function ReviewAndAdjust() {
+  const { user } = useUser()
   const [prefill, setPrefill] = useState<ClonePrefill | null>(null)
 
   const [productImageUrl, setProductImageUrl] = useState('')
@@ -131,6 +133,31 @@ export default function ReviewAndAdjust() {
       if (result.status === 'completed' && result.videoUrl) {
         setVideoUrl(result.videoUrl)
         setPhase('done')
+        // Save to history so it appears in Dashboard/History
+        if (user?.id) {
+          try {
+            const { id: campaignId } = await saveCampaign(user.id, {
+              name: productDescription.trim().slice(0, 80),
+              product_image_url: productImageUrl.trim(),
+              product_description: productDescription.trim(),
+              style,
+              quality: 'turbo',
+              status: 'ready',
+            })
+            await saveScene(user.id, {
+              campaign_id: campaignId,
+              label: 'Main',
+              style,
+              order_index: 0,
+              phase: 'done',
+              request_id: requestId,
+              director_prompt: dp,
+              video_url: result.videoUrl,
+            })
+          } catch {
+            // Non-blocking — video is still shown even if history save fails
+          }
+        }
       } else {
         setErrorMsg(result.raw || 'Video generation failed.')
         setPhase('error')
