@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, uploadAsset, type StatusResponse } from '../lib/api'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, uploadAsset, extractProductFromUrl, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -58,6 +58,9 @@ export default function ReviewAndAdjust() {
 
   const [productImageUrl, setProductImageUrl] = useState('')
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [productPageUrl, setProductPageUrl] = useState('')
+  const [scanningUrl, setScanningUrl] = useState(false)
+  const [scanError, setScanError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [productDescription, setProductDescription] = useState('')
   const [style, setStyle] = useState('testimonial')
@@ -96,6 +99,29 @@ export default function ReviewAndAdjust() {
       // sessionStorage unavailable or malformed JSON — start blank
     }
   }, [])
+
+  async function handleScanUrl() {
+    const url = productPageUrl.trim()
+    if (!url || !/^https?:\/\//i.test(url)) {
+      setScanError('Paste a full product page URL (https://…).')
+      return
+    }
+    setScanError('')
+    setScanningUrl(true)
+    try {
+      const result = await extractProductFromUrl(url)
+      if (result.imageUrl) setProductImageUrl(result.imageUrl)
+      if (result.title && !productDescription) setProductDescription(result.title)
+      if (result.description && !productDescription) setProductDescription(result.description.slice(0, 300))
+      if (!result.imageUrl && !result.title) {
+        setScanError('Nothing extracted from that page. Try pasting the image URL directly above.')
+      }
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : 'Scan failed.')
+    } finally {
+      setScanningUrl(false)
+    }
+  }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -254,6 +280,36 @@ export default function ReviewAndAdjust() {
             {productImageUrl && /^https?:\/\//.test(productImageUrl) && (
               <img src={productImageUrl} alt="Product preview" className="mt-1 h-16 w-16 rounded-lg object-cover border border-white/[0.08]" />
             )}
+          </div>
+
+          {/* Scan product page URL */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">
+              Or scan a product page URL
+            </label>
+            <p className="text-[11px] text-ink-faint">Paste a Shopify, Amazon, or DTC store link — we'll auto-extract the title, description, and image.</p>
+            <div className="flex gap-2">
+              <input
+                value={productPageUrl}
+                onChange={e => { setProductPageUrl(e.target.value); setScanError('') }}
+                onKeyDown={e => { if (e.key === 'Enter') handleScanUrl() }}
+                disabled={isBusy || scanningUrl}
+                placeholder="https://mystore.com/products/amazing-serum"
+                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={handleScanUrl}
+                disabled={isBusy || scanningUrl}
+                className="flex-shrink-0 flex items-center gap-1.5 rounded-xl bg-fire-start px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-fire-end transition-colors"
+              >
+                {scanningUrl
+                  ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning</>
+                  : <><Wand className="h-4 w-4" /> Scan</>
+                }
+              </button>
+            </div>
+            {scanError && <p className="text-sm text-rose-400">{scanError}</p>}
           </div>
 
           {/* Product description */}
