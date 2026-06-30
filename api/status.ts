@@ -1,37 +1,22 @@
 /**
  * GET /api/status?id=<requestId>
  *
- * Polls the video provider and returns a normalised status. The id encodes the
- * provider: ids prefixed with "veo:" are Google Veo operations; anything else is
- * a Higgsfield request id (kept unprefixed for backward compatibility).
+ * Polls a Veo 3 long-running operation and returns a normalised status.
+ * Request ids are prefixed with "veo:" (set by /api/generate).
  *
- * For Veo, when the render completes we download the file (the Veo file URL needs
- * the API key, so it can't be handed to the browser) and re-host it in the public
- * Supabase bucket. That gives a plain https URL the <video> tag, the muxer, and
- * the stitcher can all use. If Supabase isn't configured we fall back to an inline
- * data URL (plays fine, but can't be stitched).
+ * When the render completes we download the file (the Veo URI needs the API
+ * key so it can't be given to the browser) and re-host it in the public
+ * Supabase bucket.  That gives a plain https URL the <video> tag, the muxer,
+ * and the stitcher can all use.  If Supabase isn't configured we fall back to
+ * an inline data URL (plays fine, but can't be stitched).
  *
  * Self-contained (node_modules packages only) so Vercel reliably bundles it.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
-const HF_BASE = 'https://platform.higgsfield.ai'
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const BUCKET = 'product-images'
-
-function higgsfieldAuth(): string {
-  const combined = process.env.HF_CREDENTIALS || process.env.HF_KEY
-  let key = process.env.HF_API_KEY
-  let secret = process.env.HF_API_SECRET
-  if (combined?.includes(':')) {
-    ;[key, secret] = combined.split(':')
-  }
-  if (!key || !secret) {
-    throw new Error('Missing Higgsfield credentials. Set HF_API_KEY + HF_API_SECRET.')
-  }
-  return `Key ${key}:${secret}`
-}
 
 /** Re-host a finished render in the public bucket → returns a plain https URL (or null). */
 async function rehostRender(buf: Buffer): Promise<string | null> {
@@ -48,6 +33,37 @@ async function rehostRender(buf: Buffer): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+/**
+ * Extract the video download URI from a completed Veo operation response.
+ *
+ * Veo 3 via `predictLongRunning` returns generatedSamples directly on the
+ * `response` object (not nested under generateVideoResponse).  Older / preview
+ * API revisions used different nesting — we try all known shapes so a future
+ * API change doesn't silently break every generation.
+ */
+function extractVeoUri(response: Record<string, any>): string | null {
+  const sample: any =
+    // Veo 3 stable: generatedSamples directly on response
+    response.generatedSamples?.[0] ??
+    // Older preview nesting
+    response.generateVideoResponse?.generatedSamples?.[0] ??
+    // Other variant field names
+    response.generatedVideos?.[0] ??
+    response.videos?.[0] ??
+    null
+
+  if (!sample) return null
+
+  return (
+    sample?.video?.uri ??
+    sample?.video?.url ??
+    sample?.uri ??
+    sample?.url ??
+    (typeof sample?.video === 'string' ? sample.video : null) ??
+    null
+  )
 }
 
 /** Poll a Veo long-running operation and, when done, re-host the resulting clip. */
@@ -72,17 +88,12 @@ async function pollVeo(opName: string, res: VercelResponse) {
     return res.status(200).json({ status: 'failed', videoUrl: null, raw: JSON.stringify(data.error).slice(0, 200) })
   }
 
-  // The video URI location varies across Veo API revisions — try the known shapes.
   const response = data.response ?? {}
-  const sample =
-    response.generateVideoResponse?.generatedSamples?.[0] ??
-    response.generatedVideos?.[0] ??
-    response.videos?.[0] ??
-    null
-  const uri: string | null =
-    sample?.video?.uri ?? sample?.video?.url ?? sample?.uri ?? (typeof sample?.video === 'string' ? sample.video : null)
+  const uri = extractVeoUri(response)
 
   if (!uri) {
+    // Log the actual response shape so format changes are diagnosable.
+    console.error('[/api/status] veo-no-video-uri — response keys:', Object.keys(response), JSON.stringify(response).slice(0, 500))
     return res.status(200).json({ status: 'failed', videoUrl: null, raw: 'veo-no-video-uri' })
   }
 
@@ -103,36 +114,6 @@ async function pollVeo(opName: string, res: VercelResponse) {
   })
 }
 
-/** Poll a Higgsfield request. */
-async function pollHiggsfield(id: string, res: VercelResponse) {
-  const hfRes = await fetch(`${HF_BASE}/requests/${encodeURIComponent(id)}/status`, {
-    headers: { Authorization: higgsfieldAuth() },
-  })
-  if (!hfRes.ok) {
-    const detail = await hfRes.text().catch(() => '')
-    throw new Error(`Higgsfield status failed (${hfRes.status}): ${detail.slice(0, 300)}`)
-  }
-  const data = (await hfRes.json()) as Record<string, any>
-  const raw = String(data.status ?? '')
-  const norm = raw.toLowerCase().replace(/[\s-]/g, '_')
-
-  const videoUrl: string | null =
-    data.video?.url ??
-    data.video_url ??
-    data.output?.url ??
-    data.result?.url ??
-    (Array.isArray(data.results) ? data.results[0]?.url : null) ??
-    null
-
-  if (norm === 'completed' || norm === 'succeeded' || norm === 'success') {
-    return res.status(200).json({ status: 'completed', videoUrl, raw })
-  }
-  if (norm === 'failed' || norm === 'nsfw' || norm === 'error' || norm === 'canceled' || norm === 'cancelled') {
-    return res.status(200).json({ status: 'failed', videoUrl: null, raw })
-  }
-  return res.status(200).json({ status: 'pending', videoUrl: null, raw })
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== 'GET') {
@@ -147,7 +128,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (id.startsWith('veo:')) {
       return await pollVeo(id.slice(4), res)
     }
-    return await pollHiggsfield(id, res)
+
+    return res.status(400).json({ error: `Unknown request id format: "${id.slice(0, 40)}". Expected a veo:-prefixed id.` })
   } catch (err) {
     console.error('[/api/status]', err)
     const message = err instanceof Error ? err.message : 'Status check failed.'

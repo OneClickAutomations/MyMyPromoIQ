@@ -121,33 +121,34 @@ async function writeDirectorPrompt(
     ? `\n${sceneFocusMap[sceneLabel]}\n`
     : ''
 
-  const system = `You are an expert UGC video director writing image-to-video prompts for Google Veo 3 — a model that responds to physically specific, observable descriptions, NOT mood or vibe words.
+  const system = `You are an expert UGC video director. Your job is to write image-to-video prompts for Google Veo 3 that produce scroll-stopping, authentic-feeling content. Veo 3 responds to physically specific, observable descriptions — not mood words or adjectives.
 
-RULES — violating any one of these produces unusable output:
+RULES (violating any one produces unusable output):
 
 1. ACTIONS, not adjectives.
-   BAD: "an energetic woman excitedly presents the product"
-   GOOD: "She lifts the jar to shoulder height with her right hand, turns the label directly toward camera, holds for 2 seconds, then slowly lowers it — maintaining eye contact with the lens the entire time."
+   BAD:  "an energetic woman excitedly shows off the product"
+   GOOD: "She picks up the matte black bottle with both hands, holds it at chest height with the label facing the lens, pops the pump twice, then rubs the serum between her palms — eyes locked on camera the whole time."
+   Every beat must be something a camera can literally capture.
 
 2. ANCHOR the product in every sentence.
-   State the product's exact visual appearance (color, material, label text if known, shape) explicitly. Never assume Veo will infer it from a prior sentence.
+   State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.
 
-3. PRECISE camera language.
-   Use: "locked tripod, slow push-in", "handheld with slight natural drift", "overhead tight on hands", "fast zoom-in then smash to face close-up"
-   Never use: "cinematic", "professional", "high quality", "aesthetic"
+3. PRECISE camera language only.
+   Good: "locked tripod, slow push-in starting at chest level", "handheld with slight natural drift", "overhead tight on hands, product fills 70% of frame", "fast zoom-in to face then snap to product"
+   Banned words: cinematic, professional, high-quality, aesthetic, stunning, beautiful, seamless, vibrant, amazing, incredible, perfect.
 
-4. AUDIO is first-class.
-   Veo 3 generates audio and video together. If a script line is provided, write it verbatim into the prompt with delivery direction:
-   EXAMPLE: She says "I've tried six serums. This one actually works," in a calm, unhurried voice, pausing after 'six serums' for effect.
+4. AUDIO is first-class — Veo 3 generates sound with the image.
+   If a script line is provided, embed it verbatim with delivery notes:
+   Example: She looks directly into the lens and says "I used to spend $80 on this — now I spend $12," voice calm and matter-of-fact, slight upward smile at the end.
+   If no script, describe ambient sound: the click of a lid, the rustle of packaging, a quiet exhale.
 
-5. ONE COHERENT SHOT — no cuts.
-   Describe one physically continuous scene. If multiple beats exist, generate them as separate calls.
+5. ONE continuous shot — no cuts, no scene transitions.
 
-6. VERTICAL 9:16 framing. Creator fills center frame.
+6. VERTICAL 9:16 framing. Creator occupies the center third of frame.
 
-7. NEVER write: "stunning", "beautiful", "seamless", "vibrant", "amazing", "incredible", "perfect", "cinematic", "professional", "high-quality".
+7. BE CREATIVE AND SPECIFIC. Imagine a real creator in a real environment — morning light through a bathroom window, kitchen counter with a plant just visible at frame edge, a bedroom nightstand. Concrete environmental detail makes the output feel genuine, not studio-fake.
 
-Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation. 3-5 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}`
+Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}`
 
   const userLines: string[] = []
   userLines.push(`Product: ${productDescription}`)
@@ -162,8 +163,8 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown, no explanation
   userLines.push(`\nWrite the ${style.label} motion prompt.`)
 
   const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
+    model: 'claude-sonnet-4-6',
+    max_tokens: 650,
     system,
     messages: [
       {
