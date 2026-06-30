@@ -14,7 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import {
-  Compass, Search, TrendingUp, Wand, X, Check, ArrowRight, Spark,
+  Compass, Search, TrendingUp, Wand, X, Check, ArrowRight,
   Package, Clock, Bolt, RefreshCw, LinkIcon,
 } from '../components/icons'
 import { runDiscoverySearch, analyzeSourceAd, runSourcingLookup, type SourcingResponse } from '../lib/discovery/api'
@@ -364,8 +364,12 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
   )
 }
 
-// ── Clone confirmation modal ──────────────────────────────────────────────────
-function CloneConfirm({ ad, onCancel, onConfirm }: { ad: SourceAd; onCancel: () => void; onConfirm: () => void }) {
+// ── Clone confirmation modal — two generation modes ───────────────────────────
+function CloneConfirm({ ad, onCancel, onConfirm }: {
+  ad: SourceAd
+  onCancel: () => void
+  onConfirm: (mode: 'quick' | 'studio') => void
+}) {
   return (
     <>
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -373,22 +377,54 @@ function CloneConfirm({ ad, onCancel, onConfirm }: { ad: SourceAd; onCancel: () 
       <div className="fixed inset-0 z-[70] grid place-items-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
-          className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-void-900 p-6"
+          className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-void-900 p-6"
         >
-          <div className="grid h-12 w-12 place-items-center rounded-xl bg-fire-start/15">
-            <Spark className="h-6 w-6 text-fire-start" />
-          </div>
-          <p className="mt-4 text-lg font-bold text-ink">Clone this ad's winning structure</p>
-          <p className="mt-1 text-xs font-semibold text-fire-start">{ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName}</p>
-          <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-            Claude will analyze this ad's hook and structure, then write you a <span className="font-semibold text-ink">differentiated</span> script and creative direction — <span className="font-semibold text-ink">not a copy</span>. You'll land in the campaign wizard with creator, style, and script pre-filled and fully editable.
-          </p>
-          <div className="mt-5 flex gap-3">
-            <button onClick={onCancel} className="btn-ghost flex-1 py-2.5">Cancel</button>
-            <button onClick={onConfirm} className="btn-fire flex-1 py-2.5">
-              <Wand className="h-4 w-4" /> Analyze & clone
+          <p className="text-lg font-bold text-ink">How do you want to clone this?</p>
+          <p className="mt-0.5 text-xs font-semibold text-fire-start">{ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName}</p>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Mode 1: Quick Clone */}
+            <button
+              type="button"
+              onClick={() => onConfirm('quick')}
+              className="group flex flex-col gap-3 rounded-2xl border border-white/[0.1] bg-void-800 p-5 text-left transition-all hover:border-fire-start/40 hover:bg-fire-start/[0.04]"
+            >
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-void-700 transition-colors group-hover:bg-fire-start/15">
+                <Bolt className="h-5 w-5 text-fire-start" />
+              </div>
+              <div>
+                <p className="font-bold text-ink">Quick clone</p>
+                <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                  Use this ad's image and copy as your starting point. Swap in your own product details and generate instantly — no AI analysis, fastest path.
+                </p>
+              </div>
+              <span className="mt-auto inline-flex items-center gap-1 text-xs font-semibold text-fire-start">
+                Start immediately <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            </button>
+
+            {/* Mode 2: Studio Clone */}
+            <button
+              type="button"
+              onClick={() => onConfirm('studio')}
+              className="group flex flex-col gap-3 rounded-2xl border border-white/[0.1] bg-void-800 p-5 text-left transition-all hover:border-fire-start/40 hover:bg-fire-start/[0.04]"
+            >
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-void-700 transition-colors group-hover:bg-fire-start/15">
+                <Wand className="h-5 w-5 text-fire-start" />
+              </div>
+              <div>
+                <p className="font-bold text-ink">Adapt for my product</p>
+                <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                  Claude rewrites the hook and script for <span className="font-semibold text-ink">your</span> product. Opens the full studio with creator, style, and voiceover pre-set — fully editable.
+                </p>
+              </div>
+              <span className="mt-auto inline-flex items-center gap-1 text-xs font-semibold text-fire-start">
+                Analyze &amp; open wizard <ArrowRight className="h-3.5 w-3.5" />
+              </span>
             </button>
           </div>
+
+          <button onClick={onCancel} className="btn-ghost mt-4 w-full py-2.5 text-sm">Cancel</button>
         </motion.div>
       </div>
     </>
@@ -441,12 +477,52 @@ export default function Discovery() {
     }
   }
 
-  async function handleConfirmClone() {
+  async function handleConfirmClone(mode: 'quick' | 'studio') {
     const ad = confirmAd
     if (!ad) return
     setConfirmAd(null)
     setOpenAd(null)
     setCloneError('')
+
+    // Stable image URL: prefer AliExpress match (no CDN expiry), fall back to ad creative.
+    const adImageUrl = ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0]
+    const adProductName = ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName
+
+    // sourcedProduct is always set so both ReviewAndAdjust and CommercialStudio
+    // can pre-fill the product name/image — fixes "enter product details" error
+    // that appeared when sourcedProduct was only set for find_product workflow.
+    const sourcedProduct = {
+      name: adProductName,
+      imageUrl: adImageUrl,
+      sourceUrl: ad.product.sourceUrl,
+    }
+
+    if (mode === 'quick') {
+      // No Claude analysis — use the ad's copy and image directly. Fast path.
+      const prefill: ClonePrefill = {
+        sourceAdId: ad.id,
+        sourceAdName: adProductName,
+        analysis: {
+          hookType: 'direct',
+          hookText: ad.creative.headline ?? '',
+          structure: [],
+          claimsAndAngles: [],
+          suggestedCommercialStyle: ad.creative.mediaType === 'video' ? 'fast_cut_hook' : 'testimonial',
+          suggestedCreatorAttributes: {},
+          improvedScript: [ad.creative.headline, ad.creative.bodyText].filter(Boolean).join(' '),
+          differentiationNotes: '',
+        },
+        sourcedProduct,
+        adImageUrl,
+        cloneMode: 'quick',
+        appliedAt: new Date().toISOString(),
+      }
+      try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(prefill)) } catch {}
+      navigate('/forge/review')
+      return
+    }
+
+    // Studio mode — run Claude analysis, then open the full wizard
     setPhase('cloning')
     setAnalyzeDone(0)
     const ticker = setInterval(() => setAnalyzeDone(d => Math.min(d + 1, ANALYZE_STAGES.length - 1)), 700)
@@ -456,20 +532,16 @@ export default function Discovery() {
       setAnalyzeDone(ANALYZE_STAGES.length)
       const prefill: ClonePrefill = {
         sourceAdId: ad.id,
-        sourceAdName: ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName,
+        sourceAdName: adProductName,
         analysis: analysis as AdAnalysis,
-        sourcedProduct: workflow === 'find_product'
-          ? { name: ad.product.name ?? '', imageUrl: ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0], sourceUrl: ad.product.sourceUrl }
-          : undefined,
-        // Always carry the ad's creative image so ReviewAndAdjust can pre-fill even
-        // when sourcedProduct is absent. Prefer the AliExpress matched image (a stable
-        // URL that Veo can fetch); fall back to the ad creative (Meta CDN, proxied).
-        adImageUrl: ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0],
+        sourcedProduct,
+        adImageUrl,
+        cloneMode: 'studio',
         appliedAt: new Date().toISOString(),
       }
       try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(prefill)) } catch {}
       // Brief beat so the final stage reads as complete before routing.
-      setTimeout(() => navigate('/forge/review'), 600)
+      setTimeout(() => navigate('/studio/new'), 600)
     } catch (err) {
       clearInterval(ticker)
       setCloneError(err instanceof Error ? err.message : 'Analysis failed.')
@@ -603,7 +675,7 @@ export default function Discovery() {
       {/* Clone confirm */}
       <AnimatePresence>
         {confirmAd && (
-          <CloneConfirm ad={confirmAd} onCancel={() => setConfirmAd(null)} onConfirm={handleConfirmClone} />
+          <CloneConfirm ad={confirmAd} onCancel={() => setConfirmAd(null)} onConfirm={(mode) => handleConfirmClone(mode)} />
         )}
       </AnimatePresence>
     </AppShell>

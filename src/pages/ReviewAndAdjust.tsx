@@ -80,20 +80,17 @@ export default function ReviewAndAdjust() {
       if (raw) {
         const data = JSON.parse(raw) as ClonePrefill
         setPrefill(data)
-        // Pre-fill fields from analysis
         const analysis = data.analysis
         setStyle(resolveStyleId(analysis.suggestedCommercialStyle))
         setScript(analysis.improvedScript ?? '')
         setCreatorDescription(buildCreatorDescription(analysis.suggestedCreatorAttributes as Record<string, string>))
-        // Pre-fill image: prefer AliExpress match (stable URL), then ad creative.
-        // adImageUrl is always set by Discovery; sourcedProduct is only set for
-        // the "find_product" workflow and may carry a Meta CDN URL as fallback.
+        // Pre-fill image: sourcedProduct.imageUrl is always set by Discovery now
         const imageUrl = data.sourcedProduct?.imageUrl || data.adImageUrl
         if (imageUrl) setProductImageUrl(imageUrl)
-        if (data.sourcedProduct?.name) {
-          setProductDescription(data.sourcedProduct.name)
-        }
-        // Clear so navigating back doesn't re-use stale analysis
+        // Pre-fill product description from the ad's product name.
+        // For Quick Clone this IS what the user is selling; for Studio Clone
+        // the user should replace it with their own product.
+        if (data.sourcedProduct?.name) setProductDescription(data.sourcedProduct.name)
         sessionStorage.removeItem(CLONE_PREFILL_KEY)
       }
     } catch {
@@ -235,10 +232,16 @@ export default function ReviewAndAdjust() {
           </p>
         </div>
 
-        {/* Differentiation notes (clone path only) */}
-        {isFromClone && prefill.analysis.differentiationNotes && (
+        {/* Clone-mode contextual banner */}
+        {isFromClone && prefill.cloneMode === 'quick' && (
+          <div className="rounded-xl border border-fire-start/20 bg-fire-start/[0.06] p-4">
+            <p className="text-xs font-bold text-fire-start mb-1">Quick clone — pre-filled from the original ad</p>
+            <p className="text-sm text-ink-muted">The product name, image, and script below came from the ad you selected. Edit them to match <span className="font-semibold text-ink">your</span> product before generating.</p>
+          </div>
+        )}
+        {isFromClone && prefill.cloneMode !== 'quick' && prefill.analysis.differentiationNotes && (
           <div className="rounded-xl border border-white/[0.07] bg-void-800/60 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-gold mb-2">What Claude changed</p>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-gold mb-2">What Claude adapted</p>
             <p className="text-sm text-ink-muted">{prefill.analysis.differentiationNotes}</p>
           </div>
         )}
@@ -321,6 +324,9 @@ export default function ReviewAndAdjust() {
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
+            {isFromClone && prefill.cloneMode === 'studio' && (
+              <p className="text-[11px] text-amber-300/80">Replace this with your own product — Claude adapted the script and style, but the product field is pre-filled from the original ad.</p>
+            )}
             <textarea
               value={productDescription}
               onChange={e => setProductDescription(e.target.value)}
