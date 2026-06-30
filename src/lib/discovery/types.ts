@@ -127,6 +127,8 @@ export interface ClonePrefill {
     imageUrl?: string
     sourceUrl?: string
   }
+  /** The scraped ad's own creative image — always present so generation has a reference. */
+  adImageUrl?: string
   appliedAt: string
 }
 
