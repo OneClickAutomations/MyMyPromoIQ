@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, uploadAsset, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -57,6 +57,8 @@ export default function ReviewAndAdjust() {
   const [prefill, setPrefill] = useState<ClonePrefill | null>(null)
 
   const [productImageUrl, setProductImageUrl] = useState('')
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [productDescription, setProductDescription] = useState('')
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
@@ -95,11 +97,22 @@ export default function ReviewAndAdjust() {
     }
   }, [])
 
-  async function handleGenerate() {
-    if (!productImageUrl.trim()) {
-      setErrorMsg('Provide a product image URL.')
-      return
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingImage(true)
+    setErrorMsg('')
+    try {
+      const url = await uploadAsset(file)
+      setProductImageUrl(url)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Image upload failed.')
+    } finally {
+      setUploadingImage(false)
     }
+  }
+
+  async function handleGenerate() {
     if (!productDescription.trim()) {
       setErrorMsg('Describe the product you are selling.')
       return
@@ -205,21 +218,42 @@ export default function ReviewAndAdjust() {
 
         {/* Form */}
         <div className="space-y-5">
-          {/* Product image URL */}
+          {/* Product image */}
           <div className="space-y-1.5">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Product image URL (public https://…)
+              Product image
+              <span className="text-[10px] font-normal normal-case tracking-normal text-ink-faint">(optional — improves output)</span>
               {isFromClone && productImageUrl && (
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
-            <input
-              value={productImageUrl}
-              onChange={e => setProductImageUrl(e.target.value)}
-              disabled={isBusy}
-              placeholder="https://example.com/product.jpg"
-              className="w-full rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-            />
+            <div className="flex gap-2">
+              <input
+                value={productImageUrl}
+                onChange={e => setProductImageUrl(e.target.value)}
+                disabled={isBusy || uploadingImage}
+                placeholder="https://example.com/product.jpg"
+                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                disabled={isBusy || uploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-shrink-0 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink disabled:opacity-50"
+              >
+                {uploadingImage ? 'Uploading…' : 'Upload'}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </div>
+            {productImageUrl && /^https?:\/\//.test(productImageUrl) && (
+              <img src={productImageUrl} alt="Product preview" className="mt-1 h-16 w-16 rounded-lg object-cover border border-white/[0.08]" />
+            )}
           </div>
 
           {/* Product description */}
