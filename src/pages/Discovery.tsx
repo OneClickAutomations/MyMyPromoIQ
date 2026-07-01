@@ -5,24 +5,24 @@
  * it → let Claude analyze it → clone into a pre-filled CreativeBrief the wizard
  * opens, fully editable. The user never sees Apify, Meta's API, or a raw scrape.
  *
- * Two entry workflows, one destination:
- *   A — has a product: browse scored ads → clone → upload own product in wizard
- *   B — find a product: keyword/URL search → same scored list → same clone flow
+ * One unified flow: the user captures their product first (ProductInput), then
+ * searches the ad library, picks a winning ad, and clones its DNA — hook, pacing,
+ * structure — around THEIR product. No more has_product/find_product fork.
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import {
-  Compass, Search, TrendingUp, Wand, X, Check, ArrowRight,
+  Compass, Search, Wand, X, Check, ArrowRight,
   Package, Clock, Bolt, RefreshCw, LinkIcon,
 } from '../components/icons'
 import { runDiscoverySearch, analyzeSourceAd, runSourcingLookup, type SourcingResponse } from '../lib/discovery/api'
+import ProductInput, { EMPTY_PRODUCT, isProductReady, type ProductInputValue } from '../components/ProductInput'
 import type {
   SourceAd, AdPlatform, ScoreRating, AdAnalysis, ClonePrefill, AdSearchResponse, SourcingResult,
 } from '../lib/discovery/types'
 
-type Workflow = 'has_product' | 'find_product'
 type PlatformFilter = AdPlatform | 'both'
 type SortKey = 'score' | 'days' | 'newest'
 
@@ -54,44 +54,6 @@ function ScoreBadge({ rating, total }: { rating: ScoreRating; total: number }) {
   )
 }
 
-// ── Entry choice ──────────────────────────────────────────────────────────────
-function EntryChoice({ onPick }: { onPick: (w: Workflow) => void }) {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-ink md:text-3xl">Discover winning ads</h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
-          Research real running ads, see why they work, and clone the winning structure onto your product.
-        </p>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {([
-          { w: 'has_product' as const, icon: Package, title: 'I have a product', desc: 'Browse scored ads in your niche, then apply a winning concept to your own product.' },
-          { w: 'find_product' as const, icon: TrendingUp, title: 'Find me a winning product', desc: 'Search by keyword or paste a product URL to reverse-search ad libraries.' },
-        ]).map(({ w, icon: Icon, title, desc }) => (
-          <button
-            key={w}
-            type="button"
-            onClick={() => onPick(w)}
-            className="group rounded-2xl border border-white/[0.08] bg-void-800 p-6 text-left transition-all hover:border-fire-start/40 hover:bg-fire-start/[0.04]"
-          >
-            <div className="grid h-12 w-12 place-items-center rounded-xl bg-void-700 transition-colors group-hover:bg-fire-start/15">
-              <Icon className="h-6 w-6 text-fire-start" />
-            </div>
-            <p className="mt-4 text-lg font-bold text-ink">{title}</p>
-            <p className="mt-1.5 text-sm text-ink-muted">{desc}</p>
-            <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-fire-start">
-              Start <ArrowRight className="h-4 w-4" />
-            </span>
-          </button>
-        ))}
-      </div>
-      <p className="text-xs text-ink-faint">
-        Estimated from public signals — not a guarantee of performance.
-      </p>
-    </div>
-  )
-}
 
 // ── Searching log feed (mirrors the AI Director feed pattern) ─────────────────
 const SEARCH_STAGES = ['Querying ad libraries', 'Pulling active creatives', 'Scoring opportunities', 'Ranking results']
@@ -462,7 +424,10 @@ type Phase = 'entry' | 'search' | 'searching' | 'results' | 'cloning'
 export default function Discovery() {
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('entry')
-  const [workflow, setWorkflow] = useState<Workflow>('has_product')
+
+  // Unified flow: capture the user's product FIRST, then search ads to clone.
+  // The old has_product/find_product fork is gone — there is one path now.
+  const [product, setProduct] = useState<ProductInputValue>(EMPTY_PRODUCT)
 
   const [queryValue, setQueryValue] = useState('')
   const [platform, setPlatform] = useState<PlatformFilter>('both')
@@ -478,8 +443,7 @@ export default function Discovery() {
   const [analyzeDone, setAnalyzeDone] = useState(0)
   const [cloneError, setCloneError] = useState('')
 
-  const isUrl = workflow === 'find_product'
-  const placeholder = isUrl ? 'Paste a product URL — or a niche keyword' : 'e.g. vitamin c serum, resistance band, pet brush'
+  const placeholder = 'e.g. vitamin c serum, resistance band, pet brush'
 
   async function handleSearch() {
     if (!queryValue.trim()) return
@@ -489,7 +453,7 @@ export default function Discovery() {
     // Animate the stage feed while the request runs.
     const ticker = setInterval(() => setSearchDone(d => Math.min(d + 1, SEARCH_STAGES.length - 1)), 550)
     try {
-      const type = isUrl && /^https?:\/\//i.test(queryValue) ? 'product_url' : 'keyword'
+      const type = /^https?:\/\//i.test(queryValue) ? 'product_url' : 'keyword'
       const resp = await runDiscoverySearch({ type, value: queryValue.trim(), platform })
       clearInterval(ticker)
       setSearchDone(SEARCH_STAGES.length)
@@ -509,17 +473,17 @@ export default function Discovery() {
     setOpenAd(null)
     setCloneError('')
 
-    // Stable image URL: prefer AliExpress match (no CDN expiry), fall back to ad creative.
+    // The scraped ad's own creative — kept as the DNA/pacing reference.
     const adImageUrl = ad.product.matchedSourcingResult?.matchedImageUrl ?? ad.creative.mediaUrls[0]
     const adProductName = ad.product.name ?? ad.creative.headline ?? ad.pageOrShopName
 
-    // sourcedProduct is always set so both ReviewAndAdjust and CommercialStudio
-    // can pre-fill the product name/image — fixes "enter product details" error
-    // that appeared when sourcedProduct was only set for find_product workflow.
+    // The product to actually SELL is the user's captured product (that is the
+    // whole premise: clone the winning ad's DNA, swap in MY product). Fall back
+    // to the ad's own product only if the user skipped capture.
     const sourcedProduct = {
-      name: adProductName,
-      imageUrl: adImageUrl,
-      sourceUrl: ad.product.sourceUrl,
+      name: product.name || adProductName,
+      imageUrl: product.primaryImage || adImageUrl,
+      sourceUrl: product.sourceUrl ?? ad.product.sourceUrl,
     }
 
     if (mode === 'quick') {
@@ -585,14 +549,41 @@ export default function Discovery() {
 
   return (
     <AppShell>
-      {phase === 'entry' && <EntryChoice onPick={w => { setWorkflow(w); setPhase('search') }} />}
+      {phase === 'entry' && (
+        <div className="mx-auto max-w-2xl space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold text-ink md:text-3xl">Clone a winning ad</h1>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              Start with your product. Next you'll find a proven, currently-running ad and we'll rebuild its hook, pacing, and structure around your product.
+            </p>
+          </div>
+
+          <ProductInput value={product} onChange={setProduct} />
+
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-ink-faint">
+              {isProductReady(product) ? 'Ready — find an ad to clone.' : 'Add a product image or name to continue.'}
+            </p>
+            <button
+              onClick={() => {
+                if (!queryValue.trim() && product.name.trim()) setQueryValue(product.name.trim())
+                setPhase('search')
+              }}
+              disabled={!isProductReady(product)}
+              className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-40"
+            >
+              Find winning ads <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {(phase === 'search' || phase === 'searching') && (
         <div className="mx-auto max-w-2xl space-y-6">
-          <button onClick={() => setPhase('entry')} className="text-xs font-semibold text-ink-faint hover:text-ink">← Back</button>
+          <button onClick={() => setPhase('entry')} className="text-xs font-semibold text-ink-faint hover:text-ink">← Back to product</button>
           <div>
-            <h1 className="text-2xl font-bold text-ink">{isUrl ? 'Find a winning product' : 'Search ad libraries'}</h1>
-            <p className="mt-1.5 text-sm text-ink-muted">{isUrl ? 'Paste a product URL or search a niche to reverse-search running ads.' : 'Search a niche to see scored, currently-running ads.'}</p>
+            <h1 className="text-2xl font-bold text-ink">Search ad libraries</h1>
+            <p className="mt-1.5 text-sm text-ink-muted">Search a niche or paste a competitor product URL to see scored, currently-running ads to clone.</p>
           </div>
 
           <div className="space-y-4">
