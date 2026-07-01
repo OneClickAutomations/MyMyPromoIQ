@@ -108,7 +108,7 @@ export default function SignUpPage() {
         </div>
 
         <p className="relative text-xs text-ink-faint">
-          © {new Date().getFullYear()} {brand.name}. Powered by Higgsfield AI.
+          © {new Date().getFullYear()} {brand.name}. Powered by Google Veo 3.
         </p>
       </div>
 
