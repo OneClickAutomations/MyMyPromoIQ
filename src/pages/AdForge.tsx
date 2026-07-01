@@ -1,7 +1,13 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AnimatePresence } from 'framer-motion'
+import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
+import BrandVoiceSetup, { loadBrandProfile } from '../components/BrandVoiceSetup'
 import { adForge } from '../copy'
-import { Compass, ArrowRight, Wand, Bolt } from '../components/icons'
+import { Compass, ArrowRight, Wand, Bolt, Star, X } from '../components/icons'
+
+const BRAND_DISMISS_KEY = 'promoiq_brand_prompt_dismissed'
 
 type CardProps = {
   to: string
@@ -51,14 +57,52 @@ function PathCard({
 }
 
 export default function AdForge() {
+  const { user } = useUser()
+  const [setupOpen, setSetupOpen] = useState(false)
+  // Show the one-time prompt only if the brand voice isn't configured and the
+  // user hasn't dismissed it. Non-gating — it never blocks the three modes.
+  const [showPrompt, setShowPrompt] = useState(false)
+
+  useEffect(() => {
+    if (!user?.id) return
+    let dismissed = false
+    try { dismissed = localStorage.getItem(BRAND_DISMISS_KEY) === '1' } catch { /* ignore */ }
+    if (dismissed) return
+    loadBrandProfile(user.id).then(p => { if (!p || !p.brandVoice) setShowPrompt(true) })
+  }, [user?.id])
+
+  function dismissPrompt() {
+    setShowPrompt(false)
+    try { localStorage.setItem(BRAND_DISMISS_KEY, '1') } catch { /* ignore */ }
+  }
+
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl space-y-8">
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-extrabold text-ink">{adForge.title}</h1>
-          <p className="mt-2 text-ink-muted">{adForge.subtitle}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold text-ink">{adForge.title}</h1>
+            <p className="mt-2 text-ink-muted">{adForge.subtitle}</p>
+          </div>
+          <button onClick={() => setSetupOpen(true)}
+            className="mt-1 hidden flex-shrink-0 items-center gap-1.5 rounded-xl border border-white/[0.08] px-3 py-2 text-xs font-semibold text-ink-muted transition-colors hover:border-fire-start/40 hover:text-ink sm:inline-flex">
+            <Star className="h-3.5 w-3.5 text-fire-start" /> Brand voice
+          </button>
         </div>
+
+        {/* One-time brand-voice prompt (non-gating, dismissible) */}
+        {showPrompt && (
+          <div className="flex items-center gap-3 rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-4">
+            <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-fire-start/15"><Star className="h-4 w-4 text-fire-start" /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink">Set your brand voice (30 seconds)</p>
+              <p className="text-xs text-ink-muted">It calibrates every script's tone and CTA. You can skip and Claude uses neutral defaults.</p>
+            </div>
+            <button onClick={() => { setSetupOpen(true); setShowPrompt(false) }} className="btn-fire flex-shrink-0 gap-1.5 px-4 py-2 text-xs">Set up</button>
+            <button onClick={dismissPrompt} className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg text-ink-faint hover:bg-white/[0.06] hover:text-ink"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
 
         {/* Three paths */}
         <div className="grid gap-5 sm:grid-cols-3">
@@ -129,6 +173,10 @@ export default function AdForge() {
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {setupOpen && <BrandVoiceSetup onClose={() => setSetupOpen(false)} onSaved={() => setShowPrompt(false)} />}
+      </AnimatePresence>
     </AppShell>
   )
 }

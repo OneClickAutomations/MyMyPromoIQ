@@ -11,9 +11,11 @@
  */
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import StoryboardPlanner from '../components/StoryboardPlanner'
 import GenerationPanel from '../components/GenerationPanel'
+import { loadBrandProfile } from '../components/BrandVoiceSetup'
 import { Film, RefreshCw, Download, Check, X, Layers, ArrowRight } from '../components/icons'
 import {
   planStoryboard, startGeneration, pollUntilDone, stitchVideos,
@@ -49,6 +51,7 @@ type Phase = 'planning' | 'plan' | 'rendering' | 'error'
 
 export default function StoryboardPage() {
   const navigate = useNavigate()
+  const { user } = useUser()
   const [ctx, setCtx] = useState<StoryboardContext | null>(null)
   const [phase, setPhase] = useState<Phase>('planning')
   const [plan, setPlan] = useState<StoryboardPlan | null>(null)
@@ -68,10 +71,24 @@ export default function StoryboardPage() {
     if (!raw) { setPhase('error'); setError('No product context found. Start from Ad Forge.'); return }
     let parsed: StoryboardContext
     try { parsed = JSON.parse(raw) } catch { setPhase('error'); setError('Could not read the storyboard context.'); return }
-    setCtx(parsed)
-    runPlan(parsed)
+    // Merge the saved brand voice / CTA so every plan is calibrated to the brand
+    // (skipped brands just fall through to neutral defaults).
+    ;(async () => {
+      if (user?.id && (!parsed.brandVoice || !parsed.cta)) {
+        const profile = await loadBrandProfile(user.id).catch(() => null)
+        if (profile) {
+          parsed = {
+            ...parsed,
+            brandVoice: parsed.brandVoice || profile.brandVoice || undefined,
+            cta: parsed.cta || profile.cta || undefined,
+          }
+        }
+      }
+      setCtx(parsed)
+      runPlan(parsed)
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [user?.id])
 
   async function runPlan(c: StoryboardContext, clipCount?: number) {
     setPhase('planning'); setError('')
