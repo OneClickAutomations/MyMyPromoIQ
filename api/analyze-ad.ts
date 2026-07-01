@@ -22,6 +22,8 @@ const STYLE_IDS = [
   'cinematic_brand', 'fast_cut_hook', 'unboxing', 'explainer',
 ]
 
+interface SWOT { strengths: string[]; weaknesses: string[]; opportunities: string[]; threats: string[] }
+
 interface AdAnalysis {
   hookType: string
   hookText: string
@@ -31,6 +33,10 @@ interface AdAnalysis {
   suggestedCreatorAttributes: Record<string, string>
   improvedScript: string
   differentiationNotes: string
+  // Intelligence-report additions (Part 2.3)
+  verdict: string
+  cameraStyle: string
+  swot: SWOT
 }
 
 function coerce(parsed: Record<string, unknown>): AdAnalysis {
@@ -43,6 +49,7 @@ function coerce(parsed: Record<string, unknown>): AdAnalysis {
   for (const k of ['gender', 'ageRange', 'ethnicity', 'bodyType', 'hair', 'wardrobe', 'expression', 'energyLevel', 'cameraConfidence']) {
     if (attrsIn[k] != null) attrs[k] = String(attrsIn[k])
   }
+  const swotIn = (parsed.swot ?? {}) as Record<string, unknown>
   return {
     hookType: str(parsed.hookType) || 'attention hook',
     hookText: str(parsed.hookText),
@@ -52,6 +59,14 @@ function coerce(parsed: Record<string, unknown>): AdAnalysis {
     suggestedCreatorAttributes: attrs,
     improvedScript: str(parsed.improvedScript),
     differentiationNotes: str(parsed.differentiationNotes),
+    verdict: str(parsed.verdict),
+    cameraStyle: str(parsed.cameraStyle),
+    swot: {
+      strengths: arr(swotIn.strengths),
+      weaknesses: arr(swotIn.weaknesses),
+      opportunities: arr(swotIn.opportunities),
+      threats: arr(swotIn.threats),
+    },
   }
 }
 
@@ -80,8 +95,13 @@ Map suggestedCommercialStyle to EXACTLY ONE of these ids: ${STYLE_IDS.join(', ')
 
 For suggestedCreatorAttributes infer from the ad's casting. Allowed keys: gender, ageRange, ethnicity, bodyType, hair, wardrobe, expression, energyLevel (one of: low, medium, high), cameraConfidence. Omit any you cannot reasonably infer.
 
+Also produce an intelligence report:
+- verdict: one punchy sentence a marketer reads first (e.g. "Strong opportunity — long-running proof, simple to source, easy clone").
+- cameraStyle: the ad's shooting style in a few words (handheld/tripod/selfie/orbit, close/wide).
+- swot: 2–3 short bullet strings per quadrant. strengths = why THIS ad works; weaknesses = what's weak (soft CTA, generic claim); opportunities = how the user could beat it; threats = saturation / platform / competition risk.
+
 Respond with VALID JSON only — no markdown, no preamble:
-{"hookType":"","hookText":"","structure":["",""],"claimsAndAngles":["",""],"suggestedCommercialStyle":"","suggestedCreatorAttributes":{},"improvedScript":"","differentiationNotes":""}`
+{"hookType":"","hookText":"","structure":["",""],"claimsAndAngles":["",""],"suggestedCommercialStyle":"","suggestedCreatorAttributes":{},"improvedScript":"","differentiationNotes":"","verdict":"","cameraStyle":"","swot":{"strengths":[""],"weaknesses":[""],"opportunities":[""],"threats":[""]}}`
 
   const userMsg = `SOURCE AD (${ad.platform}, ${ad.pageOrShopName ?? 'unknown page'}):
 Headline: ${c.headline ?? '(none)'}

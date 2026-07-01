@@ -432,6 +432,21 @@ export function getBrief(
   return store({ action: 'getBrief', userId, briefId })
 }
 
+export type StoredBriefSummary = {
+  id: string
+  status: string
+  product: Record<string, unknown>
+  style: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export function listBriefs(
+  userId: string,
+): Promise<{ briefs: StoredBriefSummary[] }> {
+  return store({ action: 'listBriefs', userId })
+}
+
 // ── Creative Studio asset types ───────────────────────────────────────────────
 
 export type StoredCreator = {
@@ -526,6 +541,31 @@ export async function runDirector(params: {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// ── Storyboard planning (rides on /api/director) ──────────────────────────────
+
+export type StoryboardPlanInput = {
+  productName: string
+  description: string
+  style: string
+  /** Desired clip count (1–10). Omit to let Claude infer. */
+  clipCount?: number
+  /** Clone mode: the reference ad's beat labels + total seconds, to match pacing. */
+  referenceBeats?: string[]
+  referenceDurationSeconds?: number
+  brandVoice?: string
+  cta?: string
+}
+
+export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'storyboard', ...input }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()

@@ -73,14 +73,30 @@ export default function SeedImageStudio({
     if (!file.type.startsWith('image/')) { setError('Choose a JPG, PNG, or WebP image.'); return }
     if (file.size > 20 * 1024 * 1024) { setError('Image must be under 20 MB.'); return }
     setError('')
-    const reader = new FileReader()
-    reader.onload = () => {
-      setRefUrl(String(reader.result))
+    // Resize to ≤1280px on the long edge and re-encode as JPEG before storing.
+    // This keeps the base64 payload sent to /api/modelsheet well under Vercel's
+    // 4.5 MB body limit (a 1280×960 JPEG at 0.85 quality is ~200–400 KB).
+    const objectUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const MAX = 1280
+      const scale = Math.min(MAX / img.width, MAX / img.height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(objectUrl)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+      setRefUrl(dataUrl)
       setResult(null)
       setTurnaroundResult(null)
       setTurnaroundError('')
     }
-    reader.readAsDataURL(file)
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      setError('Could not load this image file.')
+    }
+    img.src = objectUrl
   }
 
   /** Build the imageUrl/imageBase64 field for the API from whatever refUrl holds. */

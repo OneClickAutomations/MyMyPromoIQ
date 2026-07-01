@@ -85,15 +85,21 @@ export default function PrivacyPolicy() {
             <td>USA</td>
           </tr>
           <tr>
-            <td><strong>Higgsfield AI</strong></td>
-            <td>Video rendering</td>
-            <td>Product image URLs, director prompts</td>
+            <td><strong>Google</strong></td>
+            <td>Video rendering &amp; image generation (Veo / Gemini API)</td>
+            <td>Product images, director prompts</td>
             <td>USA</td>
           </tr>
           <tr>
-            <td><strong>Arcads AI</strong></td>
-            <td>Video rendering (optional)</td>
-            <td>Product image URLs, director prompts</td>
+            <td><strong>Supabase</strong></td>
+            <td>Database &amp; media storage</td>
+            <td>Product images, generated videos, campaign data</td>
+            <td>USA</td>
+          </tr>
+          <tr>
+            <td><strong>Clerk</strong></td>
+            <td>Authentication</td>
+            <td>Email, name, session data</td>
             <td>USA</td>
           </tr>
           <tr>
@@ -103,7 +109,7 @@ export default function PrivacyPolicy() {
             <td>USA (PCI-DSS Level 1)</td>
           </tr>
           <tr>
-            <td><strong>Netlify</strong></td>
+            <td><strong>Vercel</strong></td>
             <td>Hosting &amp; serverless functions</td>
             <td>Request logs, IP addresses</td>
             <td>USA (SOC 2 Type II)</td>

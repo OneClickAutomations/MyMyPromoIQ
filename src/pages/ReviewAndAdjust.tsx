@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
-import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, uploadAsset, extractProductFromUrl, type StatusResponse } from '../lib/api'
+import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
+import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -52,17 +53,34 @@ const STEPS = [
   'Rendering video (1-3 min)…',
 ]
 
+/** Force-download a cross-origin video URL via a blob fetch. */
+async function downloadVideo(url: string) {
+  try {
+    const resp = await fetch(url)
+    const blob = await resp.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = `promo-video-${Date.now()}.mp4`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 8000)
+  } catch {
+    // Fallback: open in new tab if fetch fails (e.g. CORS restriction)
+    window.open(url, '_blank', 'noopener')
+  }
+}
+
 export default function ReviewAndAdjust() {
   const { user } = useUser()
+  const navigate = useNavigate()
   const [prefill, setPrefill] = useState<ClonePrefill | null>(null)
 
   const [productImageUrl, setProductImageUrl] = useState('')
-  const [uploadingImage, setUploadingImage] = useState(false)
-  const [productPageUrl, setProductPageUrl] = useState('')
-  const [scanningUrl, setScanningUrl] = useState(false)
-  const [scanError, setScanError] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [productName, setProductName] = useState('')
   const [productDescription, setProductDescription] = useState('')
+  const [productSourceUrl, setProductSourceUrl] = useState<string | undefined>(undefined)
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
   const [creatorDescription, setCreatorDescription] = useState('')
@@ -72,6 +90,9 @@ export default function ReviewAndAdjust() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [directorPrompt, setDirectorPrompt] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [historySaved, setHistorySaved] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   // Read prefill on mount, then clear it
   useEffect(() => {
@@ -80,20 +101,17 @@ export default function ReviewAndAdjust() {
       if (raw) {
         const data = JSON.parse(raw) as ClonePrefill
         setPrefill(data)
-        // Pre-fill fields from analysis
         const analysis = data.analysis
         setStyle(resolveStyleId(analysis.suggestedCommercialStyle))
         setScript(analysis.improvedScript ?? '')
         setCreatorDescription(buildCreatorDescription(analysis.suggestedCreatorAttributes as Record<string, string>))
-        // Pre-fill image: prefer AliExpress match (stable URL), then ad creative.
-        // adImageUrl is always set by Discovery; sourcedProduct is only set for
-        // the "find_product" workflow and may carry a Meta CDN URL as fallback.
+        // Pre-fill image: sourcedProduct.imageUrl is always set by Discovery now
         const imageUrl = data.sourcedProduct?.imageUrl || data.adImageUrl
         if (imageUrl) setProductImageUrl(imageUrl)
-        if (data.sourcedProduct?.name) {
-          setProductDescription(data.sourcedProduct.name)
-        }
-        // Clear so navigating back doesn't re-use stale analysis
+        // Pre-fill product description from the ad's product name.
+        // For Quick Clone this IS what the user is selling; for Studio Clone
+        // the user should replace it with their own product.
+        if (data.sourcedProduct?.name) setProductDescription(data.sourcedProduct.name)
         sessionStorage.removeItem(CLONE_PREFILL_KEY)
       }
     } catch {
@@ -101,50 +119,30 @@ export default function ReviewAndAdjust() {
     }
   }, [])
 
-  async function handleScanUrl() {
-    const url = productPageUrl.trim()
-    if (!url || !/^https?:\/\//i.test(url)) {
-      setScanError('Paste a full product page URL (https://…).')
-      return
-    }
-    setScanError('')
-    setScanningUrl(true)
-    try {
-      const result = await extractProductFromUrl(url)
-      if (result.imageUrl) setProductImageUrl(result.imageUrl)
-      if (result.title && !productDescription) setProductDescription(result.title)
-      if (result.description && !productDescription) setProductDescription(result.description.slice(0, 300))
-      if (!result.imageUrl && !result.title) {
-        setScanError('Nothing extracted from that page. Try pasting the image URL directly above.')
-      }
-    } catch (err) {
-      setScanError(err instanceof Error ? err.message : 'Scan failed.')
-    } finally {
-      setScanningUrl(false)
-    }
+  // Bridge the shared ProductInput to this page's flat generation fields.
+  const productValue: ProductInputValue = {
+    images: productImageUrl ? [productImageUrl] : [],
+    primaryImage: productImageUrl,
+    name: productName,
+    description: productDescription,
+    sourceUrl: productSourceUrl,
   }
-
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploadingImage(true)
-    setErrorMsg('')
-    try {
-      const url = await uploadAsset(file)
-      setProductImageUrl(url)
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Image upload failed.')
-    } finally {
-      setUploadingImage(false)
-    }
+  function onProductChange(v: ProductInputValue) {
+    setProductImageUrl(v.primaryImage)
+    setProductName(v.name)
+    setProductDescription(v.description)
+    setProductSourceUrl(v.sourceUrl)
   }
 
   async function handleGenerate() {
-    if (!productDescription.trim()) {
+    const effectiveDescription = (productDescription.trim() || productName.trim())
+    if (!effectiveDescription) {
       setErrorMsg('Describe the product you are selling.')
       return
     }
     setErrorMsg('')
+    setHistorySaved(false)
+    setHistoryError('')
     setPhase('working')
     setStepIndex(0)
     setVideoUrl(null)
@@ -153,7 +151,7 @@ export default function ReviewAndAdjust() {
       setStepIndex(0) // "Claude writing direction"
       const { requestId, directorPrompt: dp } = await startGeneration({
         productImageUrl: productImageUrl.trim(),
-        productDescription: productDescription.trim(),
+        productDescription: effectiveDescription,
         style,
         quality: 'turbo',
         script: script.trim() || undefined,
@@ -173,12 +171,13 @@ export default function ReviewAndAdjust() {
       if (result.status === 'completed' && result.videoUrl) {
         setVideoUrl(result.videoUrl)
         setPhase('done')
-        // Save to history so it appears in Dashboard/History
+
+        // Save to history
         if (user?.id) {
           try {
             const { id: campaignId } = await saveCampaign(user.id, {
               name: productDescription.trim().slice(0, 80),
-              product_image_url: productImageUrl.trim(),
+              product_image_url: productImageUrl.trim() || null,
               product_description: productDescription.trim(),
               style,
               quality: 'turbo',
@@ -194,9 +193,13 @@ export default function ReviewAndAdjust() {
               director_prompt: dp,
               video_url: result.videoUrl,
             })
-          } catch {
-            // Non-blocking — video is still shown even if history save fails
+            setHistorySaved(true)
+          } catch (e) {
+            console.error('[ReviewAndAdjust] history save failed:', e)
+            setHistoryError(e instanceof Error ? e.message : 'History save failed.')
           }
+        } else {
+          console.warn('[ReviewAndAdjust] user not loaded — skipping history save')
         }
       } else {
         setErrorMsg(result.raw || 'Video generation failed.')
@@ -213,7 +216,37 @@ export default function ReviewAndAdjust() {
     setVideoUrl(null)
     setDirectorPrompt('')
     setErrorMsg('')
+    setHistorySaved(false)
+    setHistoryError('')
     setStepIndex(0)
+  }
+
+  /** Continue to the 11-step Studio wizard to generate all 6 scenes. */
+  function handleContinueToStudio() {
+    if (!prefill) return
+    // Re-save updated prefill so CommercialStudio's clone bridge picks it up.
+    const updated: ClonePrefill = {
+      ...prefill,
+      cloneMode: 'studio',
+      analysis: { ...prefill.analysis, improvedScript: script },
+      sourcedProduct: {
+        name: productDescription || prefill.sourcedProduct?.name || '',
+        imageUrl: productImageUrl || prefill.adImageUrl,
+        sourceUrl: prefill.sourcedProduct?.sourceUrl,
+      },
+    }
+    try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(updated)) } catch {}
+    navigate('/studio/new')
+  }
+
+  async function handleDownload() {
+    if (!videoUrl) return
+    setDownloading(true)
+    try {
+      await downloadVideo(videoUrl)
+    } finally {
+      setDownloading(false)
+    }
   }
 
   const isFromClone = prefill !== null
@@ -235,101 +268,24 @@ export default function ReviewAndAdjust() {
           </p>
         </div>
 
-        {/* Differentiation notes (clone path only) */}
-        {isFromClone && prefill.analysis.differentiationNotes && (
+        {/* Clone-mode contextual banner */}
+        {isFromClone && prefill.cloneMode === 'quick' && (
+          <div className="rounded-xl border border-fire-start/20 bg-fire-start/[0.06] p-4">
+            <p className="text-xs font-bold text-fire-start mb-1">Quick clone — pre-filled from the original ad</p>
+            <p className="text-sm text-ink-muted">The product name, image, and script below came from the ad you selected. Edit them to match <span className="font-semibold text-ink">your</span> product before generating.</p>
+          </div>
+        )}
+        {isFromClone && prefill.cloneMode !== 'quick' && prefill.analysis.differentiationNotes && (
           <div className="rounded-xl border border-white/[0.07] bg-void-800/60 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-gold mb-2">What Claude changed</p>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-gold mb-2">What Claude adapted</p>
             <p className="text-sm text-ink-muted">{prefill.analysis.differentiationNotes}</p>
           </div>
         )}
 
         {/* Form */}
         <div className="space-y-5">
-          {/* Product image */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Product image
-              <span className="text-[10px] font-normal normal-case tracking-normal text-ink-faint">(recommended — Veo 3 animates your photo into video)</span>
-              {isFromClone && productImageUrl && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
-            <div className="flex gap-2">
-              <input
-                value={productImageUrl}
-                onChange={e => setProductImageUrl(e.target.value)}
-                disabled={isBusy || uploadingImage}
-                placeholder="https://example.com/product.jpg"
-                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-              />
-              <button
-                type="button"
-                disabled={isBusy || uploadingImage}
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink disabled:opacity-50"
-              >
-                {uploadingImage ? 'Uploading…' : 'Upload'}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-            </div>
-            {productImageUrl && /^https?:\/\//.test(productImageUrl) && (
-              <img src={productImageUrl} alt="Product preview" className="mt-1 h-16 w-16 rounded-lg object-cover border border-white/[0.08]" />
-            )}
-          </div>
-
-          {/* Scan product page URL */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Or scan a product page URL
-            </label>
-            <p className="text-[11px] text-ink-faint">Paste a Shopify, Amazon, or DTC store link — we'll auto-extract the title, description, and image.</p>
-            <div className="flex gap-2">
-              <input
-                value={productPageUrl}
-                onChange={e => { setProductPageUrl(e.target.value); setScanError('') }}
-                onKeyDown={e => { if (e.key === 'Enter') handleScanUrl() }}
-                disabled={isBusy || scanningUrl}
-                placeholder="https://mystore.com/products/amazing-serum"
-                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-              />
-              <button
-                type="button"
-                onClick={handleScanUrl}
-                disabled={isBusy || scanningUrl}
-                className="flex-shrink-0 flex items-center gap-1.5 rounded-xl bg-fire-start px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-fire-end transition-colors"
-              >
-                {scanningUrl
-                  ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning</>
-                  : <><Wand className="h-4 w-4" /> Scan</>
-                }
-              </button>
-            </div>
-            {scanError && <p className="text-sm text-rose-400">{scanError}</p>}
-          </div>
-
-          {/* Product description */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              What are you selling?
-              {isFromClone && productDescription && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
-            <textarea
-              value={productDescription}
-              onChange={e => setProductDescription(e.target.value)}
-              disabled={isBusy}
-              rows={3}
-              placeholder="A matte ceramic pour-over coffee dripper for slow mornings."
-              className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-            />
-          </div>
+          {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
+          <ProductInput value={productValue} onChange={onProductChange} />
 
           {/* Style picker */}
           <div className="space-y-2">
@@ -445,6 +401,17 @@ export default function ReviewAndAdjust() {
                 className="w-full"
               />
             </div>
+
+            {/* History save status */}
+            {historySaved && (
+              <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+                <Check className="h-3.5 w-3.5" /> Saved to history
+              </p>
+            )}
+            {historyError && (
+              <p className="text-xs text-amber-300">History save failed: {historyError}</p>
+            )}
+
             {directorPrompt && (
               <details className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-ink-faint">
@@ -453,23 +420,49 @@ export default function ReviewAndAdjust() {
                 <p className="mt-2 text-xs leading-relaxed text-ink-muted">{directorPrompt}</p>
               </details>
             )}
-            <div className="flex gap-3">
-              <a
-                href={videoUrl}
-                download
-                className="btn-fire flex items-center gap-2"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
-              <button
-                type="button"
-                onClick={handleReset}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Generate again
-              </button>
+
+            <div className="flex flex-col gap-3">
+              {/* Primary actions row */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="btn-fire flex items-center gap-2 disabled:opacity-60"
+                >
+                  {downloading
+                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Downloading…</>
+                    : <><Download className="h-4 w-4" /> Download</>
+                  }
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Generate again
+                </button>
+              </div>
+
+              {/* Continue to Studio — only shown when arriving from a clone */}
+              {isFromClone && (
+                <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.04] p-4">
+                  <p className="text-sm font-semibold text-ink mb-1">Want to generate all 6 scenes?</p>
+                  <p className="text-xs text-ink-muted mb-3">
+                    Open the full Studio wizard with your product and script pre-loaded. Generate the Hook, Problem, Solution, Social Proof, CTA, and Outro scenes back-to-back.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleContinueToStudio}
+                    className="btn-fire flex w-full items-center justify-center gap-2"
+                  >
+                    <Wand className="h-4 w-4" />
+                    Continue in Studio — generate next scene
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

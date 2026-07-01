@@ -156,7 +156,7 @@ export const generator = {
   eyebrow: 'Live · Real Generation',
   title: 'Stop reading. Generate one.',
   subtitle:
-    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and Higgsfield renders a real UGC video — right here, right now.',
+    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and Google Veo 3 renders a real UGC video — right here, right now.',
   // Style ids must match the backend (netlify/lib/director.ts).
   styles: [
     { id: 'testimonial', label: 'Testimonial', hint: 'Person to camera, warm + handheld' },

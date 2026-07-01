@@ -7,7 +7,7 @@
  * different brand — same premium visual language, different campaign.
  *
  * NOTE: static marketing mock. In the live app shell the render queue + clip
- * grid are driven by the generation API (Anthropic "director" + Higgsfield
+ * grid are driven by the generation API (Anthropic "director" + Google Veo 3
  * video model). See Generator.tsx for the real wiring.
  */
 import { Film, Layers, Bolt, Spark, Check } from './icons'

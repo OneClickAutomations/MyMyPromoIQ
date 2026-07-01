@@ -13,6 +13,7 @@ import BrandKit from './pages/BrandKit'
 import Discovery from './pages/Discovery'
 import AdForge from './pages/AdForge'
 import ReviewAndAdjust from './pages/ReviewAndAdjust'
+import StoryboardPage from './pages/StoryboardPage'
 import PrivacyPolicy from './pages/legal/Privacy'
 import TermsOfService from './pages/legal/Terms'
 import DataProcessingAgreement from './pages/legal/DPA'
@@ -115,6 +116,14 @@ export default function App() {
         element={
           <Protected>
             <ReviewAndAdjust />
+          </Protected>
+        }
+      />
+      <Route
+        path="/forge/storyboard"
+        element={
+          <Protected>
+            <StoryboardPage />
           </Protected>
         }
       />

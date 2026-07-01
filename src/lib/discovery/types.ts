@@ -114,6 +114,16 @@ export interface AdAnalysis {
   }
   improvedScript: string
   differentiationNotes: string
+  /** Intelligence-report fields (Part 2.3 Ad Analysis Panel). Optional so older
+   *  cached analyses still type-check. */
+  verdict?: string
+  cameraStyle?: string
+  swot?: {
+    strengths: string[]
+    weaknesses: string[]
+    opportunities: string[]
+    threats: string[]
+  }
 }
 
 /** Payload handed to the wizard via the clone bridge (sessionStorage). */
@@ -121,7 +131,11 @@ export interface ClonePrefill {
   sourceAdId: string
   sourceAdName: string
   analysis: AdAnalysis
-  /** Workflow B: a sourced product the wizard's Step 1 can auto-populate from. */
+  /**
+   * Always present: carries the ad's product name/image to pre-fill forms.
+   * For Quick Clone this IS the product to sell; for Studio Clone the user
+   * replaces it with their own product in the wizard.
+   */
   sourcedProduct?: {
     name: string
     imageUrl?: string
@@ -129,6 +143,11 @@ export interface ClonePrefill {
   }
   /** The scraped ad's own creative image — always present so generation has a reference. */
   adImageUrl?: string
+  /**
+   * 'quick'  — no analysis; ad image & copy pre-filled; lands in Quick Generate (/forge/review)
+   * 'studio' — Claude analysis; lands in 11-step wizard (/studio/new)
+   */
+  cloneMode?: 'quick' | 'studio'
   appliedAt: string
 }
 

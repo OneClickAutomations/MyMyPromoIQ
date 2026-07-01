@@ -1,10 +1,10 @@
 /**
  * Phase 0.2 — The Composition Engine. THIS is the product.
  *
- * A pure, testable function that turns a CreativeBrief into a Higgsfield-bound
+ * A pure, testable function that turns a CreativeBrief into a Veo-bound
  * payload. The user never sees a prompt; they make casting / scene / lighting /
  * voice / story decisions and this engine compiles them into the physical,
- * observable-action language Higgsfield responds to.
+ * observable-action language Veo 3 responds to.
  *
  * Pure: no I/O, no React, no network. Given the same brief it returns the same
  * payload. Cost-preflight and submission live in the orchestration layer (0.3).
@@ -12,8 +12,8 @@
 import type {
   CreativeBrief,
   CompositionWarning,
-  HiggsfieldPayload,
-  HiggsfieldScenePrompt,
+  RenderPayload,
+  RenderScenePrompt,
   StoryboardScene,
   CreatorAttributes,
 } from './types'
@@ -26,9 +26,9 @@ import {
   phraseFor,
 } from './presets'
 
-/** Credits per second of rendered video (mirrors the Higgsfield provider capability). */
+/** Credits per second of rendered video (mirrors the Veo renderer). */
 const CREDITS_PER_SECOND = 8
-const QUALITY_MULTIPLIER: Record<HiggsfieldPayload['quality'], number> = {
+const QUALITY_MULTIPLIER: Record<RenderPayload['quality'], number> = {
   lite: 1,
   turbo: 1.4,
   standard: 2,
@@ -168,7 +168,7 @@ function buildNegativePrompt(brief: CreativeBrief): string {
 
 export function estimateCredits(
   scenes: { durationSeconds: number }[],
-  quality: HiggsfieldPayload['quality'],
+  quality: RenderPayload['quality'],
 ): number {
   const seconds = scenes.reduce((sum, s) => sum + (s.durationSeconds || 0), 0)
   return Math.round(seconds * CREDITS_PER_SECOND * QUALITY_MULTIPLIER[quality])
@@ -177,11 +177,11 @@ export function estimateCredits(
 // ── The engine ───────────────────────────────────────────────────────────────
 
 /**
- * Compile a CreativeBrief into a Higgsfield payload. If the storyboard has no
+ * Compile a CreativeBrief into a render payload. If the storyboard has no
  * scenes yet, synthesize a single representative scene from the brief so the
  * engine is usable from the moment a style is chosen.
  */
-export function composeHiggsfieldPrompt(brief: CreativeBrief): HiggsfieldPayload {
+export function composeRenderPrompt(brief: CreativeBrief): RenderPayload {
   const preset = STYLE_PRESETS[brief.style.commercialStyle]
   const quality = preset?.defaults.quality ?? 'turbo'
 
@@ -198,7 +198,7 @@ export function composeHiggsfieldPrompt(brief: CreativeBrief): HiggsfieldPayload
         status: 'pending',
       }]
 
-  const scenes: HiggsfieldScenePrompt[] = sourceScenes.map(s => ({
+  const scenes: RenderScenePrompt[] = sourceScenes.map(s => ({
     order: s.order,
     shotType: s.shotType,
     durationSeconds: s.durationSeconds,

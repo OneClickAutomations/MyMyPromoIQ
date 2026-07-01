@@ -5,14 +5,15 @@
  * 11 steps: Product → Creator → Scene → Style → Camera → Environment →
  *           Lighting → Voice → Script → Storyboard → Director (generation)
  */
-import { useState, useRef, useCallback, useTransition, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
+import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, Film, ImageIcon, Info, Layers, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -22,6 +23,7 @@ import {
   uploadDirectToStorage,
   dataUrlToBlob,
   saveBrief,
+  getBrief,
   runDirector,
   listCreators,
   listProducts,
@@ -31,7 +33,6 @@ import {
   muxVideoAudio,
   stitchVideos,
   generateModelSheet,
-  extractProductFromUrl,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
@@ -53,7 +54,7 @@ import {
   PRODUCT_ACTION_OPTIONS,
   applyStylePreset,
 } from '../lib/studio/presets'
-import { composeHiggsfieldPrompt, detectConflicts } from '../lib/studio/compositionEngine'
+import { composeRenderPrompt, detectConflicts } from '../lib/studio/compositionEngine'
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -84,12 +85,6 @@ const ENERGY_OPTIONS: Array<{ id: CreatorAttributes['energyLevel']; label: strin
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 function videoThumbSrc(url: string): string {
   return /#t=/.test(url) ? url : `${url}#t=0.1`
@@ -395,7 +390,6 @@ const STYLE_IMAGES: Record<string, string> = {
 
 export default function CommercialStudio() {
   const { user } = useUser()
-  const [, startDescTransition] = useTransition()
 
   // ── Wizard step state
   const [stepNum, setStepNum] = useState(1)
@@ -406,27 +400,23 @@ export default function CommercialStudio() {
   )
   const briefIdRef = useRef<string | null>(null)
 
-  // ── Product upload helpers (mirrors Studio.tsx)
+  // ── Product upload state (capture UI is now the shared ProductInput component)
   const [inputMethod, setInputMethod]     = useState<InputMethod>('upload')
   const [productFile, setProductFile]     = useState<File | null>(null)
   const [productPreview, setProductPreview] = useState('')
   const [urlInput, setUrlInput]           = useState('')
   const [urlPreviewOk, setUrlPreviewOk]   = useState(false)
-  const [productPageUrl, setProductPageUrl] = useState('')
-  const [productPageExtracting, setProductPageExtracting] = useState(false)
-  const [productPageError, setProductPageError] = useState('')
   const [descInput, setDescInput]         = useState('')
-  const [isDragOver, setIsDragOver]       = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [step1Error, setStep1Error]       = useState('')
   const [cameraOpen, setCameraOpen]       = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Director feed state
   const [directorPhase, setDirectorPhase]       = useState<DirectorPhase>('idle')
   const [directorLog, setDirectorLog]           = useState<DirectorLogEntry[]>([])
   const [visibleLogCount, setVisibleLogCount]   = useState(0)
   const [directorNote, setDirectorNote]         = useState('')
+  const [expandedStages, setExpandedStages]     = useState<Set<string>>(new Set())
   const [videoUrl, setVideoUrl]                 = useState<string | null>(null)
   const [genError, setGenError]                 = useState('')
   const [voiceoverUrl, setVoiceoverUrl]         = useState<string | null>(null)
@@ -466,6 +456,10 @@ export default function CommercialStudio() {
   const [stitchedUrl, setStitchedUrl] = useState<string | null>(null)
   const [stitchError, setStitchError] = useState('')
 
+  // ── Draft save toast
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
+  const draftToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // ── Autosave (500 ms debounce after brief changes)
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleSave = useCallback((b: CreativeBrief) => {
@@ -475,7 +469,7 @@ export default function CommercialStudio() {
       try {
         const { id } = await saveBrief(user.id, {
           ...(briefIdRef.current ? { id: briefIdRef.current } : {}),
-          status: b.status,
+          status: 'draft',
           product: b.product,
           creator: b.creator,
           scene: b.scene,
@@ -487,6 +481,9 @@ export default function CommercialStudio() {
           ...(b.sourceAd ? { sourceAd: b.sourceAd } : {}),
         })
         briefIdRef.current = id
+        setDraftSavedAt(Date.now())
+        if (draftToastTimer.current) clearTimeout(draftToastTimer.current)
+        draftToastTimer.current = setTimeout(() => setDraftSavedAt(null), 3000)
       } catch {
         // Autosave failure is silent — user data isn't lost, just not persisted yet
       }
@@ -526,6 +523,41 @@ export default function CommercialStudio() {
       })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Resume a saved draft: ?brief=<id> ───────────────────────────────────────
+  useEffect(() => {
+    const briefId = searchParams.get('brief')
+    if (!briefId || !user?.id) return
+    getBrief(user.id, briefId).then(({ brief }) => {
+      if (!brief) return
+      briefIdRef.current = briefId
+      const b = brief as Record<string, unknown>
+      setBrief(prev => ({
+        ...prev,
+        status: (b.status as CreativeBrief['status']) ?? 'draft',
+        product:     (b.product as CreativeBrief['product'])     ?? prev.product,
+        creator:     (b.creator as CreativeBrief['creator'])     ?? prev.creator,
+        scene:       (b.scene as CreativeBrief['scene'])         ?? prev.scene,
+        style:       (b.style as CreativeBrief['style'])         ?? prev.style,
+        voice:       (b.voice as CreativeBrief['voice'])         ?? prev.voice,
+        script:      (b.script as CreativeBrief['script'])       ?? prev.script,
+        storyboard:  (b.storyboard as CreativeBrief['storyboard']) ?? prev.storyboard,
+        render:      (b.render as CreativeBrief['render'])       ?? prev.render,
+        sourceAd:    (b.source_ad as CreativeBrief['sourceAd'])  ?? prev.sourceAd,
+      }))
+      // Restore product image preview if one was saved
+      const prod = b.product as Record<string, unknown> | undefined
+      const imgUrl = prod?.productImageUrl as string | undefined
+      if (imgUrl) {
+        setInputMethod('url')
+        setUrlInput(imgUrl)
+        setProductPreview(imgUrl)
+        setUrlPreviewOk(true)
+      }
+      const descText = prod?.productName as string | undefined
+      if (descText) setDescInput(descText)
+    }).catch(() => {})
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Clone bridge: hydrate the brief from a discovered-ad analysis (once) ────
   useEffect(() => {
@@ -690,66 +722,8 @@ export default function CommercialStudio() {
 
   // ── Product helpers ───────────────────────────────────────────────────────
 
-  function applyFile(file: File) {
-    if (!file.type.startsWith('image/')) { setStep1Error('Please select a JPG, PNG, or WebP image.'); return }
-    if (file.size > 20 * 1024 * 1024) { setStep1Error('Image must be under 20 MB.'); return }
-    setStep1Error('')
-    setProductFile(file)
-    setProductPreview(URL.createObjectURL(file))
-  }
-
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) applyFile(file)
-    e.target.value = ''
-  }
-
-  function handleFileDrop(e: React.DragEvent) {
-    e.preventDefault(); setIsDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) applyFile(file)
-  }
-
   function handleCapture(dataUrl: string) {
     setProductPreview(dataUrl); setProductFile(null); setStep1Error('')
-  }
-
-  function clearProduct() {
-    setProductFile(null); setProductPreview(''); setUrlPreviewOk(false)
-    setUrlInput(''); setStep1Error('')
-    setProductPageUrl(''); setProductPageError('')
-    patch({ product: { ...brief.product, rawImages: [], processedImages: [] } })
-  }
-
-  async function handleProductUrlExtract() {
-    const url = productPageUrl.trim()
-    if (!url || !/^https?:\/\//i.test(url)) {
-      setProductPageError('Paste a full product page URL (https://…).')
-      return
-    }
-    setProductPageError('')
-    setProductPageExtracting(true)
-    try {
-      const result = await extractProductFromUrl(url)
-      if (result.title) patch({ product: { ...brief.product, productName: result.title } })
-      if (result.description) {
-        const trimmed = result.description.slice(0, 400)
-        setDescInput(trimmed)
-        patch({ product: { ...brief.product, productName: result.title ?? brief.product.productName, description: trimmed } })
-      }
-      if (result.imageUrl) {
-        setUrlInput(result.imageUrl)
-        setProductPreview(result.imageUrl)
-        setUrlPreviewOk(true)
-      }
-      if (!result.title && !result.imageUrl) {
-        setProductPageError('Could not extract product info from that page. Try pasting a direct image URL in the "Image URL" tab instead.')
-      }
-    } catch (err) {
-      setProductPageError(err instanceof Error ? err.message : 'Extraction failed.')
-    } finally {
-      setProductPageExtracting(false)
-    }
   }
 
   async function handleProductNext() {
@@ -788,6 +762,32 @@ export default function CommercialStudio() {
     ? (urlPreviewOk || !!brief.product.productName) && !!descInput.trim()
     : !!productPreview && !!descInput.trim()
 
+  // ── Bridge the shared ProductInput into the wizard's step-1 state ───────────
+  // Maps ProductInput's value onto the fields the existing generation plumbing
+  // (handleProductNext, productImageUrl, canAdvanceStep1) already reads, so the
+  // upload/turnaround/advance logic keeps working unchanged.
+  const wizardProductValue: ProductInputValue = {
+    images: productPreview ? [productPreview] : [],
+    primaryImage: productPreview,
+    name: brief.product.productName,
+    description: descInput,
+    sourceUrl: undefined,
+  }
+  function onWizardProduct(v: ProductInputValue) {
+    const img = v.primaryImage
+    if (img && /^https?:\/\//.test(img)) {
+      // Remote URL: route through the existing 'url' path (no re-upload needed).
+      setInputMethod('url'); setUrlInput(img); setUrlPreviewOk(true)
+    } else {
+      // Data URL from upload/camera: the 'upload' path re-hosts it on Next.
+      setInputMethod('upload')
+    }
+    setProductFile(null)
+    setProductPreview(img)
+    if (v.description || v.name) setDescInput(v.description || v.name)
+    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description } })
+  }
+
   // ── Director feed / generation ────────────────────────────────────────────
 
   // Stage → percentage milestones (directing phase)
@@ -800,6 +800,7 @@ export default function CommercialStudio() {
     setDirectorPhase('directing')
     setDirectorLog([])
     setVisibleLogCount(0)
+    setExpandedStages(new Set())
     setVideoUrl(null)
     setGenError('')
     setVoiceoverUrl(null)
@@ -849,8 +850,8 @@ export default function CommercialStudio() {
         setGenProgress(crept)
       }, 2_000)
 
-      // 3. Submit to Higgsfield with scene-specific focus when provided.
-      const composed = composeHiggsfieldPrompt(brief)
+      // 3. Submit to Veo 3 with scene-specific focus when provided.
+      const composed = composeRenderPrompt(brief)
       const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
       const label = sceneLabel ?? SCENE_LABELS[currentSceneIdx]
       const { requestId, directorPrompt } = await startGeneration({
@@ -978,12 +979,6 @@ export default function CommercialStudio() {
 
   // Step 1: Product
   function renderProduct() {
-    const tabs: { id: InputMethod; label: string; Icon: typeof Upload }[] = [
-      { id: 'upload',      label: 'Upload',       Icon: Upload },
-      { id: 'camera',      label: 'Take a Photo', Icon: Camera },
-      { id: 'url',         label: 'Image URL',    Icon: LinkIcon },
-      { id: 'product-url', label: 'Product URL',  Icon: Wand },
-    ]
     return (
       <div className="space-y-5">
         <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, paste an image URL, or scan a product page URL to auto-fill everything." />
@@ -1030,186 +1025,8 @@ export default function CommercialStudio() {
           </div>
         )}
 
-        <div className="flex rounded-xl border border-void-600 bg-void-800 p-1">
-          {tabs.map(({ id, label, Icon }) => (
-            <button key={id} type="button" onClick={() => { setInputMethod(id); clearProduct() }}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-semibold transition-all duration-150 ${
-                inputMethod === id ? 'bg-fire-start text-white shadow-fire-soft' : 'text-ink-muted hover:text-ink'
-              }`}>
-              <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
-        </div>
-
-        <AnimatePresence mode="wait">
-          <motion.div key={inputMethod} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}>
-            {inputMethod === 'upload' && (
-              productPreview && productFile ? (
-                <div className="flex items-center gap-4 rounded-2xl border border-fire-start/30 bg-fire-start/5 p-4">
-                  <img src={productPreview} alt="Product" className="h-16 w-16 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">{productFile.name}</p>
-                    <p className="text-xs text-ink-faint">{formatBytes(productFile.size)}</p>
-                    <span className="mt-1 inline-flex items-center gap-1 text-xs text-fire-start"><Check className="h-3 w-3" /> Ready</span>
-                  </div>
-                  <button onClick={clearProduct} className="flex-shrink-0 rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors">✕</button>
-                </div>
-              ) : (
-                <div
-                  onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={handleFileDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 text-center transition-all duration-200 ${
-                    isDragOver ? 'border-fire-start bg-fire-start/10 scale-[1.01]' : 'border-void-500 bg-void-800/60 hover:border-fire-start/40 hover:bg-void-800'
-                  }`}
-                >
-                  <div className={`grid h-12 w-12 place-items-center rounded-2xl transition-colors ${isDragOver ? 'bg-fire-start/20' : 'bg-void-700/60'}`}>
-                    <Upload className={`h-6 w-6 ${isDragOver ? 'text-fire-start' : 'text-ink-faint'}`} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-ink">Drop your product image here</p>
-                    <p className="mt-0.5 text-xs text-ink-faint">or click to browse</p>
-                    <p className="mt-0.5 text-xs text-ink-faint/60">JPG, PNG, WebP up to 20 MB</p>
-                  </div>
-                </div>
-              )
-            )}
-
-            {inputMethod === 'camera' && (
-              productPreview ? (
-                <div className="relative overflow-hidden rounded-2xl border border-fire-start/30 bg-void-900">
-                  <img src={productPreview} alt="Captured" className="max-h-52 w-full object-contain" />
-                  <button onClick={clearProduct} className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">Retake</button>
-                </div>
-              ) : (
-                <button onClick={() => setCameraOpen(true)}
-                  className="flex w-full flex-col items-center justify-center gap-4 rounded-2xl border border-void-500 bg-void-800/60 py-12 hover:border-fire-start/40 transition-all">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-fire-start/10 ring-1 ring-fire-start/30">
-                    <Camera className="h-8 w-8 text-fire-start" />
-                  </div>
-                  <p className="text-sm font-semibold text-ink">Open camera studio</p>
-                  <div className="flex items-center gap-2 rounded-xl bg-fire-start px-5 py-2.5 text-sm font-semibold text-white shadow-fire-soft">
-                    <Camera className="h-4 w-4" /> Take a Photo
-                  </div>
-                </button>
-              )
-            )}
-
-            {inputMethod === 'url' && (
-              <div className="space-y-3">
-                <div className="flex gap-2">
-                  <input type="url" value={urlInput}
-                    onChange={e => { setUrlInput(e.target.value); setUrlPreviewOk(false); setProductPreview('') }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        const url = urlInput.trim()
-                        if (url && /^https?:\/\//i.test(url)) { setProductPreview(url); setUrlPreviewOk(true) }
-                        else setStep1Error('Please enter a valid image URL (https://…).')
-                      }
-                    }}
-                    placeholder="https://example.com/product.jpg"
-                    className="flex-1 rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-                  />
-                  <button onClick={() => {
-                    const url = urlInput.trim()
-                    if (!url || !/^https?:\/\//i.test(url)) { setStep1Error('Please enter a valid https URL.'); return }
-                    setStep1Error(''); setProductPreview(url); setUrlPreviewOk(true)
-                  }} className="rounded-xl bg-void-700 px-4 py-3 text-sm font-semibold text-ink hover:bg-void-600 transition-colors">
-                    Preview
-                  </button>
-                </div>
-                {urlPreviewOk && productPreview && (
-                  <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
-                    className="overflow-hidden rounded-xl border border-fire-start/30 bg-void-900">
-                    <img src={productPreview} alt="Product preview" className="max-h-48 w-full object-contain"
-                      onError={() => { setUrlPreviewOk(false); setStep1Error('Could not load image from that URL.') }}
-                    />
-                  </motion.div>
-                )}
-              </div>
-            )}
-
-            {inputMethod === 'product-url' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
-                  <p className="text-xs text-ink-faint leading-relaxed">
-                    Paste any product page URL — Shopify, WooCommerce, Amazon, DTC brands. We'll extract the title, description, and hero image automatically.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={productPageUrl}
-                    onChange={e => { setProductPageUrl(e.target.value); setProductPageError('') }}
-                    onKeyDown={e => { if (e.key === 'Enter') handleProductUrlExtract() }}
-                    placeholder="https://mystore.com/products/amazing-serum"
-                    className="flex-1 rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-                  />
-                  <button
-                    onClick={handleProductUrlExtract}
-                    disabled={productPageExtracting}
-                    className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-fire-start px-5 py-3 text-sm font-semibold text-white shadow-fire-soft disabled:opacity-60 hover:bg-fire-end transition-colors"
-                  >
-                    {productPageExtracting
-                      ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning…</>
-                      : <><Wand className="h-4 w-4" /> Extract</>
-                    }
-                  </button>
-                </div>
-                {productPageError && (
-                  <p className="text-sm text-rose-400">{productPageError}</p>
-                )}
-                {urlPreviewOk && productPreview && (
-                  <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
-                    className="flex items-center gap-4 rounded-xl border border-fire-start/30 bg-fire-start/5 p-4">
-                    <img src={productPreview} alt="Extracted product" className="h-16 w-16 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10"
-                      onError={() => { setUrlPreviewOk(false) }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{brief.product.productName || 'Product extracted'}</p>
-                      <span className="mt-1 inline-flex items-center gap-1 text-xs text-fire-start"><Check className="h-3 w-3" /> Auto-filled from product page</span>
-                    </div>
-                    <button onClick={clearProduct} className="flex-shrink-0 rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors">✕</button>
-                  </motion.div>
-                )}
-              </div>
-            )}
-          </motion.div>
-        </AnimatePresence>
-
-        <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileSelect} />
-
-        <div>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">Product name</span>
-            <input
-              type="text"
-              value={brief.product.productName}
-              onChange={e => patch({ product: { ...brief.product, productName: e.target.value } })}
-              placeholder="e.g. NovaCream Daily SPF 50"
-              className="mt-2 w-full rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-            />
-          </label>
-        </div>
-
-        <div>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">What is it?</span>
-            <textarea
-              rows={2}
-              value={descInput}
-              onChange={e => {
-                const v = e.target.value
-                setDescInput(v)
-                startDescTransition(() => patch({ product: { ...brief.product, description: v } }))
-              }}
-              placeholder="A matte ceramic pour-over coffee dripper for slow mornings."
-              className="mt-2 w-full resize-none rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-            />
-          </label>
-        </div>
+        {/* Product capture — the shared component (upload / camera / URL / bg-removal / enhance) */}
+        <ProductInput value={wizardProductValue} onChange={onWizardProduct} />
 
         {step1Error && (
           <p className="rounded-xl border border-fire-start/20 bg-fire-start/5 px-4 py-3 text-sm text-fire-start">{step1Error}</p>
@@ -1697,7 +1514,7 @@ export default function CommercialStudio() {
   // Step 10: Storyboard review (composition engine preview)
   function renderStoryboard() {
     const payload = (() => {
-      try { return composeHiggsfieldPrompt(brief) } catch { return null }
+      try { return composeRenderPrompt(brief) } catch { return null }
     })()
     const conflicts = detectConflicts(brief)
     const preset = brief.style.commercialStyle ? STYLE_PRESETS[brief.style.commercialStyle] : null
@@ -1763,11 +1580,11 @@ export default function CommercialStudio() {
 
   // Step 11: Director feed (Phase 0.3)
   const STAGE_LABELS: Record<string, string> = {
-    analyzing:    'Analyzing brief',
-    casting:      'Casting creator',
-    scripting:    'Writing script',
-    storyboarding:'Blocking scenes',
-    rendering:    'Rendering video',
+    analyzing:    'Brief reviewed',
+    casting:      'Creator chosen',
+    scripting:    'Script written',
+    storyboarding:'Scenes planned',
+    rendering:    'Video rendered',
   }
 
   function renderDirector() {
@@ -1902,7 +1719,7 @@ export default function CommercialStudio() {
                 label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${SCENE_LABELS.length}`}
               />
 
-              <div className="w-full space-y-3">
+              <div className="w-full space-y-2">
                 {allStages.map((stage, i) => {
                   const logEntry = directorLog.find(e => e.stage === stage)
                   const isVisible = doneStages.includes(stage as DirectorLogEntry['stage'])
@@ -1910,37 +1727,59 @@ export default function CommercialStudio() {
                     (directorPhase === 'directing' && i === doneStages.length) ||
                     (directorPhase === 'generating' && stage === 'rendering')
                   )
+                  const isExpanded = expandedStages.has(stage)
+                  const toggleExpand = () => setExpandedStages(prev => {
+                    const next = new Set(prev)
+                    next.has(stage) ? next.delete(stage) : next.add(stage)
+                    return next
+                  })
                   return (
-                    <div key={stage} className="flex gap-3">
-                      <div className={`relative mt-0.5 grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
-                        isVisible ? 'bg-gradient-fire shadow-fire-soft' :
-                        isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
-                        'bg-void-600/50'
-                      }`}>
-                        {isVisible  ? <Check className="h-3 w-3 text-white" />
-                        : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-                        : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
-                            {STAGE_LABELS[stage]}
-                          </span>
-                          {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
+                    <div key={stage} className={`overflow-hidden rounded-xl transition-colors duration-300 ${
+                      isVisible ? 'border border-white/[0.08] bg-void-800/50' :
+                      isActive  ? 'border border-fire-start/20 bg-fire-start/[0.04]' :
+                      'border border-transparent'
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={isVisible && logEntry ? toggleExpand : undefined}
+                        className={`flex w-full items-center gap-3 px-3 py-2.5 ${isVisible && logEntry ? 'cursor-pointer' : 'cursor-default'}`}
+                      >
+                        {/* Status dot */}
+                        <div className={`relative grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
+                          isVisible ? 'bg-gradient-fire shadow-fire-soft' :
+                          isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
+                          'bg-void-600/50'
+                        }`}>
+                          {isVisible  ? <Check className="h-3 w-3 text-white" />
+                          : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
+                          : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
                         </div>
-                        <AnimatePresence>
-                          {logEntry && isVisible && (
-                            <motion.p
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              transition={{ duration: 0.4 }}
-                              className="mt-0.5 text-[11px] leading-relaxed text-ink-muted"
-                            >
+                        {/* Label */}
+                        <span className={`flex-1 text-left text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
+                          {STAGE_LABELS[stage]}
+                        </span>
+                        {/* Right side: pulse or chevron */}
+                        {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
+                        {isVisible && logEntry && (
+                          <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-ink-faint transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                        )}
+                      </button>
+                      {/* Expandable detail */}
+                      <AnimatePresence>
+                        {isVisible && logEntry && isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.25 }}
+                            className="overflow-hidden"
+                          >
+                            <p className="border-t border-white/[0.06] px-3 pb-3 pt-2 text-[11px] leading-relaxed text-ink-muted">
                               {logEntry.message}
-                            </motion.p>
-                          )}
-                        </AnimatePresence>
-                      </div>
+                            </p>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )
                 })}
@@ -2131,10 +1970,25 @@ export default function CommercialStudio() {
           </div>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink md:text-3xl">Commercial Studio</h1>
         </div>
-        <span className="eyebrow hidden sm:inline-flex">
-          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-          Step {stepNum} of 11
-        </span>
+        <div className="flex items-center gap-3">
+          <AnimatePresence>
+            {draftSavedAt && (
+              <motion.span
+                key="draft-toast"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-400/25"
+              >
+                <Check className="h-3 w-3" /> Draft saved
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <span className="eyebrow hidden sm:inline-flex">
+            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
+            Step {stepNum} of 11
+          </span>
+        </div>
       </div>
 
       {/* Cloned-from-ad banner */}
