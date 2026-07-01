@@ -9,7 +9,7 @@
  * searches the ad library, picks a winning ad, and clones its DNA — hook, pacing,
  * structure — around THEIR product. No more has_product/find_product fork.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
@@ -55,8 +55,7 @@ function ScoreBadge({ rating, total }: { rating: ScoreRating; total: number }) {
 }
 
 
-// ── Searching log feed (mirrors the AI Director feed pattern) ─────────────────
-const SEARCH_STAGES = ['Querying ad libraries', 'Pulling active creatives', 'Scoring opportunities', 'Ranking results']
+// ── Cloning log feed (mirrors the AI Director feed pattern) ───────────────────
 const ANALYZE_STAGES = ['Analyzing hook', 'Mapping structure', 'Drafting differentiated script', 'Matching creator']
 
 function LogFeed({ title, stages, doneCount }: { title: string; stages: string[]; doneCount: number }) {
@@ -148,6 +147,47 @@ function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
         </div>
       </div>
     </button>
+  )
+}
+
+// ── Skeleton loading grid (matches AdCard layout, shimmer not spinner) ────────
+function SkeletonGrid({ count = 8 }: { count?: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="overflow-hidden rounded-2xl border border-white/[0.06] bg-void-800/50">
+          <div className="aspect-[4/5] animate-pulse bg-void-700/60" />
+          <div className="space-y-2 p-3.5">
+            <div className="h-3 w-3/4 animate-pulse rounded-full bg-void-700/60" />
+            <div className="h-2.5 w-1/2 animate-pulse rounded-full bg-void-600/40" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Left filter rail (persistent on desktop, inline on mobile) ────────────────
+function ChipRow<T extends string | number>({ label, options, value, onChange }: {
+  label: string
+  options: { id: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-widest text-ink-faint">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(o => (
+          <button key={String(o.id)} onClick={() => onChange(o.id)}
+            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+              value === o.id ? 'bg-fire-start/15 text-fire-start ring-1 ring-fire-start/30' : 'bg-void-800 text-ink-muted hover:text-ink'
+            }`}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -276,8 +316,51 @@ function SourcingPanel({ ad }: { ad: SourceAd }) {
   )
 }
 
+// ── SWOT quadrant ─────────────────────────────────────────────────────────────
+function SwotQuad({ title, items, tone }: { title: string; items: string[]; tone: 'good' | 'bad' | 'opp' | 'threat' }) {
+  const styles = {
+    good:   'border-emerald-400/20 bg-emerald-400/[0.05]',
+    bad:    'border-amber-400/20 bg-amber-400/[0.05]',
+    opp:    'border-fire-start/20 bg-fire-start/[0.05]',
+    threat: 'border-rose-400/20 bg-rose-400/[0.05]',
+  }[tone]
+  const dot = { good: 'bg-emerald-400', bad: 'bg-amber-400', opp: 'bg-fire-start', threat: 'bg-rose-400' }[tone]
+  return (
+    <div className={`rounded-xl border p-3 ${styles}`}>
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-ink">
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} /> {title}
+      </p>
+      <ul className="space-y-1">
+        {items.length ? items.map((it, i) => (
+          <li key={i} className="text-[11px] leading-snug text-ink-muted">• {it}</li>
+        )) : <li className="text-[11px] text-ink-faint/60">—</li>}
+      </ul>
+    </div>
+  )
+}
+
 function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => void; onClone: () => void }) {
   const f = ad.score.factors
+  const [analysis, setAnalysis] = useState<AdAnalysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(true)
+  const [analyzeErr, setAnalyzeErr] = useState('')
+  const [saved, setSaved] = useState(false) // swipe-file stub (future feature)
+
+  // Fetch the intelligence report (SWOT + DNA) when the panel opens.
+  useEffect(() => {
+    let cancelled = false
+    setAnalyzing(true); setAnalyzeErr('')
+    analyzeSourceAd(ad)
+      .then(({ analysis }) => { if (!cancelled) setAnalysis(analysis as AdAnalysis) })
+      .catch(err => { if (!cancelled) setAnalyzeErr(err instanceof Error ? err.message : 'Analysis unavailable.') })
+      .finally(() => { if (!cancelled) setAnalyzing(false) })
+    return () => { cancelled = true }
+  }, [ad])
+
+  const beatCount = analysis?.structure?.length || 0
+  const estDuration = beatCount ? beatCount * 5 : 0
+  const recommendedClips = beatCount ? Math.max(2, Math.min(10, beatCount)) : 0
+
   return (
     <>
       <motion.div
@@ -287,10 +370,10 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-white/[0.08] bg-void-900"
+        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/[0.08] bg-void-900"
       >
         <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
-          <p className="text-sm font-bold text-ink">Ad detail</p>
+          <p className="text-sm font-bold text-ink">Ad intelligence</p>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-ink-faint hover:bg-white/[0.06] hover:text-ink">
             <X className="h-4 w-4" />
           </button>
@@ -312,13 +395,22 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
               : <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
           )}
 
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate font-bold text-ink">{ad.product.name ?? ad.pageOrShopName}</p>
-              <p className="truncate text-xs text-ink-muted">{ad.pageOrShopName} · {ad.platform}</p>
+              <p className="truncate text-xs text-ink-muted">{ad.pageOrShopName} · {ad.platform} · {ad.delivery.daysRunning}d running</p>
             </div>
             <ScoreBadge rating={ad.score.rating} total={ad.score.total} />
           </div>
+
+          {/* One-line verdict */}
+          {(analyzing || analysis?.verdict) && (
+            <div className="rounded-xl border border-fire-start/20 bg-fire-start/[0.06] p-3.5">
+              {analyzing
+                ? <div className="h-3 w-3/4 animate-pulse rounded-full bg-fire-start/20" />
+                : <p className="text-sm font-semibold leading-snug text-ink">{analysis!.verdict}</p>}
+            </div>
+          )}
 
           {/* Creative copy */}
           <div className="space-y-2 rounded-xl border border-white/[0.06] bg-void-800/60 p-4">
@@ -326,6 +418,50 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
             {ad.creative.bodyText && <p className="text-sm leading-relaxed text-ink-muted">{ad.creative.bodyText}</p>}
             {ad.creative.cta && <span className="inline-block rounded-md bg-fire-start/15 px-2 py-1 text-xs font-semibold text-fire-start">{ad.creative.cta}</span>}
           </div>
+
+          {/* SWOT analysis */}
+          <div className="space-y-2.5">
+            <p className="text-xs font-semibold uppercase tracking-widest text-ink-faint">SWOT analysis</p>
+            {analyzing ? (
+              <div className="grid grid-cols-2 gap-2">
+                {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-void-800/60" />)}
+              </div>
+            ) : analyzeErr ? (
+              <p className="text-xs text-amber-300">{analyzeErr}</p>
+            ) : analysis?.swot ? (
+              <div className="grid grid-cols-2 gap-2">
+                <SwotQuad title="Strengths" tone="good" items={analysis.swot.strengths} />
+                <SwotQuad title="Weaknesses" tone="bad" items={analysis.swot.weaknesses} />
+                <SwotQuad title="Opportunities" tone="opp" items={analysis.swot.opportunities} />
+                <SwotQuad title="Threats" tone="threat" items={analysis.swot.threats} />
+              </div>
+            ) : null}
+          </div>
+
+          {/* Ad DNA breakdown */}
+          {!analyzing && analysis && (
+            <div className="space-y-2.5 rounded-xl border border-white/[0.06] bg-void-800/60 p-4">
+              <p className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Ad DNA</p>
+              <div className="space-y-2 text-sm">
+                {analysis.hookType && <p><span className="text-ink-faint">Hook type:</span> <span className="text-ink">{analysis.hookType}</span></p>}
+                {analysis.hookText && <p><span className="text-ink-faint">Opening line:</span> <span className="text-ink">“{analysis.hookText}”</span></p>}
+                {analysis.cameraStyle && <p><span className="text-ink-faint">Camera:</span> <span className="text-ink">{analysis.cameraStyle}</span></p>}
+                {!!analysis.structure?.length && (
+                  <div>
+                    <span className="text-ink-faint">Beat structure:</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {analysis.structure.map((b, i) => (
+                        <span key={i} className="rounded-md bg-void-900 px-2 py-0.5 text-[11px] text-ink-muted ring-1 ring-white/[0.06]">{i + 1}. {b}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {estDuration > 0 && (
+                  <p className="text-[11px] text-ink-faint">≈ {estDuration}s across {beatCount} beats · recommend {recommendedClips} clips to match pacing</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Score breakdown */}
           <div className="space-y-3">
@@ -341,10 +477,21 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
           <SourcingPanel ad={ad} />
         </div>
 
-        <div className="border-t border-white/[0.06] p-4">
+        <div className="space-y-2 border-t border-white/[0.06] p-4">
           <button onClick={onClone} className="btn-fire w-full">
-            <Wand className="h-4 w-4" /> Clone this
+            <Wand className="h-4 w-4" /> Clone this ad with my product
           </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSaved(s => !s)}
+              className={`flex-1 rounded-xl border py-2.5 text-sm font-semibold transition-colors ${saved ? 'border-fire-start/40 bg-fire-start/10 text-fire-start' : 'border-white/[0.08] text-ink-muted hover:text-ink'}`}
+            >
+              {saved ? '✓ Saved to swipe file' : 'Save to swipe file'}
+            </button>
+            <button onClick={onClose} className="flex-1 rounded-xl border border-white/[0.08] py-2.5 text-sm font-semibold text-ink-muted hover:text-ink">
+              Back to results
+            </button>
+          </div>
         </div>
       </motion.div>
     </>
@@ -431,12 +578,13 @@ export default function Discovery() {
 
   const [queryValue, setQueryValue] = useState('')
   const [platform, setPlatform] = useState<PlatformFilter>('both')
-  const [searchDone, setSearchDone] = useState(0)
   const [response, setResponse] = useState<AdSearchResponse | null>(null)
   const [searchError, setSearchError] = useState('')
 
   const [ratingFilter, setRatingFilter] = useState<ScoreRating | 'all'>('all')
   const [sortKey, setSortKey] = useState<SortKey>('score')
+  const [daysFilter, setDaysFilter] = useState<0 | 7 | 14 | 30 | 60>(0)
+  const [mediaFilter, setMediaFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all')
 
   const [openAd, setOpenAd] = useState<SourceAd | null>(null)
   const [confirmAd, setConfirmAd] = useState<SourceAd | null>(null)
@@ -448,19 +596,13 @@ export default function Discovery() {
   async function handleSearch() {
     if (!queryValue.trim()) return
     setSearchError('')
-    setPhase('searching')
-    setSearchDone(0)
-    // Animate the stage feed while the request runs.
-    const ticker = setInterval(() => setSearchDone(d => Math.min(d + 1, SEARCH_STAGES.length - 1)), 550)
+    setPhase('searching') // skeleton grid renders while the scrape runs
     try {
       const type = /^https?:\/\//i.test(queryValue) ? 'product_url' : 'keyword'
       const resp = await runDiscoverySearch({ type, value: queryValue.trim(), platform })
-      clearInterval(ticker)
-      setSearchDone(SEARCH_STAGES.length)
       setResponse(resp)
       setPhase('results')
     } catch (err) {
-      clearInterval(ticker)
       setSearchError(err instanceof Error ? err.message : 'Search failed.')
       setPhase('search')
     }
@@ -556,13 +698,17 @@ export default function Discovery() {
   }
 
   // Derived filtered/sorted results.
+  // All filters run client-side and instantly — no re-scrape on filter change.
   const ads = (response?.ads ?? [])
     .filter(a => ratingFilter === 'all' || a.score.rating === ratingFilter)
+    .filter(a => a.delivery.daysRunning >= daysFilter)
+    .filter(a => mediaFilter === 'all' || a.creative.mediaType === mediaFilter)
     .sort((a, b) => {
       if (sortKey === 'days') return b.delivery.daysRunning - a.delivery.daysRunning
       if (sortKey === 'newest') return new Date(b.delivery.startDate).getTime() - new Date(a.delivery.startDate).getTime()
       return b.score.total - a.score.total
     })
+  const activeFilterCount = (ratingFilter !== 'all' ? 1 : 0) + (daysFilter !== 0 ? 1 : 0) + (mediaFilter !== 'all' ? 1 : 0)
 
   return (
     <AppShell>
@@ -595,7 +741,7 @@ export default function Discovery() {
         </div>
       )}
 
-      {(phase === 'search' || phase === 'searching') && (
+      {phase === 'search' && (
         <div className="mx-auto max-w-2xl space-y-6">
           <button onClick={() => setPhase('entry')} className="text-xs font-semibold text-ink-faint hover:text-ink">← Back to product</button>
           <div>
@@ -609,9 +755,8 @@ export default function Discovery() {
               <input
                 value={queryValue}
                 onChange={e => setQueryValue(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && phase === 'search' && handleSearch()}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
                 placeholder={placeholder}
-                disabled={phase === 'searching'}
                 className="w-full bg-transparent text-sm text-ink placeholder:text-ink-faint focus:outline-none"
               />
             </div>
@@ -622,54 +767,32 @@ export default function Discovery() {
                 <button
                   key={p}
                   onClick={() => setPlatform(p)}
-                  disabled={phase === 'searching'}
                   className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${platform === p ? 'bg-fire-start/15 text-fire-start ring-1 ring-fire-start/30' : 'bg-void-800 text-ink-muted hover:text-ink'}`}
                 >
-                  {p === 'both' ? 'Both' : p}
+                  {p === 'both' ? 'Both' : p === 'tiktok' ? 'TikTok — soon' : p}
                 </button>
               ))}
             </div>
 
             {searchError && <p className="text-sm text-rose-300">{searchError}</p>}
 
-            {phase === 'search'
-              ? (
-                <button onClick={handleSearch} disabled={!queryValue.trim()} className="btn-fire w-full disabled:opacity-40">
-                  <Compass className="h-4 w-4" /> Search
-                </button>
-              )
-              : <LogFeed title="Searching ad libraries…" stages={SEARCH_STAGES} doneCount={searchDone} />}
+            <button onClick={handleSearch} disabled={!queryValue.trim()} className="btn-fire w-full disabled:opacity-40">
+              <Compass className="h-4 w-4" /> Search
+            </button>
           </div>
         </div>
       )}
 
-      {(phase === 'results' || phase === 'cloning') && (
-        <div className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      {(phase === 'results' || phase === 'cloning' || phase === 'searching') && (
+        <div>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <button onClick={() => setPhase('search')} className="text-xs font-semibold text-ink-faint hover:text-ink">← New search</button>
-              <h1 className="mt-1 text-xl font-bold text-ink">{response?.resultCount ?? 0} ad{response?.resultCount === 1 ? '' : 's'} for “{queryValue}”</h1>
+              <h1 className="mt-1 text-xl font-bold text-ink">
+                {phase === 'searching' ? `Searching for “${queryValue}”…` : `${ads.length} of ${response?.resultCount ?? 0} ad${(response?.resultCount ?? 0) === 1 ? '' : 's'} for “${queryValue}”`}
+              </h1>
             </div>
-          </div>
-
-          {response?.notice && (
-            <div className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-2.5">
-              <Bolt className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" />
-              <p className="text-xs text-ink-muted">{response.notice}</p>
-            </div>
-          )}
-
-          {cloneError && <p className="text-sm text-rose-300">{cloneError}</p>}
-
-          {/* Filter / sort bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            {(['all', 'green', 'yellow', 'red'] as const).map(r => (
-              <button key={r} onClick={() => setRatingFilter(r)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${ratingFilter === r ? 'bg-fire-start/15 text-fire-start ring-1 ring-fire-start/30' : 'bg-void-800 text-ink-muted hover:text-ink'}`}>
-                {r === 'all' ? 'All scores' : RATING_STYLES[r].label}
-              </button>
-            ))}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <span className="text-xs text-ink-faint">Sort</span>
               <select value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}
                 className="rounded-lg border border-white/[0.08] bg-void-800 px-2.5 py-1.5 text-xs font-semibold text-ink focus:border-fire-start/40 focus:outline-none">
@@ -680,17 +803,72 @@ export default function Discovery() {
             </div>
           </div>
 
-          {phase === 'cloning' && (
-            <LogFeed title="Cloning the winning structure…" stages={ANALYZE_STAGES} doneCount={analyzeDone} />
+          {response?.notice && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-2.5">
+              <Bolt className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" />
+              <p className="text-xs text-ink-muted">{response.notice}</p>
+            </div>
           )}
+          {cloneError && <p className="mb-4 text-sm text-rose-300">{cloneError}</p>}
 
-          {ads.length === 0
-            ? <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-10 text-center text-sm text-ink-muted">No ads match these filters.</div>
-            : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {ads.map(ad => <AdCard key={ad.id} ad={ad} onOpen={() => setOpenAd(ad)} />)}
+          <div className="flex flex-col gap-5 lg:flex-row">
+            {/* ── Left filter rail — persistent on desktop ── */}
+            <aside className="flex-shrink-0 space-y-4 lg:w-56">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-ink">Filters</p>
+                {activeFilterCount > 0 && (
+                  <button onClick={() => { setRatingFilter('all'); setDaysFilter(0); setMediaFilter('all') }}
+                    className="text-[11px] font-semibold text-fire-start hover:text-fire-end">Clear ({activeFilterCount})</button>
+                )}
               </div>
-            )}
+              <div className="space-y-4 rounded-2xl border border-white/[0.07] bg-void-800/40 p-4">
+                <ChipRow label="Platform" value={platform}
+                  options={[{ id: 'both', label: 'All' }, { id: 'meta', label: 'Meta' }, { id: 'tiktok', label: 'TikTok — soon' }]}
+                  onChange={v => setPlatform(v as PlatformFilter)} />
+                <ChipRow label="Days running" value={daysFilter}
+                  options={[{ id: 0, label: 'Any' }, { id: 7, label: '7+' }, { id: 14, label: '14+' }, { id: 30, label: '30+' }, { id: 60, label: '60+' }]}
+                  onChange={setDaysFilter} />
+                <ChipRow label="Media type" value={mediaFilter}
+                  options={[{ id: 'all', label: 'All' }, { id: 'video', label: 'Video' }, { id: 'image', label: 'Image' }, { id: 'carousel', label: 'Carousel' }]}
+                  onChange={setMediaFilter} />
+                <ChipRow label="Score" value={ratingFilter}
+                  options={[{ id: 'all', label: 'All' }, { id: 'green', label: 'Strong' }, { id: 'yellow', label: 'Mixed' }, { id: 'red', label: 'Weak' }]}
+                  onChange={v => setRatingFilter(v as ScoreRating | 'all')} />
+              </div>
+            </aside>
+
+            {/* ── Results grid ── */}
+            <div className="min-w-0 flex-1 space-y-4">
+              {phase === 'cloning' && (
+                <LogFeed title="Cloning the winning structure…" stages={ANALYZE_STAGES} doneCount={analyzeDone} />
+              )}
+
+              {phase === 'searching'
+                ? <SkeletonGrid />
+                : ads.length === 0
+                  ? (
+                    <div className="rounded-2xl border border-dashed border-white/[0.12] px-6 py-16 text-center">
+                      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-void-800">
+                        <Search className="h-6 w-6 text-ink-faint" />
+                      </div>
+                      <h3 className="text-lg font-bold text-ink">
+                        {activeFilterCount > 0 ? 'No ads match these filters' : `No ads found for “${queryValue}”`}
+                      </h3>
+                      <p className="mx-auto mt-1.5 max-w-xs text-sm text-ink-muted">
+                        {activeFilterCount > 0 ? 'Loosen a filter to see more of the result set.' : 'Try a broader keyword, or paste a competitor product URL.'}
+                      </p>
+                      {activeFilterCount > 0
+                        ? <button onClick={() => { setRatingFilter('all'); setDaysFilter(0); setMediaFilter('all') }} className="btn-ghost mx-auto mt-5 inline-flex gap-1.5 text-sm">Clear filters</button>
+                        : <button onClick={() => setPhase('search')} className="btn-fire mx-auto mt-5 inline-flex gap-1.5 text-sm"><Search className="h-4 w-4" /> New search</button>}
+                    </div>
+                  )
+                  : (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                      {ads.map(ad => <AdCard key={ad.id} ad={ad} onOpen={() => setOpenAd(ad)} />)}
+                    </div>
+                  )}
+            </div>
+          </div>
         </div>
       )}
 

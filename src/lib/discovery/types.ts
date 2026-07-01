@@ -114,6 +114,16 @@ export interface AdAnalysis {
   }
   improvedScript: string
   differentiationNotes: string
+  /** Intelligence-report fields (Part 2.3 Ad Analysis Panel). Optional so older
+   *  cached analyses still type-check. */
+  verdict?: string
+  cameraStyle?: string
+  swot?: {
+    strengths: string[]
+    weaknesses: string[]
+    opportunities: string[]
+    threats: string[]
+  }
 }
 
 /** Payload handed to the wizard via the clone bridge (sessionStorage). */
