@@ -61,11 +61,60 @@ function resolveStyle(style: string): StyleId | null {
 
 // ── Video provider ────────────────────────────────────────────────────────────
 // Google Veo via the Gemini Developer API (API key, not Vertex AI).
-// Veo 3 uses the :generateVideo method; Veo 2 still uses :predictLongRunning.
+// Method + body shape are per the official google-genai SDK: POST to
+// `{model}:predictLongRunning` with { instances: [{ prompt, image }], parameters }.
 // Veo job ids are prefixed with "veo:" so /api/status routes the poll correctly.
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
-const VEO3_MODEL = process.env.VEO_MODEL || 'veo-3.0-fast-generate-001'
-const VEO2_MODEL = 'veo-2.0-generate-001'
+
+// Known Veo model ids, best-first — used as a safety net if a key can generate
+// video but doesn't enumerate Veo in ListModels. Discovery is still primary.
+const KNOWN_VEO_MODELS = [
+  'veo-3.0-fast-generate-001',
+  'veo-3.0-generate-001',
+  'veo-2.0-generate-001',
+]
+
+const rankVeo = (id: string) =>
+  /veo-3.*fast/i.test(id) ? 0 :
+  /veo-3/i.test(id)       ? 1 :
+  /veo-2/i.test(id)       ? 2 : 3
+
+/**
+ * Return an ordered list of Veo model ids to try for THIS API key, instead of
+ * hard-coding one id that Google may rename or gate by tier. Google's own 404
+ * says: "Call ModelService.ListModels to see the list of available models and
+ * their supported methods." — so discovery is primary; the known ids are a net.
+ */
+async function resolveVeoModels(apiKey: string): Promise<string[]> {
+  if (process.env.VEO_MODEL) return [process.env.VEO_MODEL]
+
+  const discovered: string[] = []
+  let pageToken = ''
+  try {
+    // Paginate the full model catalogue (Veo can sit on a later page).
+    for (let i = 0; i < 10; i++) {
+      const url = `${GEMINI_BASE}/models?pageSize=200${pageToken ? `&pageToken=${pageToken}` : ''}`
+      const resp = await fetch(url, { headers: { 'x-goog-api-key': apiKey } })
+      if (!resp.ok) break // fall through to known-ids net
+      const data = (await resp.json()) as { models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>; nextPageToken?: string }
+      for (const m of data.models ?? []) {
+        const id = (m.name ?? '').replace(/^models\//, '')
+        const methods = m.supportedGenerationMethods ?? []
+        if (/veo/i.test(id) && methods.includes('predictLongRunning')) discovered.push(id)
+      }
+      if (!data.nextPageToken) break
+      pageToken = data.nextPageToken
+    }
+  } catch {
+    // Network hiccup — fall through to known ids.
+  }
+
+  discovered.sort((a, b) => rankVeo(a) - rankVeo(b))
+  // Discovered first (authoritative for this key), then any known id not already listed.
+  const ordered = [...discovered]
+  for (const k of KNOWN_VEO_MODELS) if (!ordered.includes(k)) ordered.push(k)
+  return ordered
+}
 
 interface BrandContext {
   voice?: string
@@ -200,8 +249,8 @@ async function submitVeoJob(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
 
-  // Fetch and encode the reference image once (shared across attempts).
-  let imagePayload: { imageBytes: string; mimeType: string } | undefined
+  // Fetch and encode the reference image (image-to-video).
+  let imagePayload: { bytesBase64Encoded: string; mimeType: string } | undefined
   if (imageUrl) {
     const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
     const fetchHeaders: Record<string, string> = {
@@ -212,70 +261,63 @@ async function submitVeoJob(
     const imgResp = await fetch(imageUrl, { headers: fetchHeaders })
     if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}). Upload the image directly instead.`)
     imagePayload = {
-      imageBytes: Buffer.from(await imgResp.arrayBuffer()).toString('base64'),
+      bytesBase64Encoded: Buffer.from(await imgResp.arrayBuffer()).toString('base64'),
       mimeType: imgResp.headers.get('content-type') || 'image/jpeg',
     }
   }
 
+  // Discover the models this key actually has — no guessing, no single hard-coded id.
+  const candidates = await resolveVeoModels(apiKey)
+
   const aspectRatio = process.env.VEO_ASPECT_RATIO || '9:16'
   const avoid = opts?.negativePrompt?.trim()
 
-  // ── Attempt 1: Veo 3 via :generateVideo (new endpoint Google moved to) ───────
-  // Veo 3 dropped :predictLongRunning in favour of :generateVideo with a
-  // different body shape: top-level prompt/image/config instead of instances[].
-  const veo3Body: Record<string, unknown> = {
-    prompt,
-    config: {
+  const instance: Record<string, unknown> = { prompt }
+  if (imagePayload) instance.image = imagePayload
+
+  // Body shape per the google-genai SDK: instances[] + parameters.
+  const body = JSON.stringify({
+    instances: [instance],
+    parameters: {
       aspectRatio,
-      numberOfVideos: 1,
+      sampleCount: 1,
       ...(avoid ? { negativePrompt: avoid.slice(0, 400) } : {}),
     },
-  }
-  if (imagePayload) veo3Body.image = imagePayload
-
-  const veo3Resp = await fetch(`${GEMINI_BASE}/models/${VEO3_MODEL}:generateVideo`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify(veo3Body),
   })
 
-  if (veo3Resp.ok) {
-    const data = (await veo3Resp.json()) as Record<string, unknown>
+  let lastStatus = 0
+  let lastDetail = ''
+  for (const model of candidates) {
+    const resp = await fetch(`${GEMINI_BASE}/models/${model}:predictLongRunning`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body,
+    })
+    if (resp.status === 404) {
+      // Model not on this key — try the next candidate.
+      lastStatus = 404
+      lastDetail = `${model} not available`
+      console.warn(`[generate] ${model} → 404, trying next`)
+      continue
+    }
+    if (!resp.ok) {
+      // A non-404 error (quota, auth, bad request) is real — surface it now.
+      const detail = await resp.text().catch(() => '')
+      throw new Error(`Veo submit failed (${resp.status}) with ${model}: ${detail.slice(0, 400)}`)
+    }
+    const data = (await resp.json()) as Record<string, unknown>
     const opName = data.name as string | undefined
-    if (!opName) throw new Error(`Veo 3 submit returned no operation name. Raw: ${JSON.stringify(data).slice(0, 300)}`)
-    console.info(`[generate] Using ${VEO3_MODEL} (generateVideo) — op: ${opName}`)
-    return { requestId: `veo:${opName}`, status: 'queued', provider: VEO3_MODEL }
+    if (!opName) throw new Error(`Veo submit returned no operation name. Raw: ${JSON.stringify(data).slice(0, 300)}`)
+    console.info(`[generate] Veo model in use: ${model} — op: ${opName}`)
+    return { requestId: `veo:${opName}`, status: 'queued', provider: model }
   }
 
-  // If Veo 3 returns anything other than 404/405 it's a real error (quota, auth, etc.)
-  if (veo3Resp.status !== 404 && veo3Resp.status !== 405) {
-    const detail = await veo3Resp.text().catch(() => '')
-    throw new Error(`Veo 3 submit failed (${veo3Resp.status}): ${detail.slice(0, 400)}`)
-  }
-
-  // ── Attempt 2: Veo 2 via :predictLongRunning (original stable method) ────────
-  console.warn(`[generate] ${VEO3_MODEL} → ${veo3Resp.status}, falling back to ${VEO2_MODEL}`)
-  const veo2Instance: Record<string, unknown> = { prompt }
-  if (imagePayload) veo2Instance.image = { bytesBase64Encoded: imagePayload.imageBytes, mimeType: imagePayload.mimeType }
-
-  const veo2Resp = await fetch(`${GEMINI_BASE}/models/${VEO2_MODEL}:predictLongRunning`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
-      instances: [veo2Instance],
-      parameters: { aspectRatio, ...(avoid ? { negativePrompt: avoid.slice(0, 400) } : {}) },
-    }),
-  })
-
-  if (!veo2Resp.ok) {
-    const detail = await veo2Resp.text().catch(() => '')
-    throw new Error(`Veo 2 fallback also failed (${veo2Resp.status}): ${detail.slice(0, 400)}`)
-  }
-  const data2 = (await veo2Resp.json()) as Record<string, unknown>
-  const opName2 = data2.name as string | undefined
-  if (!opName2) throw new Error(`Veo 2 submit returned no operation name. Raw: ${JSON.stringify(data2).slice(0, 300)}`)
-  console.info(`[generate] Using ${VEO2_MODEL} (predictLongRunning) — op: ${opName2}`)
-  return { requestId: `veo:${opName2}`, status: 'queued', provider: VEO2_MODEL }
+  // Every candidate 404'd → the key genuinely lacks Veo access. Say so clearly.
+  throw new Error(
+    `No Veo video model is available on this GEMINI_API_KEY (tried: ${candidates.join(', ')}; last: ${lastStatus} ${lastDetail}). ` +
+    'Veo requires a Google Cloud project with billing enabled. Fix: create a key at ' +
+    'aistudio.google.com/apikey on a paid project, set it as GEMINI_API_KEY in Vercel → Settings → Environment Variables, and redeploy.',
+  )
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
