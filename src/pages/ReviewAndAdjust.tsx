@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
-import { ArrowRight, Check, Download, RefreshCw, Wand, Spark } from '../components/icons'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, uploadAsset, extractProductFromUrl, type StatusResponse } from '../lib/api'
+import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
+import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -77,12 +78,9 @@ export default function ReviewAndAdjust() {
   const [prefill, setPrefill] = useState<ClonePrefill | null>(null)
 
   const [productImageUrl, setProductImageUrl] = useState('')
-  const [uploadingImage, setUploadingImage] = useState(false)
-  const [productPageUrl, setProductPageUrl] = useState('')
-  const [scanningUrl, setScanningUrl] = useState(false)
-  const [scanError, setScanError] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [productName, setProductName] = useState('')
   const [productDescription, setProductDescription] = useState('')
+  const [productSourceUrl, setProductSourceUrl] = useState<string | undefined>(undefined)
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
   const [creatorDescription, setCreatorDescription] = useState('')
@@ -121,46 +119,24 @@ export default function ReviewAndAdjust() {
     }
   }, [])
 
-  async function handleScanUrl() {
-    const url = productPageUrl.trim()
-    if (!url || !/^https?:\/\//i.test(url)) {
-      setScanError('Paste a full product page URL (https://…).')
-      return
-    }
-    setScanError('')
-    setScanningUrl(true)
-    try {
-      const result = await extractProductFromUrl(url)
-      if (result.imageUrl) setProductImageUrl(result.imageUrl)
-      if (result.title && !productDescription) setProductDescription(result.title)
-      if (result.description && !productDescription) setProductDescription(result.description.slice(0, 300))
-      if (!result.imageUrl && !result.title) {
-        setScanError('Nothing extracted from that page. Try pasting the image URL directly above.')
-      }
-    } catch (err) {
-      setScanError(err instanceof Error ? err.message : 'Scan failed.')
-    } finally {
-      setScanningUrl(false)
-    }
+  // Bridge the shared ProductInput to this page's flat generation fields.
+  const productValue: ProductInputValue = {
+    images: productImageUrl ? [productImageUrl] : [],
+    primaryImage: productImageUrl,
+    name: productName,
+    description: productDescription,
+    sourceUrl: productSourceUrl,
   }
-
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploadingImage(true)
-    setErrorMsg('')
-    try {
-      const url = await uploadAsset(file)
-      setProductImageUrl(url)
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Image upload failed.')
-    } finally {
-      setUploadingImage(false)
-    }
+  function onProductChange(v: ProductInputValue) {
+    setProductImageUrl(v.primaryImage)
+    setProductName(v.name)
+    setProductDescription(v.description)
+    setProductSourceUrl(v.sourceUrl)
   }
 
   async function handleGenerate() {
-    if (!productDescription.trim()) {
+    const effectiveDescription = (productDescription.trim() || productName.trim())
+    if (!effectiveDescription) {
       setErrorMsg('Describe the product you are selling.')
       return
     }
@@ -175,7 +151,7 @@ export default function ReviewAndAdjust() {
       setStepIndex(0) // "Claude writing direction"
       const { requestId, directorPrompt: dp } = await startGeneration({
         productImageUrl: productImageUrl.trim(),
-        productDescription: productDescription.trim(),
+        productDescription: effectiveDescription,
         style,
         quality: 'turbo',
         script: script.trim() || undefined,
@@ -308,94 +284,8 @@ export default function ReviewAndAdjust() {
 
         {/* Form */}
         <div className="space-y-5">
-          {/* Product image */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Product image
-              <span className="text-[10px] font-normal normal-case tracking-normal text-ink-faint">(recommended — Veo 3 animates your photo into video)</span>
-              {isFromClone && productImageUrl && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
-            <div className="flex gap-2">
-              <input
-                value={productImageUrl}
-                onChange={e => setProductImageUrl(e.target.value)}
-                disabled={isBusy || uploadingImage}
-                placeholder="https://example.com/product.jpg"
-                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-              />
-              <button
-                type="button"
-                disabled={isBusy || uploadingImage}
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-shrink-0 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink disabled:opacity-50"
-              >
-                {uploadingImage ? 'Uploading…' : 'Upload'}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-            </div>
-            {productImageUrl && /^https?:\/\//.test(productImageUrl) && (
-              <img src={productImageUrl} alt="Product preview" className="mt-1 h-16 w-16 rounded-lg object-cover border border-white/[0.08]" />
-            )}
-          </div>
-
-          {/* Scan product page URL */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Or scan a product page URL
-            </label>
-            <p className="text-[11px] text-ink-faint">Paste a Shopify, Amazon, or DTC store link — we'll auto-extract the title, description, and image.</p>
-            <div className="flex gap-2">
-              <input
-                value={productPageUrl}
-                onChange={e => { setProductPageUrl(e.target.value); setScanError('') }}
-                onKeyDown={e => { if (e.key === 'Enter') handleScanUrl() }}
-                disabled={isBusy || scanningUrl}
-                placeholder="https://mystore.com/products/amazing-serum"
-                className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-              />
-              <button
-                type="button"
-                onClick={handleScanUrl}
-                disabled={isBusy || scanningUrl}
-                className="flex-shrink-0 flex items-center gap-1.5 rounded-xl bg-fire-start px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-fire-end transition-colors"
-              >
-                {scanningUrl
-                  ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning</>
-                  : <><Wand className="h-4 w-4" /> Scan</>
-                }
-              </button>
-            </div>
-            {scanError && <p className="text-sm text-rose-400">{scanError}</p>}
-          </div>
-
-          {/* Product description */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              What are you selling?
-              {isFromClone && productDescription && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
-            {isFromClone && prefill.cloneMode === 'studio' && (
-              <p className="text-[11px] text-amber-300/80">Replace this with your own product — Claude adapted the script and style, but the product field is pre-filled from the original ad.</p>
-            )}
-            <textarea
-              value={productDescription}
-              onChange={e => setProductDescription(e.target.value)}
-              disabled={isBusy}
-              rows={3}
-              placeholder="A matte ceramic pour-over coffee dripper for slow mornings."
-              className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-            />
-          </div>
+          {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
+          <ProductInput value={productValue} onChange={onProductChange} />
 
           {/* Style picker */}
           <div className="space-y-2">

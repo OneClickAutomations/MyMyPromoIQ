@@ -5,14 +5,15 @@
  * 11 steps: Product → Creator → Scene → Style → Camera → Environment →
  *           Lighting → Voice → Script → Storyboard → Director (generation)
  */
-import { useState, useRef, useCallback, useTransition, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
+import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers, LinkIcon,
+  ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
@@ -32,7 +33,6 @@ import {
   muxVideoAudio,
   stitchVideos,
   generateModelSheet,
-  extractProductFromUrl,
   type DirectorLogEntry,
   type StatusResponse,
   type StoredCreator,
@@ -85,12 +85,6 @@ const ENERGY_OPTIONS: Array<{ id: CreatorAttributes['energyLevel']; label: strin
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 function videoThumbSrc(url: string): string {
   return /#t=/.test(url) ? url : `${url}#t=0.1`
@@ -396,7 +390,6 @@ const STYLE_IMAGES: Record<string, string> = {
 
 export default function CommercialStudio() {
   const { user } = useUser()
-  const [, startDescTransition] = useTransition()
 
   // ── Wizard step state
   const [stepNum, setStepNum] = useState(1)
@@ -407,21 +400,16 @@ export default function CommercialStudio() {
   )
   const briefIdRef = useRef<string | null>(null)
 
-  // ── Product upload helpers (mirrors Studio.tsx)
+  // ── Product upload state (capture UI is now the shared ProductInput component)
   const [inputMethod, setInputMethod]     = useState<InputMethod>('upload')
   const [productFile, setProductFile]     = useState<File | null>(null)
   const [productPreview, setProductPreview] = useState('')
   const [urlInput, setUrlInput]           = useState('')
   const [urlPreviewOk, setUrlPreviewOk]   = useState(false)
-  const [productPageUrl, setProductPageUrl] = useState('')
-  const [productPageExtracting, setProductPageExtracting] = useState(false)
-  const [productPageError, setProductPageError] = useState('')
   const [descInput, setDescInput]         = useState('')
-  const [isDragOver, setIsDragOver]       = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [step1Error, setStep1Error]       = useState('')
   const [cameraOpen, setCameraOpen]       = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Director feed state
   const [directorPhase, setDirectorPhase]       = useState<DirectorPhase>('idle')
@@ -734,66 +722,8 @@ export default function CommercialStudio() {
 
   // ── Product helpers ───────────────────────────────────────────────────────
 
-  function applyFile(file: File) {
-    if (!file.type.startsWith('image/')) { setStep1Error('Please select a JPG, PNG, or WebP image.'); return }
-    if (file.size > 20 * 1024 * 1024) { setStep1Error('Image must be under 20 MB.'); return }
-    setStep1Error('')
-    setProductFile(file)
-    setProductPreview(URL.createObjectURL(file))
-  }
-
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) applyFile(file)
-    e.target.value = ''
-  }
-
-  function handleFileDrop(e: React.DragEvent) {
-    e.preventDefault(); setIsDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) applyFile(file)
-  }
-
   function handleCapture(dataUrl: string) {
     setProductPreview(dataUrl); setProductFile(null); setStep1Error('')
-  }
-
-  function clearProduct() {
-    setProductFile(null); setProductPreview(''); setUrlPreviewOk(false)
-    setUrlInput(''); setStep1Error('')
-    setProductPageUrl(''); setProductPageError('')
-    patch({ product: { ...brief.product, rawImages: [], processedImages: [] } })
-  }
-
-  async function handleProductUrlExtract() {
-    const url = productPageUrl.trim()
-    if (!url || !/^https?:\/\//i.test(url)) {
-      setProductPageError('Paste a full product page URL (https://…).')
-      return
-    }
-    setProductPageError('')
-    setProductPageExtracting(true)
-    try {
-      const result = await extractProductFromUrl(url)
-      if (result.title) patch({ product: { ...brief.product, productName: result.title } })
-      if (result.description) {
-        const trimmed = result.description.slice(0, 400)
-        setDescInput(trimmed)
-        patch({ product: { ...brief.product, productName: result.title ?? brief.product.productName, description: trimmed } })
-      }
-      if (result.imageUrl) {
-        setUrlInput(result.imageUrl)
-        setProductPreview(result.imageUrl)
-        setUrlPreviewOk(true)
-      }
-      if (!result.title && !result.imageUrl) {
-        setProductPageError('Could not extract product info from that page. Try pasting a direct image URL in the "Image URL" tab instead.')
-      }
-    } catch (err) {
-      setProductPageError(err instanceof Error ? err.message : 'Extraction failed.')
-    } finally {
-      setProductPageExtracting(false)
-    }
   }
 
   async function handleProductNext() {
@@ -831,6 +761,32 @@ export default function CommercialStudio() {
   const canAdvanceStep1 = inputMethod === 'product-url'
     ? (urlPreviewOk || !!brief.product.productName) && !!descInput.trim()
     : !!productPreview && !!descInput.trim()
+
+  // ── Bridge the shared ProductInput into the wizard's step-1 state ───────────
+  // Maps ProductInput's value onto the fields the existing generation plumbing
+  // (handleProductNext, productImageUrl, canAdvanceStep1) already reads, so the
+  // upload/turnaround/advance logic keeps working unchanged.
+  const wizardProductValue: ProductInputValue = {
+    images: productPreview ? [productPreview] : [],
+    primaryImage: productPreview,
+    name: brief.product.productName,
+    description: descInput,
+    sourceUrl: undefined,
+  }
+  function onWizardProduct(v: ProductInputValue) {
+    const img = v.primaryImage
+    if (img && /^https?:\/\//.test(img)) {
+      // Remote URL: route through the existing 'url' path (no re-upload needed).
+      setInputMethod('url'); setUrlInput(img); setUrlPreviewOk(true)
+    } else {
+      // Data URL from upload/camera: the 'upload' path re-hosts it on Next.
+      setInputMethod('upload')
+    }
+    setProductFile(null)
+    setProductPreview(img)
+    if (v.description || v.name) setDescInput(v.description || v.name)
+    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description } })
+  }
 
   // ── Director feed / generation ────────────────────────────────────────────
 
@@ -1023,12 +979,6 @@ export default function CommercialStudio() {
 
   // Step 1: Product
   function renderProduct() {
-    const tabs: { id: InputMethod; label: string; Icon: typeof Upload }[] = [
-      { id: 'upload',      label: 'Upload',       Icon: Upload },
-      { id: 'camera',      label: 'Take a Photo', Icon: Camera },
-      { id: 'url',         label: 'Image URL',    Icon: LinkIcon },
-      { id: 'product-url', label: 'Product URL',  Icon: Wand },
-    ]
     return (
       <div className="space-y-5">
         <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, paste an image URL, or scan a product page URL to auto-fill everything." />
@@ -1075,186 +1025,8 @@ export default function CommercialStudio() {
           </div>
         )}
 
-        <div className="flex rounded-xl border border-void-600 bg-void-800 p-1">
-          {tabs.map(({ id, label, Icon }) => (
-            <button key={id} type="button" onClick={() => { setInputMethod(id); clearProduct() }}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-semibold transition-all duration-150 ${
-                inputMethod === id ? 'bg-fire-start text-white shadow-fire-soft' : 'text-ink-muted hover:text-ink'
-              }`}>
-              <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
-        </div>
-
-        <AnimatePresence mode="wait">
-          <motion.div key={inputMethod} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}>
-            {inputMethod === 'upload' && (
-              productPreview && productFile ? (
-                <div className="flex items-center gap-4 rounded-2xl border border-fire-start/30 bg-fire-start/5 p-4">
-                  <img src={productPreview} alt="Product" className="h-16 w-16 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">{productFile.name}</p>
-                    <p className="text-xs text-ink-faint">{formatBytes(productFile.size)}</p>
-                    <span className="mt-1 inline-flex items-center gap-1 text-xs text-fire-start"><Check className="h-3 w-3" /> Ready</span>
-                  </div>
-                  <button onClick={clearProduct} className="flex-shrink-0 rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors">✕</button>
-                </div>
-              ) : (
-                <div
-                  onDragOver={e => { e.preventDefault(); setIsDragOver(true) }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={handleFileDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 text-center transition-all duration-200 ${
-                    isDragOver ? 'border-fire-start bg-fire-start/10 scale-[1.01]' : 'border-void-500 bg-void-800/60 hover:border-fire-start/40 hover:bg-void-800'
-                  }`}
-                >
-                  <div className={`grid h-12 w-12 place-items-center rounded-2xl transition-colors ${isDragOver ? 'bg-fire-start/20' : 'bg-void-700/60'}`}>
-                    <Upload className={`h-6 w-6 ${isDragOver ? 'text-fire-start' : 'text-ink-faint'}`} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-ink">Drop your product image here</p>
-                    <p className="mt-0.5 text-xs text-ink-faint">or click to browse</p>
-                    <p className="mt-0.5 text-xs text-ink-faint/60">JPG, PNG, WebP up to 20 MB</p>
-                  </div>
-                </div>
-              )
-            )}
-
-            {inputMethod === 'camera' && (
-              productPreview ? (
-                <div className="relative overflow-hidden rounded-2xl border border-fire-start/30 bg-void-900">
-                  <img src={productPreview} alt="Captured" className="max-h-52 w-full object-contain" />
-                  <button onClick={clearProduct} className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">Retake</button>
-                </div>
-              ) : (
-                <button onClick={() => setCameraOpen(true)}
-                  className="flex w-full flex-col items-center justify-center gap-4 rounded-2xl border border-void-500 bg-void-800/60 py-12 hover:border-fire-start/40 transition-all">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-fire-start/10 ring-1 ring-fire-start/30">
-                    <Camera className="h-8 w-8 text-fire-start" />
-                  </div>
-                  <p className="text-sm font-semibold text-ink">Open camera studio</p>
-                  <div className="flex items-center gap-2 rounded-xl bg-fire-start px-5 py-2.5 text-sm font-semibold text-white shadow-fire-soft">
-                    <Camera className="h-4 w-4" /> Take a Photo
-                  </div>
-                </button>
-              )
-            )}
-
-            {inputMethod === 'url' && (
-              <div className="space-y-3">
-                <div className="flex gap-2">
-                  <input type="url" value={urlInput}
-                    onChange={e => { setUrlInput(e.target.value); setUrlPreviewOk(false); setProductPreview('') }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        const url = urlInput.trim()
-                        if (url && /^https?:\/\//i.test(url)) { setProductPreview(url); setUrlPreviewOk(true) }
-                        else setStep1Error('Please enter a valid image URL (https://…).')
-                      }
-                    }}
-                    placeholder="https://example.com/product.jpg"
-                    className="flex-1 rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-                  />
-                  <button onClick={() => {
-                    const url = urlInput.trim()
-                    if (!url || !/^https?:\/\//i.test(url)) { setStep1Error('Please enter a valid https URL.'); return }
-                    setStep1Error(''); setProductPreview(url); setUrlPreviewOk(true)
-                  }} className="rounded-xl bg-void-700 px-4 py-3 text-sm font-semibold text-ink hover:bg-void-600 transition-colors">
-                    Preview
-                  </button>
-                </div>
-                {urlPreviewOk && productPreview && (
-                  <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
-                    className="overflow-hidden rounded-xl border border-fire-start/30 bg-void-900">
-                    <img src={productPreview} alt="Product preview" className="max-h-48 w-full object-contain"
-                      onError={() => { setUrlPreviewOk(false); setStep1Error('Could not load image from that URL.') }}
-                    />
-                  </motion.div>
-                )}
-              </div>
-            )}
-
-            {inputMethod === 'product-url' && (
-              <div className="space-y-4">
-                <div className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
-                  <p className="text-xs text-ink-faint leading-relaxed">
-                    Paste any product page URL — Shopify, WooCommerce, Amazon, DTC brands. We'll extract the title, description, and hero image automatically.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={productPageUrl}
-                    onChange={e => { setProductPageUrl(e.target.value); setProductPageError('') }}
-                    onKeyDown={e => { if (e.key === 'Enter') handleProductUrlExtract() }}
-                    placeholder="https://mystore.com/products/amazing-serum"
-                    className="flex-1 rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-                  />
-                  <button
-                    onClick={handleProductUrlExtract}
-                    disabled={productPageExtracting}
-                    className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-fire-start px-5 py-3 text-sm font-semibold text-white shadow-fire-soft disabled:opacity-60 hover:bg-fire-end transition-colors"
-                  >
-                    {productPageExtracting
-                      ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> Scanning…</>
-                      : <><Wand className="h-4 w-4" /> Extract</>
-                    }
-                  </button>
-                </div>
-                {productPageError && (
-                  <p className="text-sm text-rose-400">{productPageError}</p>
-                )}
-                {urlPreviewOk && productPreview && (
-                  <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}
-                    className="flex items-center gap-4 rounded-xl border border-fire-start/30 bg-fire-start/5 p-4">
-                    <img src={productPreview} alt="Extracted product" className="h-16 w-16 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10"
-                      onError={() => { setUrlPreviewOk(false) }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-ink">{brief.product.productName || 'Product extracted'}</p>
-                      <span className="mt-1 inline-flex items-center gap-1 text-xs text-fire-start"><Check className="h-3 w-3" /> Auto-filled from product page</span>
-                    </div>
-                    <button onClick={clearProduct} className="flex-shrink-0 rounded-lg p-1.5 text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors">✕</button>
-                  </motion.div>
-                )}
-              </div>
-            )}
-          </motion.div>
-        </AnimatePresence>
-
-        <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileSelect} />
-
-        <div>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">Product name</span>
-            <input
-              type="text"
-              value={brief.product.productName}
-              onChange={e => patch({ product: { ...brief.product, productName: e.target.value } })}
-              placeholder="e.g. NovaCream Daily SPF 50"
-              className="mt-2 w-full rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-            />
-          </label>
-        </div>
-
-        <div>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">What is it?</span>
-            <textarea
-              rows={2}
-              value={descInput}
-              onChange={e => {
-                const v = e.target.value
-                setDescInput(v)
-                startDescTransition(() => patch({ product: { ...brief.product, description: v } }))
-              }}
-              placeholder="A matte ceramic pour-over coffee dripper for slow mornings."
-              className="mt-2 w-full resize-none rounded-xl border border-void-500 bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none focus:ring-2 focus:ring-fire-start/30 transition-colors"
-            />
-          </label>
-        </div>
+        {/* Product capture — the shared component (upload / camera / URL / bg-removal / enhance) */}
+        <ProductInput value={wizardProductValue} onChange={onWizardProduct} />
 
         {step1Error && (
           <p className="rounded-xl border border-fire-start/20 bg-fire-start/5 px-4 py-3 text-sm text-fire-start">{step1Error}</p>
