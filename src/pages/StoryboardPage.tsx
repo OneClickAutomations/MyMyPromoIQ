@@ -9,16 +9,30 @@
  * The multi-clip render here is the working core of the Generation Queue; the
  * full 10-slot panel polish is tracked as Part 4.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import StoryboardPlanner from '../components/StoryboardPlanner'
+import GenerationPanel from '../components/GenerationPanel'
 import { Film, RefreshCw, Download, Check, X, Layers, ArrowRight } from '../components/icons'
 import {
   planStoryboard, startGeneration, pollUntilDone, stitchVideos,
 } from '../lib/api'
+import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
 import type { StoryboardPlan, StoryboardClip } from '../lib/studio/storyboard'
+
+/** Cross-origin-safe download: fetch → blob → click (the `download` attr is
+ * ignored for cross-origin URLs like Veo/CDN renders). */
+async function downloadVideo(url: string, name = `clip-${Date.now()}.mp4`) {
+  try {
+    const blob = await (await fetch(url)).blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl; a.download = name
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 8000)
+  } catch { window.open(url, '_blank', 'noopener') }
+}
 
 const CTX_KEY = 'promoiq_storyboard_ctx'
 
@@ -32,8 +46,6 @@ export interface StoryboardContext {
 }
 
 type Phase = 'planning' | 'plan' | 'rendering' | 'error'
-type TileStatus = 'waiting' | 'generating' | 'complete' | 'failed'
-interface Tile { clip: StoryboardClip; status: TileStatus; videoUrl?: string }
 
 export default function StoryboardPage() {
   const navigate = useNavigate()
@@ -44,11 +56,10 @@ export default function StoryboardPage() {
   const [clipCountBusy, setClipCountBusy] = useState(false)
   const [regenOrder, setRegenOrder] = useState<number | null>(null)
 
-  // Render state
-  const [tiles, setTiles] = useState<Tile[]>([])
+  // Generation queue (Part 4) — worker pool with auto-retry + auto-advance.
+  const queue = useGenerationQueue(1, 1)
   const [assembling, setAssembling] = useState(false)
   const [assembledUrl, setAssembledUrl] = useState<string | null>(null)
-  const cancelRef = useRef(false)
 
   // Load context + plan the first storyboard.
   useEffect(() => {
@@ -111,61 +122,39 @@ export default function StoryboardPage() {
     finally { setRegenOrder(null) }
   }
 
-  async function generate(clips: StoryboardClip[]) {
-    if (!ctx) return
-    cancelRef.current = false
-    setPhase('rendering')
-    setAssembledUrl(null)
-    const initial: Tile[] = clips.map(clip => ({ clip, status: 'waiting' }))
-    setTiles(initial)
-
-    // Fire clips sequentially (Veo maxConcurrent = 1). Auto-advance on complete.
-    for (let i = 0; i < clips.length; i++) {
-      if (cancelRef.current) break
-      const clip = clips[i]
-      setTiles(prev => prev.map((t, idx) => (idx === i ? { ...t, status: 'generating' } : t)))
-      try {
-        const { requestId } = await startGeneration({
-          productImageUrl: ctx.product.primaryImage,
-          productDescription: ctx.product.description || ctx.product.name,
-          style: ctx.style,
-          quality: 'turbo',
-          sceneLabel: clip.beat,
-          script: clip.dialogue,
-          brandVoice: ctx.brandVoice,
-          brandCta: ctx.cta,
-        })
-        const res = await pollUntilDone(requestId, () => {})
-        setTiles(prev => prev.map((t, idx) => (idx === i
-          ? { ...t, status: res.status === 'completed' && res.videoUrl ? 'complete' : 'failed', videoUrl: res.videoUrl ?? undefined }
-          : t)))
-      } catch {
-        setTiles(prev => prev.map((t, idx) => (idx === i ? { ...t, status: 'failed' } : t)))
-      }
-    }
+  // Turn one storyboard clip into a hosted video URL (throws on failure so the
+  // queue's retry logic can catch it).
+  async function generateOne(clip: StoryboardClip): Promise<string> {
+    if (!ctx) throw new Error('no context')
+    const { requestId } = await startGeneration({
+      productImageUrl: ctx.product.primaryImage,
+      productDescription: ctx.product.description || ctx.product.name,
+      style: ctx.style,
+      quality: 'turbo',
+      sceneLabel: clip.beat,
+      script: clip.dialogue,
+      brandVoice: ctx.brandVoice,
+      brandCta: ctx.cta,
+    })
+    const res = await pollUntilDone(requestId, () => {})
+    if (res.status === 'completed' && res.videoUrl) return res.videoUrl
+    throw new Error(res.raw || 'render failed')
   }
 
-  async function retryTile(index: number) {
+  function generate(clips: StoryboardClip[]) {
     if (!ctx) return
-    const tile = tiles[index]
-    setTiles(prev => prev.map((t, idx) => (idx === index ? { ...t, status: 'generating' } : t)))
-    try {
-      const { requestId } = await startGeneration({
-        productImageUrl: ctx.product.primaryImage,
-        productDescription: ctx.product.description || ctx.product.name,
-        style: ctx.style, quality: 'turbo', sceneLabel: tile.clip.beat, script: tile.clip.dialogue,
-      })
-      const res = await pollUntilDone(requestId, () => {})
-      setTiles(prev => prev.map((t, idx) => (idx === index
-        ? { ...t, status: res.status === 'completed' && res.videoUrl ? 'complete' : 'failed', videoUrl: res.videoUrl ?? undefined }
-        : t)))
-    } catch {
-      setTiles(prev => prev.map((t, idx) => (idx === index ? { ...t, status: 'failed' } : t)))
-    }
+    setAssembledUrl(null)
+    setPhase('rendering')
+    void queue.run(clips, generateOne)
+  }
+
+  function retryClip(clipId: string) {
+    const clip = plan?.clips.find(c => c.id === clipId)
+    if (clip) void queue.retryOne(clip, generateOne)
   }
 
   async function assemble() {
-    const urls = tiles.filter(t => t.status === 'complete' && t.videoUrl).map(t => t.videoUrl!)
+    const urls = queue.tiles.filter(t => t.status === 'complete' && t.videoUrl).map(t => t.videoUrl!)
     if (urls.length < 1) return
     setAssembling(true)
     try {
@@ -175,8 +164,7 @@ export default function StoryboardPage() {
     finally { setAssembling(false) }
   }
 
-  const doneCount = tiles.filter(t => t.status === 'complete').length
-  const allSettled = tiles.length > 0 && tiles.every(t => t.status === 'complete' || t.status === 'failed')
+  const doneSeconds = queue.tiles.filter(t => t.status === 'complete').reduce((s, t) => s + t.durationSeconds, 0)
 
   return (
     <AppShell>
@@ -221,52 +209,30 @@ export default function StoryboardPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold text-ink">Rendering your commercial</h1>
-              <p className="mt-0.5 text-sm text-ink-muted">{doneCount} of {tiles.length} clips complete</p>
+              <p className="mt-0.5 text-sm text-ink-muted">The queue keeps one clip rendering and fires the next automatically.</p>
             </div>
-            <button onClick={() => { cancelRef.current = true; setPhase('plan') }} className="btn-ghost gap-1.5 px-3.5 py-2 text-sm">
+            <button onClick={() => { queue.cancel(); setPhase('plan') }} className="btn-ghost gap-1.5 px-3.5 py-2 text-sm">
               <X className="h-4 w-4" /> Back to storyboard
             </button>
           </div>
 
-          {/* Tile grid — 2 columns, scales toward the Part 4 10-slot panel */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {tiles.map((t, i) => (
-              <motion.div key={t.clip.id} layout className="relative aspect-[9/16] overflow-hidden rounded-xl border border-white/10 bg-void-900">
-                {t.status === 'complete' && t.videoUrl ? (
-                  <video src={`${t.videoUrl}#t=0.1`} muted loop playsInline preload="metadata"
-                    className="h-full w-full object-cover"
-                    onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
-                    onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }} />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-2 p-2 text-center">
-                    {t.status === 'generating' && <RefreshCw className="h-5 w-5 animate-spin text-fire-start" />}
-                    {t.status === 'waiting' && <span className="h-2 w-2 animate-pulse rounded-full bg-ink-faint/50" />}
-                    {t.status === 'failed' && (
-                      <button onClick={() => retryTile(i)} className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-[11px] font-bold text-rose-300 ring-1 ring-rose-400/30">Retry</button>
-                    )}
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-ink-faint">{t.clip.beat}</p>
-                    <p className="line-clamp-3 px-1 text-[10px] leading-snug text-ink-muted">{t.clip.dialogue}</p>
-                  </div>
-                )}
-                <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white">#{i + 1}</span>
-                {t.status === 'complete' && t.videoUrl && (
-                  <a href={t.videoUrl} download target="_blank" rel="noreferrer"
-                    className="absolute bottom-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-md bg-black/70 text-white ring-1 ring-white/15 hover:bg-black/90">
-                    <Download className="h-3 w-3" />
-                  </a>
-                )}
-              </motion.div>
-            ))}
-          </div>
+          <GenerationPanel
+            tiles={queue.tiles}
+            running={queue.running}
+            completedCount={queue.completedCount}
+            onRetry={retryClip}
+            onRemix={retryClip}
+            onDownload={url => downloadVideo(url)}
+          />
 
-          {/* Assemble prompt */}
-          {allSettled && doneCount >= 1 && !assembledUrl && (
+          {/* Assemble prompt — explicit, one-tap (not automatic) */}
+          {queue.allSettled && queue.completedCount >= 1 && !assembledUrl && (
             <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <Layers className="h-5 w-5 text-fire-start" />
                   <p className="text-sm font-semibold text-ink">
-                    You have {doneCount}/{tiles.length} clips — assemble into one ~{tiles.filter(t => t.status === 'complete').reduce((s, t) => s + t.clip.durationSeconds, 0)}-second commercial?
+                    You have {queue.completedCount}/{queue.total} clips — assemble into one ~{doneSeconds}-second commercial?
                   </p>
                 </div>
                 <button onClick={assemble} disabled={assembling} className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-50">
