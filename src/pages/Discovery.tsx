@@ -519,18 +519,35 @@ export default function Discovery() {
       const { analysis } = await analyzeSourceAd(ad)
       clearInterval(ticker)
       setAnalyzeDone(ANALYZE_STAGES.length)
+      const a = analysis as AdAnalysis
       const prefill: ClonePrefill = {
         sourceAdId: ad.id,
         sourceAdName: adProductName,
-        analysis: analysis as AdAnalysis,
+        analysis: a,
         sourcedProduct,
         adImageUrl,
         cloneMode: 'studio',
         appliedAt: new Date().toISOString(),
       }
       try { sessionStorage.setItem(CLONE_PREFILL_KEY, JSON.stringify(prefill)) } catch {}
+
+      // Converge on the Storyboard Planner: hand it the user's product + the
+      // reference ad's beat structure so Claude paces the clone to match.
+      const ctx = {
+        product: {
+          name: sourcedProduct.name,
+          description: product.description || a.improvedScript || '',
+          primaryImage: sourcedProduct.imageUrl,
+        },
+        style: a.suggestedCommercialStyle || 'ugc_testimonial',
+        referenceBeats: a.structure ?? [],
+        // Estimate the reference length from its beat count (~5s/beat) so the
+        // planner suggests a clip count that matches the original's pacing.
+        referenceDurationSeconds: (a.structure?.length || 4) * 5,
+      }
+      try { sessionStorage.setItem('promoiq_storyboard_ctx', JSON.stringify(ctx)) } catch {}
       // Brief beat so the final stage reads as complete before routing.
-      setTimeout(() => navigate('/studio/new'), 600)
+      setTimeout(() => navigate('/forge/storyboard'), 600)
     } catch (err) {
       clearInterval(ticker)
       setCloneError(err instanceof Error ? err.message : 'Analysis failed.')
