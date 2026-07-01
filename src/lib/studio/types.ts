@@ -3,7 +3,7 @@
  *
  * The single source of truth for the commercial-studio wizard. Every wizard
  * step reads/writes this one object; the Composition Engine (compositionEngine.ts)
- * is the only thing that turns it into a Higgsfield-bound payload. Steps must NOT
+ * is the only thing that turns it into a Veo-bound payload. Steps must NOT
  * hold private creative state that isn't reflected here.
  */
 
@@ -118,7 +118,7 @@ export interface CreativeBrief {
 
   render: {
     jobId?: string
-    higgsfieldPayload?: HiggsfieldPayload
+    renderPayload?: RenderPayload
     outputUrl?: string
     creditsCost?: number
     statusLog: DirectorLogEntry[]
@@ -135,12 +135,12 @@ export interface CreativeBrief {
 
 // ── Composition Engine output ────────────────────────────────────────────────
 
-export interface HiggsfieldScenePrompt {
+export interface RenderScenePrompt {
   order: number
   shotType: string
   durationSeconds: number
   cameraDirection: string
-  /** The compiled, physical/observable-action prompt sent to Higgsfield. */
+  /** The compiled, physical/observable-action prompt sent to Veo 3. */
   prompt: string
 }
 
@@ -151,11 +151,11 @@ export interface CompositionWarning {
   severity: 'soft'
 }
 
-export interface HiggsfieldPayload {
+export interface RenderPayload {
   aspectRatio: string
   quality: 'lite' | 'turbo' | 'standard'
   negativePrompt: string
-  scenes: HiggsfieldScenePrompt[]
+  scenes: RenderScenePrompt[]
   warnings: CompositionWarning[]
   estimatedCredits: number
 }

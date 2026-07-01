@@ -6,11 +6,11 @@ import Reveal from './Reveal'
 
 /**
  * Interactive product tour (the explainer). The REAL, working pipeline lives
- * in components/Generator.tsx (#generate) and the Netlify functions:
+ * in components/Generator.tsx (#generate) and the Vercel functions:
  *   Step 3 (AI directs) → POST /api/generate → Claude writes the prompt +
- *                         Higgsfield submits the render
+ *                         Google Veo 3 submits the render
  *   Step 4 (download)   → GET /api/status polls until the video URL is ready
- * Keys (ANTHROPIC_API_KEY, HF_API_KEY/HF_API_SECRET) load server-side only.
+ * Keys (ANTHROPIC_API_KEY, GEMINI_API_KEY) load server-side only.
  */
 
 const stepIcons = [Upload, Wand, Film, Download]

@@ -7,7 +7,7 @@ const benefits = [
   'First 3 videos completely free — no card required',
   'AI director writes cinematic prompts for you',
   'Results in minutes, not weeks',
-  'Higgsfield + Arcads providers built in',
+  'Google Veo 3 video engine built in',
   'Cancel any time, keep everything you made',
 ]
 

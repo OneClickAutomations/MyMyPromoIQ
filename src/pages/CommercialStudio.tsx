@@ -54,7 +54,7 @@ import {
   PRODUCT_ACTION_OPTIONS,
   applyStylePreset,
 } from '../lib/studio/presets'
-import { composeHiggsfieldPrompt, detectConflicts } from '../lib/studio/compositionEngine'
+import { composeRenderPrompt, detectConflicts } from '../lib/studio/compositionEngine'
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -850,8 +850,8 @@ export default function CommercialStudio() {
         setGenProgress(crept)
       }, 2_000)
 
-      // 3. Submit to Higgsfield with scene-specific focus when provided.
-      const composed = composeHiggsfieldPrompt(brief)
+      // 3. Submit to Veo 3 with scene-specific focus when provided.
+      const composed = composeRenderPrompt(brief)
       const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
       const label = sceneLabel ?? SCENE_LABELS[currentSceneIdx]
       const { requestId, directorPrompt } = await startGeneration({
@@ -1514,7 +1514,7 @@ export default function CommercialStudio() {
   // Step 10: Storyboard review (composition engine preview)
   function renderStoryboard() {
     const payload = (() => {
-      try { return composeHiggsfieldPrompt(brief) } catch { return null }
+      try { return composeRenderPrompt(brief) } catch { return null }
     })()
     const conflicts = detectConflicts(brief)
     const preset = brief.style.commercialStyle ? STYLE_PRESETS[brief.style.commercialStyle] : null

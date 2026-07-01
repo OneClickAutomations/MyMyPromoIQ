@@ -93,16 +93,23 @@ export default function DataProcessingAgreement() {
             <td>SCCs / DPA</td>
           </tr>
           <tr>
-            <td><strong>Higgsfield AI, Inc.</strong></td>
-            <td>Video rendering</td>
-            <td>Product image URLs, director prompts</td>
+            <td><strong>Google LLC</strong></td>
+            <td>Video rendering &amp; image generation (Veo / Gemini API)</td>
+            <td>Product images, director prompts</td>
             <td>USA</td>
             <td>SCCs / DPA</td>
           </tr>
           <tr>
-            <td><strong>Arcads AI</strong></td>
-            <td>Video rendering (optional)</td>
-            <td>Product image URLs, director prompts</td>
+            <td><strong>Supabase, Inc.</strong></td>
+            <td>Database &amp; media storage</td>
+            <td>Product images, generated videos, campaign data</td>
+            <td>USA</td>
+            <td>SCCs / DPA</td>
+          </tr>
+          <tr>
+            <td><strong>Clerk, Inc.</strong></td>
+            <td>Authentication</td>
+            <td>Email, name, session data</td>
             <td>USA</td>
             <td>SCCs / DPA</td>
           </tr>
@@ -114,7 +121,7 @@ export default function DataProcessingAgreement() {
             <td>SCCs / DPA</td>
           </tr>
           <tr>
-            <td><strong>Netlify, Inc.</strong></td>
+            <td><strong>Vercel, Inc.</strong></td>
             <td>Hosting &amp; serverless compute</td>
             <td>IP addresses, request logs</td>
             <td>USA</td>

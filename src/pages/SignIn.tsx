@@ -12,7 +12,7 @@ const recentActivity = [
 
 const features = [
   'AI director crafts every prompt',
-  'Higgsfield DoP cinematic engine',
+  'Google Veo 3 cinematic engine',
   'Campaign dashboard with history',
   'Download-ready in minutes',
 ]

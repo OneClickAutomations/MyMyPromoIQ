@@ -8,7 +8,7 @@ import { startGeneration, pollUntilDone, type StatusResponse } from '../lib/api'
 /**
  * The live generation flow — replaces the old static How-It-Works mock with the
  * real pipeline:
- *   client → POST /api/generate  (Claude directs + Higgsfield submit)
+ *   client → POST /api/generate  (Claude directs + Google Veo 3 submit)
  *          → GET  /api/status    (poll until the video URL is ready)
  * Keys live server-side in netlify/functions; nothing secret touches this file.
  */
