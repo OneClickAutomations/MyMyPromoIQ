@@ -80,6 +80,15 @@ export interface CreativeBrief {
     seedImages?: MediaAsset[]
     attributes?: CreatorAttributes
     savedCreatorId?: string
+    /** 'as_is' = use the upload directly; 'transform' = identity-preserving edit. */
+    usagePath?: 'as_is' | 'transform'
+    transformInstruction?: string
+    /** "Transform this person" (Task A): the identity-preserving edited still,
+     *  once previewed. When absent on an uploaded_seed creator, seedImages[0]
+     *  (the raw upload) is used as-is. */
+    transformedImageUrl?: string
+    /** ISO timestamp of the required likeness-use consent acknowledgment. */
+    likenessConsentAt?: string
   }
 
   scene: {

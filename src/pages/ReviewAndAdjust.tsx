@@ -4,6 +4,8 @@ import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
+import type { CreatorAttributes } from '../lib/studio/types'
 import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
@@ -31,18 +33,6 @@ const STYLE_ID_MAP: Record<string, string> = {
 function resolveStyleId(raw: string): string {
   if (STYLE_OPTIONS.find(s => s.id === raw)) return raw
   return STYLE_ID_MAP[raw] ?? 'testimonial'
-}
-
-function buildCreatorDescription(attrs: Record<string, string>): string {
-  const parts: string[] = []
-  if (attrs.gender) parts.push(attrs.gender)
-  if (attrs.ageRange) parts.push(attrs.ageRange)
-  if (attrs.ethnicity) parts.push(attrs.ethnicity)
-  if (attrs.hair) parts.push(`${attrs.hair} hair`)
-  if (attrs.wardrobe) parts.push(attrs.wardrobe)
-  if (attrs.energyLevel) parts.push(`${attrs.energyLevel} energy`)
-  if (attrs.cameraConfidence) parts.push(`${attrs.cameraConfidence} camera confidence`)
-  return parts.join(', ')
 }
 
 type Phase = 'idle' | 'working' | 'done' | 'error'
@@ -83,7 +73,7 @@ export default function ReviewAndAdjust() {
   const [productSourceUrl, setProductSourceUrl] = useState<string | undefined>(undefined)
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
-  const [creatorDescription, setCreatorDescription] = useState('')
+  const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
 
   const [phase, setPhase] = useState<Phase>('idle')
   const [stepIndex, setStepIndex] = useState(0)
@@ -104,7 +94,18 @@ export default function ReviewAndAdjust() {
         const analysis = data.analysis
         setStyle(resolveStyleId(analysis.suggestedCommercialStyle))
         setScript(analysis.improvedScript ?? '')
-        setCreatorDescription(buildCreatorDescription(analysis.suggestedCreatorAttributes as Record<string, string>))
+        const suggested = (analysis.suggestedCreatorAttributes ?? {}) as Record<string, string>
+        setCreatorValue(prev => ({
+          ...prev,
+          mode: 'generated',
+          attributes: {
+            gender: suggested.gender ?? '', ageRange: suggested.ageRange ?? '', ethnicity: suggested.ethnicity ?? '',
+            bodyType: '', hair: suggested.hair ?? '', wardrobe: suggested.wardrobe ?? '',
+            expression: suggested.expression ?? '',
+            energyLevel: (suggested.energyLevel as CreatorAttributes['energyLevel']) ?? 'medium',
+            cameraConfidence: suggested.cameraConfidence ?? '',
+          },
+        }))
         // Pre-fill image: sourcedProduct.imageUrl is always set by Discovery now
         const imageUrl = data.sourcedProduct?.imageUrl || data.adImageUrl
         if (imageUrl) setProductImageUrl(imageUrl)
@@ -140,12 +141,20 @@ export default function ReviewAndAdjust() {
       setErrorMsg('Describe the product you are selling.')
       return
     }
+    if (!isCreatorReady(creatorValue)) {
+      setErrorMsg('Confirm you have the right to use this person\'s likeness before generating.')
+      return
+    }
     setErrorMsg('')
     setHistorySaved(false)
     setHistoryError('')
     setPhase('working')
     setStepIndex(0)
     setVideoUrl(null)
+
+    // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
+    // Veo's identity reference, taking priority over the product photo.
+    const creatorImageUrl = creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
 
     try {
       setStepIndex(0) // "Claude writing direction"
@@ -155,6 +164,8 @@ export default function ReviewAndAdjust() {
         style,
         quality: 'turbo',
         script: script.trim() || undefined,
+        creatorImageUrl,
+        creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
       })
       setDirectorPrompt(dp)
       setStepIndex(1) // "Submitting to Veo 3"
@@ -337,18 +348,11 @@ export default function ReviewAndAdjust() {
           <div className="space-y-1.5">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
               Creator
-              {isFromClone && creatorDescription && (
+              {isFromClone && creatorValue.mode === 'generated' && creatorValue.attributes.gender && (
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
-            <textarea
-              value={creatorDescription}
-              onChange={e => setCreatorDescription(e.target.value)}
-              disabled={isBusy}
-              rows={2}
-              placeholder="e.g. female, 25-35, high energy, casual wardrobe"
-              className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
-            />
+            <CreatorInput value={creatorValue} onChange={setCreatorValue} />
           </div>
         </div>
 
@@ -484,7 +488,8 @@ export default function ReviewAndAdjust() {
           <button
             type="button"
             onClick={handleGenerate}
-            className="btn-fire w-full justify-center gap-2"
+            disabled={!isCreatorReady(creatorValue)}
+            className="btn-fire w-full justify-center gap-2 disabled:opacity-40"
           >
             <Wand className="h-4 w-4" />
             {adForge.review.generateCta}

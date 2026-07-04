@@ -15,6 +15,7 @@ import { useUser } from '@clerk/clerk-react'
 import AppShell from '../components/AppShell'
 import StoryboardPlanner from '../components/StoryboardPlanner'
 import GenerationPanel from '../components/GenerationPanel'
+import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import { loadBrandProfile } from '../components/BrandVoiceSetup'
 import { Film, RefreshCw, Download, Check, X, Layers, ArrowRight } from '../components/icons'
 import {
@@ -47,17 +48,21 @@ export interface StoryboardContext {
   cta?: string
 }
 
-type Phase = 'planning' | 'plan' | 'rendering' | 'error'
+type Phase = 'creator' | 'planning' | 'plan' | 'rendering' | 'error'
 
 export default function StoryboardPage() {
   const navigate = useNavigate()
   const { user } = useUser()
   const [ctx, setCtx] = useState<StoryboardContext | null>(null)
-  const [phase, setPhase] = useState<Phase>('planning')
+  const [phase, setPhase] = useState<Phase>('creator')
   const [plan, setPlan] = useState<StoryboardPlan | null>(null)
   const [error, setError] = useState('')
   const [clipCountBusy, setClipCountBusy] = useState(false)
   const [regenOrder, setRegenOrder] = useState<number | null>(null)
+
+  // Bring Your Own Creator (Task A) — Clone had no creator step at all before;
+  // this gives it the same three-way choice as the other two modes.
+  const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
 
   // Generation queue (Part 4) — worker pool with auto-retry + auto-advance.
   const queue = useGenerationQueue(1, 1)
@@ -85,10 +90,15 @@ export default function StoryboardPage() {
         }
       }
       setCtx(parsed)
-      runPlan(parsed)
+      setPhase('creator')
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
+
+  function proceedToStoryboard() {
+    if (!ctx || !isCreatorReady(creatorValue)) return
+    runPlan(ctx)
+  }
 
   async function runPlan(c: StoryboardContext, clipCount?: number) {
     setPhase('planning'); setError('')
@@ -143,6 +153,9 @@ export default function StoryboardPage() {
   // queue's retry logic can catch it).
   async function generateOne(clip: StoryboardClip): Promise<string> {
     if (!ctx) throw new Error('no context')
+    // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
+    // Veo's identity reference, taking priority over the product photo.
+    const creatorImageUrl = creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
     const { requestId } = await startGeneration({
       productImageUrl: ctx.product.primaryImage,
       productDescription: ctx.product.description || ctx.product.name,
@@ -152,6 +165,8 @@ export default function StoryboardPage() {
       script: clip.dialogue,
       brandVoice: ctx.brandVoice,
       brandCta: ctx.cta,
+      creatorImageUrl,
+      creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
     })
     const res = await pollUntilDone(requestId, () => {})
     if (res.status === 'completed' && res.videoUrl) return res.videoUrl
@@ -191,6 +206,19 @@ export default function StoryboardPage() {
         <span className="text-ink-faint">/</span>
         <span className="text-ink">Storyboard</span>
       </div>
+
+      {phase === 'creator' && ctx && (
+        <div className="mx-auto max-w-2xl space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold text-ink md:text-3xl">Cast your creator</h1>
+            <p className="mt-1.5 text-sm text-ink-muted">Let AI cast one, reuse a saved creator, or bring your own — then we'll storyboard the clone around them.</p>
+          </div>
+          <CreatorInput value={creatorValue} onChange={setCreatorValue} />
+          <button onClick={proceedToStoryboard} disabled={!isCreatorReady(creatorValue)} className="btn-fire w-full gap-1.5 disabled:opacity-40">
+            Continue to storyboard <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {phase === 'planning' && (
         <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-void-800/50 p-10 text-center">

@@ -345,10 +345,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       brandCta,
       sceneLabel,
       script,
+      // "Bring Your Own Creator" (Task A): an uploaded/transformed creator photo
+      // takes priority over the product photo as Veo's single identity reference.
+      creatorImageUrl,
+      creatorConsentAt,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
-    if (productImageUrl && !/^https?:\/\//i.test(productImageUrl)) {
-      return res.status(400).json({ error: 'Product image URL must start with https://.' })
+    // ProductInput/CreatorInput both emit resized data: URLs directly (no
+    // upload round-trip needed — Node's fetch reads data: URLs natively), so
+    // accept either an https link or an inline data URL.
+    const VALID_IMAGE_URL = /^(https?:\/\/|data:image\/[a-z0-9.+-]+;base64,)/i
+    if (productImageUrl && !VALID_IMAGE_URL.test(productImageUrl)) {
+      return res.status(400).json({ error: 'Product image must be an https:// URL or an uploaded photo.' })
+    }
+    if (creatorImageUrl && !VALID_IMAGE_URL.test(creatorImageUrl)) {
+      return res.status(400).json({ error: 'Creator image must be an https:// URL or an uploaded photo.' })
+    }
+    // A real person's likeness is in play — never generate without the explicit
+    // consent acknowledgment (Task A.3). Enforced server-side, not just in the UI.
+    if (creatorImageUrl && !creatorConsentAt) {
+      return res.status(400).json({ error: 'Confirm you have the right to use this person\'s likeness before generating.' })
     }
     if (!productDescription?.trim()) {
       return res.status(400).json({ error: 'Describe the product in a sentence.' })
@@ -377,7 +393,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       script,
     )
 
-    const { requestId, status } = await submitVeoJob(directorPrompt, productImageUrl || undefined, { negativePrompt })
+    // Veo takes exactly one conditioning image per job. When a creator photo is
+    // present, it wins — identity drift on a face is far more noticeable (and
+    // more consequential, since it's a real person) than on a product, and the
+    // product's appearance/scale is already carried in the text prompt.
+    const veoReferenceImage = creatorImageUrl || productImageUrl
+    const { requestId, status } = await submitVeoJob(directorPrompt, veoReferenceImage || undefined, { negativePrompt })
 
     return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
   } catch (err) {

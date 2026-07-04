@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import {
   ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers,
   Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
@@ -72,17 +73,8 @@ const STEPS = [
   { num: 11, key: 'director',    label: 'Director',     required: true,  icon: Spark },
 ] as const
 
-// ── Creator attribute options ─────────────────────────────────────────────────
-
-const GENDER_OPTIONS = ['Woman', 'Man', 'Non-binary']
-const AGE_OPTIONS    = ['18–24', '25–34', '35–44', '45–54', '55+']
-const ETHNICITY_OPTIONS = ['Asian', 'Black / African American', 'Hispanic / Latino', 'Middle Eastern', 'South Asian', 'White / Caucasian', 'Mixed / Other']
-const WARDROBE_OPTIONS = ['casual streetwear', 'athletic / sportswear', 'business casual', 'cozy loungewear', 'trendy fashion', 'classic / timeless']
-const ENERGY_OPTIONS: Array<{ id: CreatorAttributes['energyLevel']; label: string; hint: string }> = [
-  { id: 'low',    label: 'Calm',     hint: 'Trustworthy, measured delivery' },
-  { id: 'medium', label: 'Engaging', hint: 'Relatable, natural enthusiasm' },
-  { id: 'high',   label: 'Hype',     hint: 'High-energy, scroll-stopper' },
-]
+// Creator attribute chip options now live in CreatorInput.tsx (shared across
+// all three modes) — the wizard's Cast step delegates rendering to it.
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -854,6 +846,9 @@ export default function CommercialStudio() {
       const composed = composeRenderPrompt(brief)
       const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
       const label = sceneLabel ?? SCENE_LABELS[currentSceneIdx]
+      // Bring Your Own Creator: the resolved photo (as-is or transformed)
+      // becomes Veo's identity reference, taking priority over the product photo.
+      const creatorImageUrl = brief.creator.transformedImageUrl || brief.creator.seedImages?.[0]?.url || undefined
       const { requestId, directorPrompt } = await startGeneration({
         productImageUrl,
         productDescription: brief.product.description ?? descInput,
@@ -865,6 +860,8 @@ export default function CommercialStudio() {
         brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
         brandCta: savedBrand?.cta_preferences ?? undefined,
         sceneLabel: label,
+        creatorImageUrl,
+        creatorConsentAt: creatorImageUrl ? brief.creator.likenessConsentAt : undefined,
       })
       setDirectorNote(directorPrompt)
 
@@ -1046,7 +1043,35 @@ export default function CommercialStudio() {
 
   // Step 2: Creator
   function renderCreator() {
-    const attrs = brief.creator.attributes
+    const creatorValue: CreatorInputValue = {
+      mode: brief.creator.mode,
+      attributes: brief.creator.attributes ?? EMPTY_CREATOR.attributes,
+      savedCreatorId: brief.creator.savedCreatorId ?? '',
+      seedImages: (brief.creator.seedImages ?? []).map(a => a.url),
+      primarySeedImage: brief.creator.seedImages?.[0]?.url ?? '',
+      usagePath: brief.creator.usagePath ?? 'as_is',
+      transformInstruction: brief.creator.transformInstruction ?? '',
+      resolvedImageUrl: brief.creator.transformedImageUrl || (brief.creator.usagePath === 'as_is' ? brief.creator.seedImages?.[0]?.url ?? '' : ''),
+      consentAcknowledged: !!brief.creator.likenessConsentAt,
+      consentAt: brief.creator.likenessConsentAt,
+    }
+    const nowIso = new Date().toISOString()
+    function onCreatorChange(v: CreatorInputValue) {
+      patch({
+        creator: {
+          mode: v.mode,
+          attributes: v.attributes,
+          savedCreatorId: v.savedCreatorId || undefined,
+          seedImages: v.seedImages.map((url, i) => ({ id: `creator-seed-${i}`, url, kind: 'raw' as const, createdAt: nowIso })),
+          usagePath: v.usagePath,
+          transformInstruction: v.transformInstruction,
+          transformedImageUrl: v.usagePath === 'transform' ? v.resolvedImageUrl : undefined,
+          likenessConsentAt: v.consentAt,
+        },
+      })
+    }
+    const readyToAdvance = creatorValue.mode !== 'uploaded_seed' || isCreatorReady(creatorValue)
+
     return (
       <div className="space-y-6">
         <StepHeader title="Cast your creator" desc="Tell us who should star in your ad — or let AI choose." onBack={goBack} />
@@ -1055,115 +1080,13 @@ export default function CommercialStudio() {
           'Be specific and explicit about ethnicity and skin tone — e.g. “African American woman, deep brown skin.” Vague casting is the #1 cause of the AI rendering the wrong person.',
           'Set age range, hair, and wardrobe — the more concrete the description, the more consistent the result.',
           'Energy level and expression shape delivery: pick high energy for hooks, calm/warm for testimonials.',
-          'Save a creator you like in the Creator Studio so you can reuse the exact same person across campaigns.',
+          'Bringing your own creator? Upload 1–5 clear photos of the same person for the strongest identity match.',
         ]} />
 
-        <div className={`grid gap-3 ${savedCreators.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          {([
-            { mode: 'generated' as const,    label: 'Generate AI Creator', desc: 'AI builds from attributes' },
-            { mode: 'uploaded_seed' as const, label: 'Upload Seed Image',  desc: 'Use a reference photo' },
-            ...(savedCreators.length > 0 ? [{ mode: 'saved' as const, label: 'My Creators', desc: `${savedCreators.length} saved` }] : []),
-          ]).map(({ mode, label, desc }) => (
-            <button key={mode} type="button"
-              onClick={() => patch({ creator: { ...brief.creator, mode } })}
-              className={`rounded-2xl border p-4 text-left transition-all ${
-                brief.creator.mode === mode ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
-              }`}>
-              <p className="font-bold text-ink text-sm">{label}</p>
-              <p className="mt-1 text-xs text-ink-muted">{desc}</p>
-            </button>
-          ))}
-        </div>
-
-        {brief.creator.mode === 'generated' && (
-          <div className="space-y-5">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Gender</p>
-              <ChipGrid options={GENDER_OPTIONS.map(v => ({ id: v, label: v }))} value={attrs?.gender ?? ''} onChange={v => patch({ creator: { ...brief.creator, attributes: { ...attrs!, gender: v as string } } })} />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Age range</p>
-              <ChipGrid options={AGE_OPTIONS.map(v => ({ id: v, label: v }))} value={attrs?.ageRange ?? ''} onChange={v => patch({ creator: { ...brief.creator, attributes: { ...attrs!, ageRange: v as string } } })} />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Ethnicity</p>
-              <ChipGrid options={ETHNICITY_OPTIONS.map(v => ({ id: v, label: v }))} value={attrs?.ethnicity ?? ''} onChange={v => patch({ creator: { ...brief.creator, attributes: { ...attrs!, ethnicity: v as string } } })} />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">Wardrobe vibe</p>
-              <ChipGrid options={WARDROBE_OPTIONS.map(v => ({ id: v, label: v }))} value={attrs?.wardrobe ?? ''} onChange={v => patch({ creator: { ...brief.creator, attributes: { ...attrs!, wardrobe: v as string } } })} />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-semibold text-ink">On-camera energy</p>
-              <div className="grid grid-cols-3 gap-3">
-                {ENERGY_OPTIONS.map(opt => (
-                  <button key={opt.id} type="button"
-                    onClick={() => patch({ creator: { ...brief.creator, attributes: { ...attrs!, energyLevel: opt.id } } })}
-                    className={`rounded-xl border p-3 text-left transition-all ${
-                      attrs?.energyLevel === opt.id ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
-                    }`}>
-                    <p className="text-sm font-bold text-ink">{opt.label}</p>
-                    <p className="mt-0.5 text-[11px] text-ink-faint">{opt.hint}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {brief.creator.mode === 'uploaded_seed' && (
-          <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-6 text-center">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-void-700">
-              <Upload className="h-6 w-6 text-ink-faint" />
-            </div>
-            <p className="mt-3 text-sm font-semibold text-ink">Seed image upload</p>
-            <p className="mt-1 text-xs text-ink-muted">Coming soon — use AI creator for now.</p>
-          </div>
-        )}
-
-        {brief.creator.mode === 'saved' && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {savedCreators.map(c => {
-              const attrs = (c.attributes ?? {}) as Record<string, string>
-              const initials = c.name.split(' ').slice(0, 2).map((w: string) => w[0] ?? '').join('').toUpperCase() || '?'
-              const selected = brief.creator.savedCreatorId === c.id
-              return (
-                <button key={c.id} type="button"
-                  onClick={() => patch({ creator: {
-                    ...brief.creator,
-                    mode: 'saved',
-                    savedCreatorId: c.id,
-                    attributes: {
-                      gender: attrs.gender ?? '',
-                      ageRange: attrs.ageRange ?? '',
-                      ethnicity: attrs.ethnicity ?? '',
-                      bodyType: '',
-                      hair: attrs.hairStyle ?? '',
-                      wardrobe: attrs.wardrobe ?? '',
-                      expression: attrs.personality ?? '',
-                      energyLevel: (attrs.energyLevel as 'low' | 'medium' | 'high') ?? 'medium',
-                      cameraConfidence: attrs.cameraConfidence ?? '',
-                    },
-                  }})}
-                  className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition-all ${
-                    selected ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
-                  }`}>
-                  <div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl font-bold text-white" style={{ background: '#FF6B35' }}>
-                    {initials}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-bold text-ink">{c.name}</p>
-                    <p className="text-xs text-ink-muted">{attrs.creatorType ?? 'AI Creator'}</p>
-                  </div>
-                  {selected && <Check className="h-4 w-4 flex-shrink-0 text-fire-start" />}
-                </button>
-              )
-            })}
-          </div>
-        )}
+        <CreatorInput value={creatorValue} onChange={onCreatorChange} savedCreators={savedCreators} />
 
         <div className="flex flex-col gap-3">
-          <button onClick={goForward} className="btn-fire w-full">
+          <button onClick={goForward} disabled={!readyToAdvance} className="btn-fire w-full disabled:opacity-40">
             Next — Scene <ArrowRight className="h-4 w-4" />
           </button>
           <SkipButton onClick={skipWithDefaults} />

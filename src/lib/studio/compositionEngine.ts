@@ -122,7 +122,11 @@ export function assembleScenePrompt(brief: CreativeBrief, scene?: StoryboardScen
   const camera = (cameraIds.length ? cameraIds : ['slow_push'])
     .map(id => phraseFor(CAMERA_OPTIONS, id))
     .join(', then ')
-  const creator = brief.creator.mode === 'uploaded_seed'
+  // Detect "has a real photo" by the seed image itself, not just the mode
+  // label — a 'saved' creator selected from the library can also carry an
+  // uploaded photo (Task A), and should get the same "provided creator"
+  // treatment rather than a generic attribute description.
+  const creator = brief.creator.seedImages?.length
     ? 'the provided creator'
     : describeCreator(brief.creator.attributes)
 

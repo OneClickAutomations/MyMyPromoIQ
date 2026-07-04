@@ -34,6 +34,12 @@ export type GenerateInput = {
   sceneLabel?: string
   /** Spoken script line — Claude writes it verbatim into the Veo prompt with delivery direction. */
   script?: string
+  /** "Bring Your Own Creator" — an uploaded/transformed creator photo. Takes
+   *  priority over productImageUrl as Veo's single identity reference. */
+  creatorImageUrl?: string
+  /** ISO timestamp of the likeness-use consent acknowledgment. Required
+   *  server-side whenever creatorImageUrl is set. */
+  creatorConsentAt?: string
 }
 
 export type GenerateResponse = {

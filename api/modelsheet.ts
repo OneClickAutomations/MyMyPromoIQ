@@ -34,6 +34,19 @@ const GEMINI_MODEL_CANDIDATES = process.env.GEMINI_IMAGE_MODEL
   ? [process.env.GEMINI_IMAGE_MODEL]
   : ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview']
 
+/**
+ * Scope an edit instruction to the SUPPLIED reference image, never a
+ * from-scratch regeneration. This is the enforcement point for identity
+ * preservation — critical for "Transform this person" (Task A): the person's
+ * face/identity must survive the edit, only the directed attribute changes.
+ */
+function buildIdentityLockedEditPrompt(subjectType: 'product' | 'character', instruction: string): string {
+  const lock = subjectType === 'character'
+    ? 'Keep the SAME person — identical face, identity, skin tone, and features — change only what the instruction asks.'
+    : 'Keep the SAME product — identical shape, materials, label, and proportions — change only what the instruction asks.'
+  return `${instruction.trim()}. ${lock} Photorealistic, high detail, sharp focus, no added text or watermark.`
+}
+
 function buildPrompt(subjectType: 'product' | 'character', subject: string): string {
   if (subjectType === 'character') {
     return `A professional character turnaround model sheet of ${subject}. Strict 2x3 grid layout (2 rows, 3 columns) showing the SAME person as a multi-angle reference turnaround. The six cells, in order, are distinct views: (1) front view, (2) three-quarter front view, (3) left profile side view, (4) three-quarter back view, (5) full back view, (6) front close-up of the face. The identity must stay PERFECTLY consistent across all six cells — identical face, skin tone, facial features, hairstyle, body type, age, and wardrobe, lit identically in every cell. Neutral relaxed A-pose, full body where shown, neutral calm expression. Clean seamless light-grey studio background, soft even key lighting, photorealistic natural skin texture with visible pores (never plastic, waxy, or airbrushed). High-definition photography, sharp focus, accurate color, orthographic projection with minimal perspective distortion, each cell evenly spaced and centered. No text, no labels, no callouts, no measurement lines, no watermark, no logos. Consistent, production-ready character model sheet.`
@@ -191,10 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (mode === 'edit') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Pick or write an edit instruction.' })
-      const lock = type === 'character'
-        ? 'Keep the SAME person — identical face, identity, skin tone, and features — change only what the instruction asks.'
-        : 'Keep the SAME product — identical shape, materials, label, and proportions — change only what the instruction asks.'
-      const prompt = `${editPrompt.trim()}. ${lock} Photorealistic, high detail, sharp focus, no added text or watermark.`
+      const prompt = buildIdentityLockedEditPrompt(type, editPrompt)
       const imageDataUrl = await generateImage(apiKey, prompt, img, 0.5)
       return res.status(200).json({ imageDataUrl, prompt })
     }
