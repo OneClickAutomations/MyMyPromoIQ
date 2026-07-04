@@ -23,9 +23,29 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 
-// gemini-2.0-flash-preview-image-generation was a short-lived preview alias.
-// Override with GEMINI_IMAGE_MODEL if a newer stable model is released.
-const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-exp'
+// Model candidates for native image output via generateContent, best-first.
+// gemini-2.0-flash-preview-image-generation (the previous default here) was a
+// 2.0-preview model and has since been retired by Google — that retirement is
+// exactly what produced the 404 this fixes. Rather than hardcode a single name
+// again (the same mistake), try the current models in order and only fall
+// through to the next on a 404 (model not found/retired for this key/tier).
+// Set GEMINI_IMAGE_MODEL to pin one and skip the list.
+const GEMINI_MODEL_CANDIDATES = process.env.GEMINI_IMAGE_MODEL
+  ? [process.env.GEMINI_IMAGE_MODEL]
+  : ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview']
+
+/**
+ * Scope an edit instruction to the SUPPLIED reference image, never a
+ * from-scratch regeneration. This is the enforcement point for identity
+ * preservation — critical for "Transform this person" (Task A): the person's
+ * face/identity must survive the edit, only the directed attribute changes.
+ */
+function buildIdentityLockedEditPrompt(subjectType: 'product' | 'character', instruction: string): string {
+  const lock = subjectType === 'character'
+    ? 'Keep the SAME person — identical face, identity, skin tone, and features — change only what the instruction asks.'
+    : 'Keep the SAME product — identical shape, materials, label, and proportions — change only what the instruction asks.'
+  return `${instruction.trim()}. ${lock} Photorealistic, high detail, sharp focus, no added text or watermark.`
+}
 
 function buildPrompt(subjectType: 'product' | 'character', subject: string): string {
   if (subjectType === 'character') {
@@ -41,8 +61,15 @@ async function resolveImage(imageUrl?: string, imageBase64?: string, mimeType?: 
     return { data, mime }
   }
   if (imageUrl) {
-    const r = await fetch(imageUrl)
-    if (!r.ok) throw new Error(`Could not fetch reference image (${r.status}).`)
+    // Meta CDN (fbcdn.net, cdninstagram.com) blocks bare server fetches with 403.
+    const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
+    const fetchHeaders: Record<string, string> = {
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
+    }
+    if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
+    const r = await fetch(imageUrl, { headers: fetchHeaders })
+    if (!r.ok) throw new Error(`Could not fetch reference image (${r.status}). If this is a Meta/Facebook URL it may have expired — upload the image directly instead.`)
     const mime = r.headers.get('content-type') || 'image/jpeg'
     const data = Buffer.from(await r.arrayBuffer()).toString('base64')
     return { data, mime }
@@ -73,8 +100,11 @@ async function describeSubject(img: { data: string; mime: string }, subjectType:
 }
 
 /**
- * Call Gemini image generation with an optional inline reference image. Returns
- * the first image part as a data URL, or throws with the API's error detail.
+ * Call Gemini image generation with an optional inline reference image. Tries
+ * each candidate model in order — a 404 means that model is retired/unavailable
+ * for this key and we move to the next; any other failure (auth, quota, safety
+ * block) is real and surfaces immediately with the actual upstream detail, never
+ * a bare status code. Returns the first image part as a data URL.
  */
 async function generateImage(
   apiKey: string,
@@ -86,30 +116,63 @@ async function generateImage(
   if (ref) parts.push({ inline_data: { mime_type: ref.mime, data: ref.data } })
   parts.push({ text: prompt })
 
-  const geminiResp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: { temperature, responseModalities: ['IMAGE', 'TEXT'] },
-      }),
-    },
-  )
+  let lastNotFound = ''
+  for (const model of GEMINI_MODEL_CANDIDATES) {
+    const geminiResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { temperature, responseModalities: ['IMAGE', 'TEXT'] },
+        }),
+      },
+    )
 
-  if (!geminiResp.ok) {
-    const detail = await geminiResp.text().catch(() => '')
-    throw new Error(`Image generation failed (${geminiResp.status}): ${detail.slice(0, 240)}`)
+    if (geminiResp.status === 404) {
+      lastNotFound = model
+      console.warn(`[modelsheet] ${model} → 404 (retired or unavailable for this key), trying next`)
+      continue
+    }
+    if (!geminiResp.ok) {
+      const detail = await geminiResp.text().catch(() => '')
+      console.error(`[modelsheet] ${model} failed (${geminiResp.status}):`, detail.slice(0, 500))
+      throw new Error(`Couldn't generate the image (${model} returned ${geminiResp.status}). ${summarizeUpstreamError(detail)}`)
+    }
+
+    const data = (await geminiResp.json()) as any
+    const candidate = data?.candidates?.[0]
+    const outParts = candidate?.content?.parts ?? []
+    const imagePart = outParts.find((p: any) => p.inline_data?.data || p.inlineData?.data)
+    const out = imagePart?.inline_data?.data ?? imagePart?.inlineData?.data
+
+    if (!out) {
+      // Model responded 200 but produced no image — usually a safety/content
+      // block. Surface the REAL reason instead of a generic "no image" message.
+      const blockReason = data?.promptFeedback?.blockReason || candidate?.finishReason
+      console.error(`[modelsheet] ${model} returned no image. blockReason/finishReason: ${blockReason ?? 'none'}. Raw:`, JSON.stringify(data).slice(0, 500))
+      if (blockReason && blockReason !== 'STOP') {
+        throw new Error(`Couldn't generate the image — the reference photo or prompt was flagged (${blockReason}). Try a different photo.`)
+      }
+      throw new Error('Couldn\'t generate the image. Try a clearer reference photo or a more specific description.')
+    }
+
+    const outMime = imagePart?.inline_data?.mime_type ?? imagePart?.inlineData?.mimeType ?? 'image/png'
+    return `data:${outMime};base64,${out}`
   }
 
-  const data = (await geminiResp.json()) as any
-  const outParts = data?.candidates?.[0]?.content?.parts ?? []
-  const imagePart = outParts.find((p: any) => p.inline_data?.data || p.inlineData?.data)
-  const out = imagePart?.inline_data?.data ?? imagePart?.inlineData?.data
-  if (!out) throw new Error('Image model returned no image. Try a clearer reference photo or a more specific prompt.')
-  const outMime = imagePart?.inline_data?.mime_type ?? imagePart?.inlineData?.mimeType ?? 'image/png'
-  return `data:${outMime};base64,${out}`
+  throw new Error(`No image model is available for this API key (tried: ${GEMINI_MODEL_CANDIDATES.join(', ')}; last: ${lastNotFound} 404). Verify GEMINI_API_KEY has image generation access at aistudio.google.com.`)
+}
+
+/** Turn a raw Gemini error body into one honest, actionable sentence. */
+function summarizeUpstreamError(detail: string): string {
+  try {
+    const parsed = JSON.parse(detail)
+    const msg = parsed?.error?.message
+    if (msg) return String(msg).slice(0, 200)
+  } catch { /* not JSON */ }
+  return 'Try again in a moment.'
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -141,10 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (mode === 'edit') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Pick or write an edit instruction.' })
-      const lock = type === 'character'
-        ? 'Keep the SAME person — identical face, identity, skin tone, and features — change only what the instruction asks.'
-        : 'Keep the SAME product — identical shape, materials, label, and proportions — change only what the instruction asks.'
-      const prompt = `${editPrompt.trim()}. ${lock} Photorealistic, high detail, sharp focus, no added text or watermark.`
+      const prompt = buildIdentityLockedEditPrompt(type, editPrompt)
       const imageDataUrl = await generateImage(apiKey, prompt, img, 0.5)
       return res.status(200).json({ imageDataUrl, prompt })
     }
