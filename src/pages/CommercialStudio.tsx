@@ -2,10 +2,13 @@
  * CommercialStudio — Phase 1 wizard shell using the CreativeBrief canonical object.
  *
  * Route: /studio/new
- * 12 steps: Count → Style → Product → Creator → Scene → Camera → Environment →
- *           Lighting → Voice → Script → Storyboard → Director (generation)
+ * 11 steps: Count → Style → Product → Creator → Scene → Camera → Environment →
+ *           Lighting → Voice → Script → Storyboard (plan, review, generate all)
  * Count/Style/Product front-load the three questions a user answers before
- * generating even one video: how many, what look, and what's the asset.
+ * generating even one video: how many, what look, and what's the asset. The
+ * final Storyboard step shows every clip up front — editable, regeneratable —
+ * before a single render starts; "Generate All" fires the whole queue and every
+ * clip is presented together, not one scene at a time.
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -15,9 +18,13 @@ import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
+import StoryboardPlanner from '../components/StoryboardPlanner'
+import GenerationPanel from '../components/GenerationPanel'
+import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
+import type { StoryboardPlan, StoryboardClip } from '../lib/studio/storyboard'
 import {
-  ArrowRight, Bolt, Camera, Check, ChevronDown, ChevronRight, Download, Film, ImageIcon, Info, Layers,
-  Palette, PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
+  ArrowRight, Bolt, Camera, Check, ChevronRight, Download, Film, ImageIcon, Info, Layers,
+  PlayIcon, RefreshCw, Spark, Upload, Users, Wand, X,
 } from '../components/icons'
 import {
   startGeneration,
@@ -27,7 +34,6 @@ import {
   dataUrlToBlob,
   saveBrief,
   getBrief,
-  runDirector,
   listCreators,
   listProducts,
   getBrand,
@@ -36,7 +42,7 @@ import {
   muxVideoAudio,
   stitchVideos,
   generateModelSheet,
-  type DirectorLogEntry,
+  planStoryboard,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
@@ -57,7 +63,7 @@ import {
   PRODUCT_ACTION_OPTIONS,
   applyStylePreset,
 } from '../lib/studio/presets'
-import { composeRenderPrompt, detectConflicts } from '../lib/studio/compositionEngine'
+import { composeRenderPrompt } from '../lib/studio/compositionEngine'
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -73,17 +79,10 @@ const STEPS = [
   { num: 9,  key: 'voice',       label: 'Voice',        required: false, icon: Bolt },
   { num: 10, key: 'script',      label: 'Script',       required: false, icon: Wand },
   { num: 11, key: 'storyboard',  label: 'Storyboard',   required: true,  icon: PlayIcon },
-  { num: 12, key: 'director',    label: 'Director',     required: true,  icon: Spark },
 ] as const
 
 // Creator attribute chip options now live in CreatorInput.tsx (shared across
 // all three modes) — the wizard's Cast step delegates rendering to it.
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function videoThumbSrc(url: string): string {
-  return /#t=/.test(url) ? url : `${url}#t=0.1`
-}
 
 // ── Chip selector ─────────────────────────────────────────────────────────────
 
@@ -176,10 +175,13 @@ function BestResults({ title = 'For best results', tips }: { title?: string; tip
 
 // ── Turnaround model-sheet generator (Gemini) ──────────────────────────────────
 // Turns one reference photo into a 2x3 multi-angle sheet for consistency review.
-function ModelSheetGenerator({ imageUrl, subjectType, subjectHint }: {
+function ModelSheetGenerator({ imageUrl, subjectType, subjectHint, onGenerated }: {
   imageUrl: string
   subjectType: 'product' | 'character'
   subjectHint?: string
+  /** Called with the sheet's data URL once generated, so the caller can persist
+   *  it (e.g. onto the brief) and use it as a vision reference at generation time. */
+  onGenerated?: (sheetDataUrl: string) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [sheet, setSheet] = useState<string | null>(null)
@@ -191,6 +193,7 @@ function ModelSheetGenerator({ imageUrl, subjectType, subjectHint }: {
     try {
       const { sheetDataUrl } = await generateModelSheet({ imageUrl, subjectType, subjectHint })
       setSheet(sheetDataUrl)
+      onGenerated?.(sheetDataUrl)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not generate the turnaround.')
     } finally {
@@ -233,54 +236,6 @@ function ModelSheetGenerator({ imageUrl, subjectType, subjectHint }: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Circular generation progress indicator ─────────────────────────────────────
-function CircularProgress({ pct, label }: { pct: number; label: string }) {
-  const r = 42
-  const circ = 2 * Math.PI * r
-  const offset = circ * (1 - Math.min(100, Math.max(0, pct)) / 100)
-  const isDone = pct >= 100
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="relative flex items-center justify-center" style={{ width: 120, height: 120 }}>
-        {/* Outer glow ring — pulses while in progress */}
-        {!isDone && (
-          <div
-            className="pointer-events-none absolute inset-0 rounded-full animate-pulse"
-            style={{ boxShadow: `0 0 32px 6px rgba(255,107,53,${0.15 + pct / 500})` }}
-          />
-        )}
-        <svg width="120" height="120" viewBox="0 0 100 100" className="-rotate-90">
-          <defs>
-            <linearGradient id="cg-fire" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#FF6B35" />
-              <stop offset="100%" stopColor="#FFD700" />
-            </linearGradient>
-          </defs>
-          {/* Track */}
-          <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
-          {/* Progress arc */}
-          <circle
-            cx="50" cy="50" r={r} fill="none"
-            stroke={isDone ? '#4ade80' : 'url(#cg-fire)'}
-            strokeWidth="7"
-            strokeLinecap="round"
-            strokeDasharray={circ}
-            strokeDashoffset={offset}
-            style={{ transition: 'stroke-dashoffset 0.9s ease, stroke 0.4s ease' }}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-          <span className="text-2xl font-bold tabular-nums text-ink">{Math.round(pct)}%</span>
-          <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-faint">
-            {isDone ? 'Done' : pct < 75 ? 'Planning' : 'Rendering'}
-          </span>
-        </div>
-      </div>
-      <p className="text-xs font-semibold text-fire-start/90">{label}</p>
     </div>
   )
 }
@@ -371,7 +326,6 @@ function PresetCard({
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type InputMethod = 'upload' | 'camera' | 'url' | 'product-url'
-type DirectorPhase = 'idle' | 'directing' | 'generating' | 'done' | 'error'
 
 const STYLE_IMAGES: Record<string, string> = {
   ugc_testimonial:   '/assets/fmt-testimonial.png',
@@ -406,20 +360,6 @@ export default function CommercialStudio() {
   const [step1Error, setStep1Error]       = useState('')
   const [cameraOpen, setCameraOpen]       = useState(false)
 
-  // ── Director feed state
-  const [directorPhase, setDirectorPhase]       = useState<DirectorPhase>('idle')
-  const [directorLog, setDirectorLog]           = useState<DirectorLogEntry[]>([])
-  const [visibleLogCount, setVisibleLogCount]   = useState(0)
-  const [directorNote, setDirectorNote]         = useState('')
-  const [expandedStages, setExpandedStages]     = useState<Set<string>>(new Set())
-  const [videoUrl, setVideoUrl]                 = useState<string | null>(null)
-  const [genError, setGenError]                 = useState('')
-  const [voiceoverUrl, setVoiceoverUrl]         = useState<string | null>(null)
-  const [voiceoverError, setVoiceoverError]     = useState('')
-  const [muxedUrl, setMuxedUrl]                 = useState<string | null>(null)
-  const [muxing, setMuxing]                     = useState(false)
-  const [muxError, setMuxError]                 = useState('')
-
   // ── Voiceover (ElevenLabs) state
   const [voices, setVoices]               = useState<ElevenVoice[]>([])
   const [voicesLoading, setVoicesLoading] = useState(false)
@@ -436,22 +376,21 @@ export default function CommercialStudio() {
   const [clonedFrom, setClonedFrom] = useState<{ name: string; notes: string } | null>(null)
 
   // ── Multi-scene state ──────────────────────────────────────────────────────
-  type SceneResult = { label: string; videoUrl: string; voiceoverUrl: string | null }
   const SCENE_LABELS = ['Hook', 'Problem / Agitation', 'Solution', 'Social Proof', 'Call to Action', 'Outro'] as const
-  const [completedScenes, setCompletedScenes] = useState<SceneResult[]>([])
-  const [currentSceneIdx, setCurrentSceneIdx] = useState(0)
   // "How many videos?" (Step 1) — 1 renders a single video; 2-6 builds that many
   // beats into a full commercial. Seeded from the dashboard entry point (?mode=).
   const [desiredVideoCount, setDesiredVideoCount] = useState(1)
   const activeSceneLabels = SCENE_LABELS.slice(0, desiredVideoCount)
-  const adMode: 'quick' | 'full' = desiredVideoCount <= 1 ? 'quick' : 'full'
-  const [genProgress, setGenProgress] = useState(0)
-  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Stitch state
-  const [stitching, setStitching] = useState(false)
-  const [stitchedUrl, setStitchedUrl] = useState<string | null>(null)
-  const [stitchError, setStitchError] = useState('')
+  // ── Storyboard plan → Generate All (replaces the old one-scene-at-a-time flow)
+  const [wizardPhase, setWizardPhase] = useState<'idle' | 'planning' | 'plan' | 'rendering' | 'error'>('idle')
+  const [wizardPlan, setWizardPlan] = useState<StoryboardPlan | null>(null)
+  const [wizardPlanError, setWizardPlanError] = useState('')
+  const [wizardClipCountBusy, setWizardClipCountBusy] = useState(false)
+  const [wizardRegenOrder, setWizardRegenOrder] = useState<number | null>(null)
+  const wizardQueue = useGenerationQueue(2, 1)
+  const [wizardAssembling, setWizardAssembling] = useState(false)
+  const [wizardAssembledUrl, setWizardAssembledUrl] = useState<string | null>(null)
 
   // ── Draft save toast
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
@@ -640,16 +579,6 @@ export default function CommercialStudio() {
     if (stepNum === 9) loadVoices()
   }, [stepNum, loadVoices])
 
-  // Auto-combine the rendered scene with its voiceover the moment both are ready,
-  // so the finished clip actually plays with sound — no manual "combine" click
-  // (that extra step was why generated videos seemed silent). The guards make this
-  // fire exactly once per scene.
-  useEffect(() => {
-    if (directorPhase === 'done' && videoUrl && voiceoverUrl && !muxedUrl && !muxing) {
-      handleMux()
-    }
-  }, [directorPhase, videoUrl, voiceoverUrl, muxedUrl, muxing]) // eslint-disable-line react-hooks/exhaustive-deps
-
   function previewVoice(v: ElevenVoice) {
     if (!v.previewUrl) return
     // Toggle off if the same preview is playing.
@@ -665,20 +594,6 @@ export default function CommercialStudio() {
     audio.play().then(() => setPreviewingVoiceId(v.voiceId)).catch(() => setPreviewingVoiceId(null))
   }
 
-  async function handleMux() {
-    if (!videoUrl || !voiceoverUrl || muxing) return
-    setMuxing(true)
-    setMuxError('')
-    try {
-      const { videoDataUrl } = await muxVideoAudio({ videoUrl, audioBase64: voiceoverUrl })
-      setMuxedUrl(videoDataUrl)
-    } catch (err) {
-      setMuxError(err instanceof Error ? err.message : 'Could not combine audio and video.')
-    } finally {
-      setMuxing(false)
-    }
-  }
-
   // ── Navigation helpers ────────────────────────────────────────────────────
 
   function goBack() {
@@ -686,7 +601,7 @@ export default function CommercialStudio() {
   }
 
   function goForward() {
-    setStepNum(n => Math.min(12, n + 1))
+    setStepNum(n => Math.min(11, n + 1))
   }
 
   // Skip optional step: apply preset defaults then advance
@@ -786,157 +701,135 @@ export default function CommercialStudio() {
     patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description } })
   }
 
-  // ── Director feed / generation ────────────────────────────────────────────
+  // ── Storyboard plan → Generate All ────────────────────────────────────────
+  // Replaces the old one-scene-at-a-time director feed: the full storyboard is
+  // planned and shown up front, every clip is editable/regeneratable, and
+  // "Generate All" fires the whole queue at once instead of a click-per-scene.
 
-  // Stage → percentage milestones (directing phase)
-  const STAGE_PROGRESS: Record<string, number> = {
-    analyzing: 12, casting: 28, scripting: 48, storyboarding: 68,
-  }
-
-  async function handleGenerate(sceneLabel?: string) {
-    if (!productImageUrl) return
-    setDirectorPhase('directing')
-    setDirectorLog([])
-    setVisibleLogCount(0)
-    setExpandedStages(new Set())
-    setVideoUrl(null)
-    setGenError('')
-    setVoiceoverUrl(null)
-    setVoiceoverError('')
-    setMuxedUrl(null)
-    setMuxError('')
-    setGenProgress(0)
-    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
-
-    // Kick off the voiceover in parallel — it's independent of the video render,
-    // so we don't make the user wait on it sequentially.
-    const scriptText = brief.script.editedText || brief.script.generatedText || ''
-    let currentVoiceoverUrl: string | null = null
-    if (scriptText.trim() && brief.voice.voiceId) {
-      generateVoiceover({ text: scriptText, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
-        .then(r => { currentVoiceoverUrl = r.audioDataUrl; setVoiceoverUrl(r.audioDataUrl) })
-        .catch(e => setVoiceoverError(e instanceof Error ? e.message : 'Voiceover failed.'))
-    }
-
+  async function runWizardPlan(clipCount?: number) {
+    setWizardPhase('planning')
+    setWizardPlanError('')
     try {
-      // 1. Run director commentary
-      const { log } = await runDirector({
+      const { plan } = await planStoryboard({
         productName: brief.product.productName,
         description: brief.product.description ?? descInput,
-        style: brief.style.commercialStyle,
-        creatorMode: brief.creator.mode,
-        energyLevel: brief.creator.attributes?.energyLevel,
-      })
-
-      // Animate log entries in, one per second, updating progress circle
-      setDirectorLog(log)
-      for (let i = 0; i < log.length; i++) {
-        await new Promise(r => setTimeout(r, 900))
-        setVisibleLogCount(i + 1)
-        const stage = log[i]?.stage as string | undefined
-        if (stage && STAGE_PROGRESS[stage] !== undefined) {
-          setGenProgress(STAGE_PROGRESS[stage])
-        }
-      }
-
-      // 2. Transition to rendering stage — start time-based creep 75% → 95%
-      setDirectorPhase('generating')
-      setGenProgress(75)
-      let crept = 75
-      progressTimerRef.current = setInterval(() => {
-        crept = Math.min(95, crept + (95 - crept) * 0.04)
-        setGenProgress(crept)
-      }, 2_000)
-
-      // 3. Submit to Veo 3 with scene-specific focus when provided.
-      const composed = composeRenderPrompt(brief)
-      const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
-      const label = sceneLabel ?? SCENE_LABELS[currentSceneIdx]
-      // Bring Your Own Creator: the resolved photo (as-is or transformed)
-      // becomes Veo's identity reference, taking priority over the product photo.
-      const creatorImageUrl = brief.creator.transformedImageUrl || brief.creator.seedImages?.[0]?.url || undefined
-      const { requestId, directorPrompt } = await startGeneration({
-        productImageUrl,
-        productDescription: brief.product.description ?? descInput,
         style: brief.style.commercialStyle || 'testimonial',
-        quality: 'turbo',
-        composedPrompt,
-        negativePrompt: composed.negativePrompt,
+        clipCount: clipCount ?? desiredVideoCount,
+        referenceBeats: [...activeSceneLabels],
         brandVoice: savedBrand?.brand_voice ?? undefined,
-        brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
-        brandCta: savedBrand?.cta_preferences ?? undefined,
-        sceneLabel: label,
-        creatorImageUrl,
-        creatorConsentAt: creatorImageUrl ? brief.creator.likenessConsentAt : undefined,
+        cta: savedBrand?.cta_preferences ?? undefined,
       })
-      setDirectorNote(directorPrompt)
-
-      setDirectorLog(prev => [...prev, {
-        timestamp: new Date().toISOString(),
-        stage: 'rendering',
-        message: directorPrompt || 'Submitting to the render engine — stand by.',
-      }])
-      setVisibleLogCount(prev => prev + 1)
-
-      // 4. Poll for completion
-      const final: StatusResponse = await pollUntilDone(requestId, () => {}, {
-        intervalMs: 5_000,
-        timeoutMs: 10 * 60 * 1_000,
-      })
-
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
-
-      if (final.status === 'completed' && final.videoUrl) {
-        setGenProgress(100)
-        setVideoUrl(final.videoUrl)
-        setDirectorPhase('done')
-        patch({ status: 'complete', render: { ...brief.render, outputUrl: final.videoUrl, statusLog: [] } })
-        // Save this scene to the completed list
-        setCompletedScenes(prev => [...prev, {
-          label: label,
-          videoUrl: final.videoUrl!,
-          voiceoverUrl: currentVoiceoverUrl,
-        }])
-      } else {
-        setGenProgress(0)
-        const msg = final.raw === 'timeout' ? 'Render timed out — try again.' : 'Render failed. Try a different style or image.'
-        setGenError(msg)
-        setDirectorPhase('error')
-      }
-    } catch (err) {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
-      setGenProgress(0)
-      setGenError(err instanceof Error ? err.message : 'Something went wrong.')
-      setDirectorPhase('error')
+      setWizardPlan(plan)
+      setWizardPhase('plan')
+    } catch (e) {
+      setWizardPlanError(e instanceof Error ? e.message : 'Could not plan the storyboard.')
+      setWizardPhase('error')
     }
   }
 
-  function handleNextScene() {
-    const next = currentSceneIdx + 1
-    setCurrentSceneIdx(next)
-    setVideoUrl(null)
-    setVoiceoverUrl(null)
-    setMuxedUrl(null)
-    setMuxError('')
-    setDirectorPhase('idle')
-    setGenProgress(0)
-    handleGenerate(SCENE_LABELS[next])
+  async function changeWizardClipCount(n: number) {
+    setWizardClipCountBusy(true)
+    try { await runWizardPlan(n) } finally { setWizardClipCountBusy(false) }
   }
 
-  async function handleStitch() {
-    const urls = completedScenes.map(s => s.videoUrl)
-    if (urls.length < 2) return
-    setStitching(true)
-    setStitchError('')
+  async function regenWizardClip(clip: StoryboardClip) {
+    if (!wizardPlan) return
+    setWizardRegenOrder(clip.order)
+    try {
+      const { plan: one } = await planStoryboard({
+        productName: brief.product.productName,
+        description: brief.product.description ?? descInput,
+        style: brief.style.commercialStyle || 'testimonial',
+        clipCount: 1,
+        referenceBeats: [clip.beat],
+        brandVoice: savedBrand?.brand_voice ?? undefined,
+        cta: savedBrand?.cta_preferences ?? undefined,
+      })
+      const fresh = one.clips[0]
+      if (fresh) {
+        const merged: StoryboardClip = { ...fresh, id: clip.id, order: clip.order, durationSeconds: clip.durationSeconds, beat: clip.beat, locked: false }
+        setWizardPlan({ ...wizardPlan, clips: wizardPlan.clips.map(c => (c.id === clip.id ? merged : c)) })
+      }
+    } catch { /* leave clip as-is */ }
+    finally { setWizardRegenOrder(null) }
+  }
+
+  // Turn one storyboard clip into a hosted video URL (throws on failure so the
+  // queue's retry logic can catch it). Layers a per-clip ElevenLabs voiceover
+  // on top when a voice was picked, falling back to the silent/native-audio
+  // clip if voiceover or mux fails.
+  async function wizardGenerateOne(clip: StoryboardClip): Promise<string> {
+    if (!productImageUrl) throw new Error('no product image')
+    const composed = composeRenderPrompt(brief)
+    const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
+    const creatorImageUrl = brief.creator.transformedImageUrl || brief.creator.seedImages?.[0]?.url || undefined
+    const { requestId } = await startGeneration({
+      productImageUrl,
+      productDescription: brief.product.description ?? descInput,
+      style: brief.style.commercialStyle || 'testimonial',
+      quality: 'turbo',
+      composedPrompt,
+      negativePrompt: composed.negativePrompt,
+      brandVoice: savedBrand?.brand_voice ?? undefined,
+      brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
+      brandCta: savedBrand?.cta_preferences ?? undefined,
+      sceneLabel: clip.beat,
+      script: clip.dialogue,
+      creatorImageUrl,
+      creatorConsentAt: creatorImageUrl ? brief.creator.likenessConsentAt : undefined,
+      // Product consistency: prefer the 6-angle turnaround as Claude's vision
+      // reference when one exists; the server falls back to productImageUrl otherwise.
+      productReferenceImageUrl: brief.product.turnaroundImageUrl || undefined,
+    })
+    const final: StatusResponse = await pollUntilDone(requestId, () => {}, {
+      intervalMs: 5_000,
+      timeoutMs: 10 * 60 * 1_000,
+    })
+    if (final.status !== 'completed' || !final.videoUrl) {
+      throw new Error(final.raw === 'timeout' ? 'Render timed out — try again.' : 'Render failed.')
+    }
+
+    if (!brief.voice.voiceId || !clip.dialogue.trim()) return final.videoUrl
+    try {
+      const { audioDataUrl } = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+      const { videoDataUrl } = await muxVideoAudio({ videoUrl: final.videoUrl, audioBase64: audioDataUrl })
+      return videoDataUrl
+    } catch {
+      // Voiceover/mux is a nice-to-have — never fail the clip over it.
+      return final.videoUrl
+    }
+  }
+
+  function generateAllClips(clips: StoryboardClip[]) {
+    setWizardAssembledUrl(null)
+    setWizardPhase('rendering')
+    void wizardQueue.run(clips, wizardGenerateOne)
+  }
+
+  function retryWizardClip(clipId: string) {
+    const clip = wizardPlan?.clips.find(c => c.id === clipId)
+    if (clip) void wizardQueue.retryOne(clip, wizardGenerateOne)
+  }
+
+  async function assembleWizardAd() {
+    const urls = wizardQueue.tiles.filter(t => t.status === 'complete' && t.videoUrl).map(t => t.videoUrl!)
+    if (urls.length < 1) return
+    setWizardAssembling(true)
     try {
       const { videoDataUrl } = await stitchVideos(urls)
-      setStitchedUrl(videoDataUrl)
-    } catch (e) {
-      setStitchError(e instanceof Error ? e.message : 'Stitch failed.')
-    } finally {
-      setStitching(false)
-    }
+      setWizardAssembledUrl(videoDataUrl)
+      patch({ status: 'complete', render: { ...brief.render, outputUrl: videoDataUrl, statusLog: [] } })
+    } catch { /* keep individual clips available */ }
+    finally { setWizardAssembling(false) }
   }
+
+  // Kick off planning the moment the user reaches the Storyboard step.
+  useEffect(() => {
+    if (stepNum === 11 && wizardPhase === 'idle' && productImageUrl) {
+      runWizardPlan()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepNum])
 
   // ── Left-rail stepper ─────────────────────────────────────────────────────
 
@@ -1070,9 +963,16 @@ export default function CommercialStudio() {
           <p className="rounded-xl border border-fire-start/20 bg-fire-start/5 px-4 py-3 text-sm text-fire-start">{step1Error}</p>
         )}
 
-        {/* Optional: turnaround model sheet for consistency (needs an image). */}
+        {/* Turnaround model sheet — also the vision reference Claude sees when
+            writing the director prompt, so the product's real color/material/
+            label/shape ground the description instead of being invented. */}
         {productImageUrl && (
-          <ModelSheetGenerator imageUrl={productImageUrl} subjectType="product" subjectHint={brief.product.productName || undefined} />
+          <ModelSheetGenerator
+            imageUrl={productImageUrl}
+            subjectType="product"
+            subjectHint={brief.product.productName || undefined}
+            onGenerated={sheetDataUrl => patch({ product: { ...brief.product, turnaroundImageUrl: sheetDataUrl } })}
+          />
         )}
 
         <button onClick={handleProductNext} disabled={!canAdvanceStep1 || uploadingImage} className="btn-fire w-full disabled:opacity-50">
@@ -1475,425 +1375,109 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 11: Storyboard review (composition engine preview)
-  function renderStoryboard() {
-    const payload = (() => {
-      try { return composeRenderPrompt(brief) } catch { return null }
-    })()
-    const conflicts = detectConflicts(brief)
-    const preset = brief.style.commercialStyle ? STYLE_PRESETS[brief.style.commercialStyle] : null
-
-    return (
-      <div className="space-y-6">
-        <StepHeader title="Storyboard preview" desc="Review the AI-composed shot list before generating." onBack={goBack} />
-
-        {/* Brief summary card */}
-        <div className="rounded-2xl border border-white/[0.08] bg-void-900/60 p-5 space-y-3">
-          {productPreview && (
-            <div className="flex items-center gap-3">
-              <img src={productPreview} alt="Product" className="h-14 w-14 flex-shrink-0 rounded-xl object-cover ring-1 ring-white/10" />
-              <div className="min-w-0">
-                <p className="font-semibold text-ink truncate">{brief.product.productName || 'Product'}</p>
-                <p className="text-xs text-ink-muted truncate mt-0.5">{brief.product.description ?? descInput}</p>
-              </div>
-            </div>
-          )}
-          {preset && (
-            <div className="flex items-center gap-2">
-              <span className="rounded-full border border-fire-start/30 bg-fire-start/[0.08] px-3 py-1 text-[11px] font-semibold text-fire-start">{preset.label}</span>
-              <span className="text-xs text-ink-faint">· {payload?.estimatedCredits ?? 0} est. credits</span>
-            </div>
-          )}
-        </div>
-
-        {/* Conflict warnings */}
-        {conflicts.length > 0 && (
-          <div className="space-y-2">
-            {conflicts.map((w, i) => (
-              <div key={i} className="flex items-start gap-2.5 rounded-xl border border-gold/20 bg-gold/[0.05] px-4 py-3">
-                <span className="text-gold text-sm">⚠</span>
-                <p className="text-sm text-ink-muted">{w.message}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Scene list */}
-        {payload && (
-          <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Scene breakdown</p>
-            {payload.scenes.map((s, i) => (
-              <div key={i} className="rounded-xl border border-white/[0.08] bg-void-800/60 p-4">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-xs font-bold uppercase tracking-wide text-fire-start">Scene {i + 1}</span>
-                  <span className="text-[10px] text-ink-faint">{s.durationSeconds}s · {s.cameraDirection}</span>
-                </div>
-                <p className="text-sm text-ink-muted leading-relaxed">{s.prompt}</p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button onClick={goForward} className="btn-fire w-full">
-          <Wand className="h-4 w-4" />
-          Approve & Generate →
-        </button>
-      </div>
-    )
-  }
-
-  // Step 12: Director feed (Phase 0.3)
-  const STAGE_LABELS: Record<string, string> = {
-    analyzing:    'Brief reviewed',
-    casting:      'Creator chosen',
-    scripting:    'Script written',
-    storyboarding:'Scenes planned',
-    rendering:    'Video rendered',
-  }
-
-  function renderDirector() {
-    const allStages = ['analyzing', 'casting', 'scripting', 'storyboarding', 'rendering']
-    const doneStages = directorLog.slice(0, visibleLogCount).map(e => e.stage)
-    const isGenerating = directorPhase === 'directing' || directorPhase === 'generating'
-    const currentLabel = SCENE_LABELS[currentSceneIdx] ?? `Scene ${currentSceneIdx + 1}`
-    const scenesDone = completedScenes.length
-    // Quick Create = a single video; Full Ad = build up to the chosen count.
-    const canAddMore = adMode === 'full' && scenesDone < activeSceneLabels.length
-    const canStitch = scenesDone >= 2
+  // Step 11: Storyboard — plan every clip up front, let the user edit/regenerate,
+  // then "Generate All" fires the whole queue and every clip lands together.
+  function renderStoryboardGenerate() {
+    const doneSeconds = wizardQueue.tiles.filter(t => t.status === 'complete').reduce((s, t) => s + t.durationSeconds, 0)
 
     return (
       <div className="space-y-6">
         <StepHeader
-          title={scenesDone === 0 ? (adMode === 'quick' ? 'Quick Create' : 'AI Director') : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${activeSceneLabels.length}`}
-          desc={isGenerating ? `Generating — ${currentLabel}` : scenesDone > 0 ? (adMode === 'full' ? 'Keep going or stitch your scenes into a full ad.' : 'Your video is ready below.') : 'Sit back — the director is working.'}
-          onBack={directorPhase === 'idle' ? goBack : undefined}
+          title="Storyboard"
+          desc={
+            wizardPhase === 'plan' ? 'Review, edit, or regenerate any clip — then generate the whole ad at once.'
+            : wizardPhase === 'rendering' ? 'The queue renders every clip in parallel and presents them together.'
+            : 'Every clip up front — editable, regeneratable — before a single render starts.'
+          }
+          onBack={wizardPhase === 'idle' || wizardPhase === 'planning' ? goBack : undefined}
         />
 
-        {/* ── Ad structure — the chosen number of beats that make the commercial ─ */}
-        {adMode === 'full' && (
-        <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-3.5">
-          <div className="mb-2.5 flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-faint">Ad structure</p>
-            <span className="text-[10px] text-ink-faint">{scenesDone}/{activeSceneLabels.length} beats</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {activeSceneLabels.map((label, i) => {
-              const done = i < scenesDone
-              const current = i === scenesDone
-              return (
-                <span key={label}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors ${
-                    done ? 'bg-emerald-500/15 text-emerald-300'
-                    : current ? 'bg-fire-start/15 text-fire-start ring-1 ring-fire-start/30'
-                    : 'bg-void-700/40 text-ink-faint'
-                  }`}>
-                  {done ? <Check className="h-3 w-3" /> : <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-black/20 text-[8px]">{i + 1}</span>}
-                  {label}
-                </span>
-              )
-            })}
-          </div>
-        </div>
-        )}
-
-        {/* ── Completed scenes gallery ──────────────────────────────────────── */}
-        {completedScenes.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-ink-faint">Completed scenes</p>
-            <div className="grid grid-cols-3 gap-2">
-              {completedScenes.map((sc, i) => (
-                <div key={i} className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-void-900">
-                  <video
-                    src={videoThumbSrc(sc.videoUrl)}
-                    muted playsInline preload="metadata"
-                    className="aspect-[9/16] w-full object-cover"
-                    onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play()}
-                    onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
-                    <p className="truncate text-[9px] font-bold text-white/90">{sc.label}</p>
-                  </div>
-                  <div className="absolute right-1.5 top-1.5">
-                    <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  </div>
-                </div>
-              ))}
-              {/* Empty slot placeholders — labeled with the upcoming scene beat (full mode) */}
-              {adMode === 'full' && activeSceneLabels.slice(completedScenes.length).map((label, i) => (
-                <div key={`empty-${i}`} className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-white/[0.08] bg-void-900/30 p-2 text-center">
-                  <span className="grid h-5 w-5 place-items-center rounded-full bg-void-700/60 text-[10px] font-bold text-ink-faint">{completedScenes.length + i + 1}</span>
-                  <span className="text-[9px] font-semibold leading-tight text-ink-faint">{label}</span>
-                </div>
-              ))}
-            </div>
+        {wizardPhase === 'idle' && !productImageUrl && (
+          <div className="rounded-2xl border border-dashed border-white/12 p-10 text-center">
+            <Film className="mx-auto h-8 w-8 text-ink-faint/50" />
+            <p className="mt-3 text-sm text-ink-muted">Add a product image in Assets before planning the storyboard.</p>
           </div>
         )}
 
-        {/* ── Idle: start / next-scene button ──────────────────────────────── */}
-        {directorPhase === 'idle' && (
-          <div className="space-y-4">
-            {scenesDone === 0 && (
-              <div className="rounded-2xl border border-white/[0.07] bg-void-900/60 p-5">
-                <p className="text-sm text-ink-muted">The Composition Engine has assembled your brief. The AI Director will plan and render:</p>
-                <ul className="mt-3 space-y-1.5">
-                  {allStages.map(s => (
-                    <li key={s} className="flex items-center gap-2.5 text-sm text-ink-muted">
-                      <span className="h-1.5 w-1.5 rounded-full bg-fire-start/40" />
-                      {STAGE_LABELS[s]}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-3 text-xs text-ink-faint">{adMode === 'full' ? `You'll generate ${desiredVideoCount} scenes and stitch them into one complete ad.` : 'Quick Create renders a single video in your chosen format.'}</p>
-              </div>
-            )}
-            {savedBrand && scenesDone === 0 && (
-              <div className="flex items-center gap-2 rounded-xl border border-fire-start/20 bg-fire-start/[0.06] px-4 py-2.5">
-                <Palette className="h-3.5 w-3.5 flex-shrink-0 text-fire-start" />
-                <p className="text-xs text-ink-muted">
-                  <span className="font-semibold text-fire-start">Brand Kit active</span>
-                  {savedBrand.brand_voice ? ` · ${savedBrand.brand_voice}` : ''}
-                  {savedBrand.cta_preferences ? ` · CTA: "${savedBrand.cta_preferences}"` : ''}
-                </p>
-              </div>
-            )}
-            <button onClick={() => handleGenerate()} className="btn-fire w-full">
-              <Spark className="h-4 w-4" />
-              {scenesDone === 0 ? 'Start Generation' : `Generate Scene ${scenesDone + 1} — ${currentLabel}`}
+        {wizardPhase === 'planning' && (
+          <div className="rounded-2xl border border-white/10 bg-void-800/50 p-10 text-center">
+            <RefreshCw className="mx-auto h-6 w-6 animate-spin text-fire-start" />
+            <h2 className="mt-4 text-lg font-bold text-ink">Planning your commercial…</h2>
+            <p className="mt-1.5 text-sm text-ink-muted">Claude is breaking this into scroll-stopping clips, each timed to speak clean.</p>
+          </div>
+        )}
+
+        {wizardPhase === 'error' && (
+          <div className="rounded-2xl border border-fire-start/20 bg-fire-start/5 p-5">
+            <p className="text-sm font-semibold text-fire-start">Could not plan the storyboard</p>
+            <p className="mt-1 text-sm text-ink-muted">{wizardPlanError}</p>
+            <button onClick={() => runWizardPlan()} className="btn-fire mt-4 py-2.5 px-5 text-sm">
+              <RefreshCw className="h-4 w-4" /> Retry
             </button>
           </div>
         )}
 
-        {/* ── Active feed: circular progress + stage log ────────────────────── */}
-        {isGenerating && (
-          <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-void-900/60 shadow-card">
-            <div className="relative border-b border-white/[0.06] px-5 py-4">
-              <div className="pointer-events-none absolute inset-0 opacity-20" style={{ background: 'linear-gradient(90deg,rgba(255,107,53,0.25) 0%,transparent 60%)' }} />
-              <div className="flex items-center gap-2.5">
-                <span className="h-2 w-2 animate-pulse-dot rounded-full bg-fire-start" />
-                <p className="text-sm font-semibold text-ink">
-                  {directorPhase === 'directing' ? `AI Director — Planning` : `Rendering — ${currentLabel}`}
-                </p>
-              </div>
-            </div>
-
-            {/* Circular progress + stage list */}
-            <div className="flex flex-col items-center gap-6 p-6">
-              <CircularProgress
-                pct={genProgress}
-                label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${activeSceneLabels.length}`}
-              />
-
-              <div className="w-full space-y-2">
-                {allStages.map((stage, i) => {
-                  const logEntry = directorLog.find(e => e.stage === stage)
-                  const isVisible = doneStages.includes(stage as DirectorLogEntry['stage'])
-                  const isActive = !isVisible && (
-                    (directorPhase === 'directing' && i === doneStages.length) ||
-                    (directorPhase === 'generating' && stage === 'rendering')
-                  )
-                  const isExpanded = expandedStages.has(stage)
-                  const toggleExpand = () => setExpandedStages(prev => {
-                    const next = new Set(prev)
-                    next.has(stage) ? next.delete(stage) : next.add(stage)
-                    return next
-                  })
-                  return (
-                    <div key={stage} className={`overflow-hidden rounded-xl transition-colors duration-300 ${
-                      isVisible ? 'border border-white/[0.08] bg-void-800/50' :
-                      isActive  ? 'border border-fire-start/20 bg-fire-start/[0.04]' :
-                      'border border-transparent'
-                    }`}>
-                      <button
-                        type="button"
-                        onClick={isVisible && logEntry ? toggleExpand : undefined}
-                        className={`flex w-full items-center gap-3 px-3 py-2.5 ${isVisible && logEntry ? 'cursor-pointer' : 'cursor-default'}`}
-                      >
-                        {/* Status dot */}
-                        <div className={`relative grid h-5 w-5 flex-shrink-0 place-items-center rounded-full transition-all duration-500 ${
-                          isVisible ? 'bg-gradient-fire shadow-fire-soft' :
-                          isActive  ? 'bg-fire-start/15 ring-1 ring-fire-start/50' :
-                          'bg-void-600/50'
-                        }`}>
-                          {isVisible  ? <Check className="h-3 w-3 text-white" />
-                          : isActive  ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-                          : <span className="h-1 w-1 rounded-full bg-ink-faint/30" />}
-                        </div>
-                        {/* Label */}
-                        <span className={`flex-1 text-left text-xs font-semibold transition-colors duration-300 ${isVisible || isActive ? 'text-ink' : 'text-ink-faint/30'}`}>
-                          {STAGE_LABELS[stage]}
-                        </span>
-                        {/* Right side: pulse or chevron */}
-                        {isActive && <span className="animate-pulse text-[9px] font-semibold text-fire-start/70">In progress…</span>}
-                        {isVisible && logEntry && (
-                          <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-ink-faint transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
-                        )}
-                      </button>
-                      {/* Expandable detail */}
-                      <AnimatePresence>
-                        {isVisible && logEntry && isExpanded && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.25 }}
-                            className="overflow-hidden"
-                          >
-                            <p className="border-t border-white/[0.06] px-3 pb-3 pt-2 text-[11px] leading-relaxed text-ink-muted">
-                              {logEntry.message}
-                            </p>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
+        {wizardPhase === 'plan' && wizardPlan && (
+          <StoryboardPlanner
+            plan={wizardPlan}
+            onChange={setWizardPlan}
+            onGenerate={generateAllClips}
+            onRegenClip={regenWizardClip}
+            regeneratingOrder={wizardRegenOrder}
+            clipCountBusy={wizardClipCountBusy}
+            onClipCountChange={changeWizardClipCount}
+          />
         )}
 
-        {/* ── Error ─────────────────────────────────────────────────────────── */}
-        {directorPhase === 'error' && (
-          <div className="rounded-2xl border border-fire-start/20 bg-fire-start/5 p-5">
-            <p className="text-sm font-semibold text-fire-start">Generation failed</p>
-            <p className="mt-1 text-sm text-ink-muted">{genError}</p>
-            <div className="mt-4 flex gap-3">
-              <button onClick={() => handleGenerate(currentLabel)} className="btn-fire py-2.5 px-5 text-sm">
-                <RefreshCw className="h-4 w-4" /> Retry
-              </button>
-              <button onClick={goBack} className="btn-ghost py-2.5 px-5 text-sm">
-                Adjust brief
+        {wizardPhase === 'rendering' && (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-ink-muted">The queue keeps clips rendering and fires the next automatically.</p>
+              <button onClick={() => { wizardQueue.cancel(); setWizardPhase('plan') }} className="btn-ghost gap-1.5 px-3.5 py-2 text-sm">
+                <X className="h-4 w-4" /> Back to storyboard
               </button>
             </div>
-          </div>
-        )}
 
-        {/* ── Done — current scene result ───────────────────────────────────── */}
-        {directorPhase === 'done' && videoUrl && (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="space-y-4">
+            <GenerationPanel
+              tiles={wizardQueue.tiles}
+              running={wizardQueue.running}
+              completedCount={wizardQueue.completedCount}
+              onRetry={retryWizardClip}
+              onRemix={retryWizardClip}
+              onDownload={url => window.open(url, '_blank', 'noopener')}
+            />
 
-            {/* Scene header badge */}
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold text-emerald-400">
-                <Check className="h-3 w-3" /> Scene {scenesDone} complete
-              </span>
-              <span className="text-xs text-ink-faint">{completedScenes[completedScenes.length - 1]?.label}</span>
-            </div>
-
-            {/* Video preview */}
-            <div className="overflow-hidden rounded-2xl border border-gold/20 bg-void-900 shadow-card">
-              <video
-                src={videoThumbSrc(videoUrl)}
-                poster={productPreview || undefined}
-                controls autoPlay loop muted playsInline preload="metadata"
-                className="aspect-[9/16] max-h-72 w-full object-contain"
-              />
-              {directorNote && (
-                <div className="border-t border-white/[0.06] p-3">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-gold">✦ Director's note</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">{directorNote}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Per-scene voiceover */}
-            {voiceoverUrl && (
-              <div className="rounded-2xl border border-white/[0.08] bg-void-900 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-ink">Voiceover</p>
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
-                </div>
-                <audio src={voiceoverUrl} controls className="mt-3 w-full" />
-                {muxing
-                  ? <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-fire-start"><RefreshCw className="h-3 w-3 animate-spin" /> Adding the voiceover to your video…</p>
-                  : !muxedUrl && <p className="mt-1.5 text-[11px] text-ink-faint">Combining with your video automatically — or continue generating scenes and stitch them all at the end.</p>}
-              </div>
-            )}
-            {voiceoverError && <p className="text-xs text-amber-300">Voiceover: {voiceoverError}</p>}
-
-            {/* No voice was picked → the clip is silent. Tell the user why and how to fix it. */}
-            {!voiceoverUrl && !voiceoverError && (
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
-                <p className="text-sm font-semibold text-amber-200">This clip has no voiceover</p>
-                <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
-                  Pick a voice in the Voice step and add a script so your ad speaks. The video renders without sound until a voice is selected.
-                </p>
-              </div>
-            )}
-
-            {muxedUrl && (
-              <div className="overflow-hidden rounded-2xl border border-gold/30 bg-void-900">
-                <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
-                  <Check className="h-4 w-4 text-emerald-400" />
-                  <p className="text-sm font-semibold text-ink">Scene + voiceover combined</p>
-                </div>
-                <video src={muxedUrl} controls autoPlay playsInline className="aspect-[9/16] max-h-72 w-full object-contain" />
-              </div>
-            )}
-            {muxError && <p className="text-xs text-amber-300">Combine: {muxError}</p>}
-
-            {/* ── Next scene / stitch CTA area ─────────────────────────────── */}
-            <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-void-900/60 p-4">
-              <p className="text-sm font-semibold text-ink">What's next?</p>
-
-              {canAddMore && (
-                <button onClick={handleNextScene}
-                  className="btn-fire flex w-full items-center justify-center gap-2 py-3">
-                  <Spark className="h-4 w-4" />
-                  Generate Next Scene — {SCENE_LABELS[currentSceneIdx + 1] ?? 'Next'}
-                </button>
-              )}
-
-              {canStitch && (
-                <button onClick={handleStitch} disabled={stitching}
-                  className="btn-ghost flex w-full items-center justify-center gap-2 py-3 disabled:opacity-60">
-                  {stitching
-                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Stitching {scenesDone} scenes…</>
-                    : <><Film className="h-4 w-4" /> Stitch {scenesDone} scenes into one ad</>}
-                </button>
-              )}
-
-              {/* Per-scene combine / download */}
-              <div className="grid gap-2 sm:grid-cols-2">
-                {voiceoverUrl && !muxedUrl && (
-                  <button onClick={handleMux} disabled={muxing}
-                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-60">
-                    {muxing ? <><RefreshCw className="h-4 w-4 animate-spin" /> Combining…</> : <><Bolt className="h-4 w-4" /> Combine this scene with audio</>}
-                  </button>
-                )}
-                {muxedUrl ? (
-                  <a href={muxedUrl} download={`scene-${scenesDone}-with-sound.mp4`}
-                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm">
-                    <Download className="h-4 w-4" /> Download scene with sound
-                  </a>
-                ) : (
-                  <a href={videoUrl} download={`scene-${scenesDone}-silent.mp4`} target="_blank" rel="noreferrer"
-                    className="btn-ghost flex items-center justify-center gap-2 py-2.5 text-sm">
-                    <Download className="h-4 w-4" /> Download scene (silent)
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {/* ── Stitched final ad ─────────────────────────────────────────── */}
-            {stitchedUrl && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-                <div className="overflow-hidden rounded-2xl border border-gold/40 bg-void-900 shadow-card">
-                  <div className="flex items-center gap-2.5 border-b border-white/[0.06] bg-gold/5 px-4 py-3">
-                    <Film className="h-4 w-4 text-gold" />
-                    <p className="text-sm font-bold text-ink">Full ad — {scenesDone} scenes stitched</p>
+            {wizardQueue.allSettled && wizardQueue.completedCount >= 1 && !wizardAssembledUrl && (
+              <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <Layers className="h-5 w-5 text-fire-start" />
+                    <p className="text-sm font-semibold text-ink">
+                      You have {wizardQueue.completedCount}/{wizardQueue.total} clips — assemble into one ~{doneSeconds}-second commercial?
+                    </p>
                   </div>
-                  <video src={stitchedUrl} controls playsInline className="w-full" />
+                  <button onClick={assembleWizardAd} disabled={wizardAssembling} className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-50">
+                    {wizardAssembling ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
+                    {wizardAssembling ? 'Assembling…' : 'Assemble commercial'}
+                  </button>
                 </div>
-                <a href={stitchedUrl} download="full-ad-stitched.mp4"
-                  className="btn-fire flex w-full items-center justify-center gap-2 py-3">
-                  <Download className="h-4 w-4" /> Download complete ad ({scenesDone} scenes)
-                </a>
-              </motion.div>
+              </div>
             )}
-            {stitchError && <p className="text-xs text-amber-300">Stitch: {stitchError}</p>}
 
-          </motion.div>
+            {wizardAssembledUrl && (
+              <div className="rounded-2xl border border-white/10 bg-void-800/50 p-5">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                  <Check className="h-4 w-4" /> Commercial assembled
+                </div>
+                <video src={wizardAssembledUrl} controls playsInline className="mx-auto max-h-[70vh] rounded-xl" />
+                <div className="mt-3 flex justify-center gap-2">
+                  <a href={wizardAssembledUrl} download="commercial.mp4" className="btn-fire gap-1.5 px-5 py-2.5 text-sm">
+                    <Download className="h-4 w-4" /> Download commercial
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     )
@@ -1913,8 +1497,7 @@ export default function CommercialStudio() {
       case 8:  return renderLighting()
       case 9:  return renderVoice()
       case 10: return renderScript()
-      case 11: return renderStoryboard()
-      case 12: return renderDirector()
+      case 11: return renderStoryboardGenerate()
       default: return null
     }
   }
@@ -1951,7 +1534,7 @@ export default function CommercialStudio() {
           </AnimatePresence>
           <span className="eyebrow hidden sm:inline-flex">
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-            Step {stepNum} of 12
+            Step {stepNum} of 11
           </span>
         </div>
       </div>

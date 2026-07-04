@@ -137,6 +137,7 @@ async function writeDirectorPrompt(
   composedPrompt?: string,
   sceneLabel?: string,
   script?: string,
+  productReference?: { data: string; mime: string },
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -179,7 +180,7 @@ RULES (violating any one produces unusable output):
    Every beat must be something a camera can literally capture.
 
 2. ANCHOR the product in every sentence.
-   State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.
+   State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
 
 3. PRECISE camera language only.
    Good: "locked tripod, slow push-in starting at chest level", "handheld with slight natural drift", "overhead tight on hands, product fills 70% of frame", "fast zoom-in to face then snap to product"
@@ -217,7 +218,12 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
     messages: [
       {
         role: 'user',
-        content: userLines.join('\n\n'),
+        content: productReference
+          ? [
+              { type: 'image', source: { type: 'base64', media_type: productReference.mime as any, data: productReference.data } },
+              { type: 'text', text: userLines.join('\n\n') },
+            ]
+          : userLines.join('\n\n'),
       },
     ],
   })
@@ -241,6 +247,22 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
  * Veo wants the reference image as inline base64 (not a URL), so we fetch and
  * encode the product photo here.
  */
+/** Fetch any https:// or data: image URL and return it as base64 + mime type. */
+async function fetchImageAsBase64(imageUrl: string): Promise<{ data: string; mime: string }> {
+  const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
+  const fetchHeaders: Record<string, string> = {
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
+  }
+  if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
+  const imgResp = await fetch(imageUrl, { headers: fetchHeaders })
+  if (!imgResp.ok) throw new Error(`Could not fetch the reference image (${imgResp.status}). Upload the image directly instead.`)
+  return {
+    data: Buffer.from(await imgResp.arrayBuffer()).toString('base64'),
+    mime: imgResp.headers.get('content-type') || 'image/jpeg',
+  }
+}
+
 async function submitVeoJob(
   prompt: string,
   imageUrl?: string,
@@ -252,18 +274,8 @@ async function submitVeoJob(
   // Fetch and encode the reference image (image-to-video).
   let imagePayload: { bytesBase64Encoded: string; mimeType: string } | undefined
   if (imageUrl) {
-    const META_CDN = /(fbcdn\.net|cdninstagram\.com|fbsbx\.com|facebook\.com)/i
-    const fetchHeaders: Record<string, string> = {
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-      'accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
-    }
-    if (META_CDN.test(imageUrl)) fetchHeaders['referer'] = 'https://www.facebook.com/'
-    const imgResp = await fetch(imageUrl, { headers: fetchHeaders })
-    if (!imgResp.ok) throw new Error(`Could not fetch the product image (${imgResp.status}). Upload the image directly instead.`)
-    imagePayload = {
-      bytesBase64Encoded: Buffer.from(await imgResp.arrayBuffer()).toString('base64'),
-      mimeType: imgResp.headers.get('content-type') || 'image/jpeg',
-    }
+    const img = await fetchImageAsBase64(imageUrl)
+    imagePayload = { bytesBase64Encoded: img.data, mimeType: img.mime }
   }
 
   // Discover the models this key actually has — no guessing, no single hard-coded id.
@@ -349,6 +361,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // takes priority over the product photo as Veo's single identity reference.
       creatorImageUrl,
       creatorConsentAt,
+      // Product consistency: the turnaround sheet (or the hero photo, as a
+      // fallback) is shown to Claude as a VISION input so the written
+      // description matches the real product instead of being invented from
+      // text alone. This is separate from Veo's single conditioning image.
+      productReferenceImageUrl,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -384,6 +401,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cta: brandCta || undefined,
     }
 
+    // Ground the written description in the real product: prefer the
+    // turnaround sheet (richer — 6 angles), fall back to the hero photo. A
+    // failed fetch here is non-fatal — generation proceeds text-only rather
+    // than failing the whole request over a vision nice-to-have.
+    const referenceUrl = productReferenceImageUrl || productImageUrl
+    const productReference = referenceUrl
+      ? await fetchImageAsBase64(referenceUrl).catch(err => {
+          console.warn('[generate] product reference fetch failed, continuing text-only:', err instanceof Error ? err.message : err)
+          return undefined
+        })
+      : undefined
+
     const directorPrompt = await writeDirectorPrompt(
       productDescription.trim(),
       styleId,
@@ -391,6 +420,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       composedPrompt,
       sceneLabel,
       script,
+      productReference,
     )
 
     // Veo takes exactly one conditioning image per job. When a creator photo is

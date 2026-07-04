@@ -100,13 +100,20 @@ function resizeToDataUrl(src: string): Promise<string> {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      const MAX = 1280
-      const scale = Math.min(MAX / img.width, MAX / img.height, 1)
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.width * scale)
-      canvas.height = Math.round(img.height * scale)
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      resolve(canvas.toDataURL('image/jpeg', 0.85))
+      // See ProductInput.tsx's identical helper for why this try/catch matters:
+      // a CORS-tainted canvas throws inside this callback, not the executor's
+      // sync scope, so without it the promise hangs forever instead of rejecting.
+      try {
+        const MAX = 1280
+        const scale = Math.min(MAX / img.width, MAX / img.height, 1)
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error('Could not process image (CORS-restricted source).'))
+      }
     }
     img.onerror = () => reject(new Error('Could not load image'))
     img.src = src

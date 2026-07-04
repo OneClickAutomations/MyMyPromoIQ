@@ -73,6 +73,11 @@ export interface CreativeBrief {
     productName: string
     description?: string
     url?: string
+    /** 2x3 multi-angle turnaround sheet, once generated. Passed to Claude as a
+     *  vision reference when writing the director prompt, so the product's
+     *  actual color/material/label/shape ground the written description
+     *  instead of being invented from text alone. */
+    turnaroundImageUrl?: string
   }
 
   creator: {

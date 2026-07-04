@@ -57,36 +57,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     await mkdir(dir, { recursive: true })
 
-    // Download all clips
-    const clipPaths: string[] = []
-    for (let i = 0; i < videoUrls.length; i++) {
-      const vresp = await fetch(videoUrls[i] as string)
+    // Download all clips IN PARALLEL — Vercel Hobby's maxDuration is a hard 60s
+    // ceiling (can't be raised without a paid plan), and the old sequential
+    // for-loop burned a large chunk of that budget just waiting on network I/O
+    // before ffmpeg ever started. This is the fix for the 504
+    // FUNCTION_INVOCATION_TIMEOUT, not a bigger timeout — there isn't one.
+    const clipPaths = await Promise.all(videoUrls.map(async (url, i) => {
+      const vresp = await fetch(url as string)
       if (!vresp.ok) throw new Error(`Could not fetch clip ${i + 1} (${vresp.status}).`)
       const vbuf = Buffer.from(await vresp.arrayBuffer())
       if (vbuf.length > MAX_VIDEO_BYTES) throw new Error(`Clip ${i + 1} exceeds 80 MB.`)
       const p = join(dir, `clip${String(i).padStart(2, '0')}.mp4`)
       await writeFile(p, vbuf)
-      clipPaths.push(p)
-    }
+      return p
+    }))
 
     // Build concat list (ffmpeg concat demuxer format)
     await writeFile(listPath, clipPaths.map(p => `file '${p}'`).join('\n'))
 
-    // Concat: re-encode to ensure consistent codec/resolution across clips.
-    // scale2ref + pad normalizes any resolution mismatches to 1080×1920 (9:16).
-    await run(ffmpegPath, [
-      '-y',
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', listPath,
-      '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '23',
-      '-an',
-      '-movflags', '+faststart',
-      outPath,
-    ])
+    // Fast path: stream-copy concat — no re-encode, just remuxing. Takes
+    // roughly a second regardless of clip count. Works whenever all clips
+    // share codec/resolution/pixel format, which Veo-rendered clips always do
+    // (same aspectRatio, same model). Also the only path that PRESERVES
+    // Veo's native audio track — the old code discarded audio unconditionally.
+    try {
+      await run(ffmpegPath, [
+        '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        outPath,
+      ])
+    } catch {
+      // Fallback: clips don't match (mixed sources/resolutions) — re-encode.
+      // ultrafast trades file size for speed; it's the only preset with real
+      // margin under a hard 60s wall once download + startup time is spent.
+      console.warn('[/api/stitch] stream-copy failed, falling back to re-encode')
+      await run(ffmpegPath, [
+        '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        outPath,
+      ])
+    }
 
     const out = await readFile(outPath)
     const dataUrl = `data:video/mp4;base64,${out.toString('base64')}`

@@ -40,6 +40,9 @@ export type GenerateInput = {
   /** ISO timestamp of the likeness-use consent acknowledgment. Required
    *  server-side whenever creatorImageUrl is set. */
   creatorConsentAt?: string
+  /** Turnaround sheet (preferred) or hero photo — shown to Claude as a vision
+   *  reference so the written product description matches reality. */
+  productReferenceImageUrl?: string
 }
 
 export type GenerateResponse = {
