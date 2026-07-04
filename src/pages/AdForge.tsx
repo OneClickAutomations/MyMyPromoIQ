@@ -123,7 +123,7 @@ export default function AdForge() {
             badgeClass="bg-fire-start/10 text-fire-start"
           />
 
-          {/* Build From Scratch — 11-step wizard */}
+          {/* Build From Scratch — 12-step wizard */}
           <PathCard
             to="/studio/new"
             icon={Bolt}
@@ -164,7 +164,7 @@ export default function AdForge() {
             </div>
             <div>
               <p className="font-semibold text-gold mb-1">Build From Scratch</p>
-              <p className="text-ink-faint leading-relaxed text-xs">Best when you want full control. 11 guided steps cover product, creator, brand, scenes, and voiceover — upload your image and Veo 3 animates it.</p>
+              <p className="text-ink-faint leading-relaxed text-xs">Best when you want full control. 12 guided steps — how many videos, style, product, creator, brand, scenes, and voiceover — upload your image and Veo 3 animates it.</p>
             </div>
             <div>
               <p className="font-semibold text-ink-muted mb-1">Quick Generate</p>

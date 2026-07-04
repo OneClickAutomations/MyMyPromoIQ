@@ -2,8 +2,10 @@
  * CommercialStudio — Phase 1 wizard shell using the CreativeBrief canonical object.
  *
  * Route: /studio/new
- * 11 steps: Product → Creator → Scene → Style → Camera → Environment →
+ * 12 steps: Count → Style → Product → Creator → Scene → Camera → Environment →
  *           Lighting → Voice → Script → Storyboard → Director (generation)
+ * Count/Style/Product front-load the three questions a user answers before
+ * generating even one video: how many, what look, and what's the asset.
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -60,17 +62,18 @@ import { composeRenderPrompt, detectConflicts } from '../lib/studio/compositionE
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 const STEPS = [
-  { num: 1,  key: 'product',     label: 'Product',      required: true,  icon: Upload },
-  { num: 2,  key: 'creator',     label: 'Creator',      required: false, icon: Users },
-  { num: 3,  key: 'scene',       label: 'Scene',        required: false, icon: Camera },
-  { num: 4,  key: 'style',       label: 'Style',        required: true,  icon: Wand },
-  { num: 5,  key: 'camera',      label: 'Camera',       required: false, icon: Camera },
-  { num: 6,  key: 'environment', label: 'Environment',  required: false, icon: ImageIcon },
-  { num: 7,  key: 'lighting',    label: 'Lighting',     required: false, icon: Spark },
-  { num: 8,  key: 'voice',       label: 'Voice',        required: false, icon: Bolt },
-  { num: 9,  key: 'script',      label: 'Script',       required: false, icon: Wand },
-  { num: 10, key: 'storyboard',  label: 'Storyboard',   required: true,  icon: PlayIcon },
-  { num: 11, key: 'director',    label: 'Director',     required: true,  icon: Spark },
+  { num: 1,  key: 'count',       label: 'How Many',     required: true,  icon: Layers },
+  { num: 2,  key: 'style',       label: 'Style',        required: true,  icon: Wand },
+  { num: 3,  key: 'product',     label: 'Assets',        required: true,  icon: Upload },
+  { num: 4,  key: 'creator',     label: 'Creator',      required: false, icon: Users },
+  { num: 5,  key: 'scene',       label: 'Scene',        required: false, icon: Camera },
+  { num: 6,  key: 'camera',      label: 'Camera',       required: false, icon: Camera },
+  { num: 7,  key: 'environment', label: 'Environment',  required: false, icon: ImageIcon },
+  { num: 8,  key: 'lighting',    label: 'Lighting',     required: false, icon: Spark },
+  { num: 9,  key: 'voice',       label: 'Voice',        required: false, icon: Bolt },
+  { num: 10, key: 'script',      label: 'Script',       required: false, icon: Wand },
+  { num: 11, key: 'storyboard',  label: 'Storyboard',   required: true,  icon: PlayIcon },
+  { num: 12, key: 'director',    label: 'Director',     required: true,  icon: Spark },
 ] as const
 
 // Creator attribute chip options now live in CreatorInput.tsx (shared across
@@ -437,9 +440,11 @@ export default function CommercialStudio() {
   const SCENE_LABELS = ['Hook', 'Problem / Agitation', 'Solution', 'Social Proof', 'Call to Action', 'Outro'] as const
   const [completedScenes, setCompletedScenes] = useState<SceneResult[]>([])
   const [currentSceneIdx, setCurrentSceneIdx] = useState(0)
-  // 'quick' = one video in a chosen format; 'full' = build up to 6 scenes into a
-  // complete commercial. Seeded from the dashboard entry point (?mode=).
-  const [adMode, setAdMode] = useState<'quick' | 'full'>('full')
+  // "How many videos?" (Step 1) — 1 renders a single video; 2-6 builds that many
+  // beats into a full commercial. Seeded from the dashboard entry point (?mode=).
+  const [desiredVideoCount, setDesiredVideoCount] = useState(1)
+  const activeSceneLabels = SCENE_LABELS.slice(0, desiredVideoCount)
+  const adMode: 'quick' | 'full' = desiredVideoCount <= 1 ? 'quick' : 'full'
   const [genProgress, setGenProgress] = useState(0)
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -505,7 +510,8 @@ export default function CommercialStudio() {
   const [searchParams] = useSearchParams()
   useEffect(() => {
     const mode = searchParams.get('mode')
-    if (mode === 'quick' || mode === 'full') setAdMode(mode)
+    if (mode === 'quick') setDesiredVideoCount(1)
+    if (mode === 'full') setDesiredVideoCount(6)
     const style = searchParams.get('style')
     if (style && STYLE_PRESETS[style]) {
       setBrief(prev => {
@@ -631,7 +637,7 @@ export default function CommercialStudio() {
 
   // Lazy-load voices the first time the user reaches the Voice step.
   useEffect(() => {
-    if (stepNum === 8) loadVoices()
+    if (stepNum === 9) loadVoices()
   }, [stepNum, loadVoices])
 
   // Auto-combine the rendered scene with its voiceover the moment both are ready,
@@ -680,7 +686,7 @@ export default function CommercialStudio() {
   }
 
   function goForward() {
-    setStepNum(n => Math.min(11, n + 1))
+    setStepNum(n => Math.min(12, n + 1))
   }
 
   // Skip optional step: apply preset defaults then advance
@@ -974,7 +980,42 @@ export default function CommercialStudio() {
 
   // ── Step renders ──────────────────────────────────────────────────────────
 
-  // Step 1: Product
+  // Step 1: How many videos? — asked before style or assets, so the rest of
+  // the wizard (and the final render) already knows the scope of the job.
+  function renderCount() {
+    const OPTIONS = [1, 2, 3, 4, 5, 6]
+    return (
+      <div className="space-y-6">
+        <StepHeader title="How many videos do you want to make?" desc="One video, or build a full commercial from several beats — Hook, Problem, Solution, Social Proof, CTA, Outro." />
+
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+          {OPTIONS.map(n => (
+            <button key={n} type="button" onClick={() => setDesiredVideoCount(n)}
+              className={`rounded-2xl border p-4 text-center transition-all ${
+                desiredVideoCount === n ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
+              }`}>
+              <p className="text-2xl font-black text-ink">{n}</p>
+              <p className="mt-1 text-[11px] text-ink-muted">{n === 1 ? 'video' : 'videos'}</p>
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-4">
+          <p className="text-sm text-ink-muted">
+            {desiredVideoCount === 1
+              ? 'A single video in your chosen style — fastest path.'
+              : `A full commercial built from ${desiredVideoCount} scenes: ${SCENE_LABELS.slice(0, desiredVideoCount).join(' → ')}.`}
+          </p>
+        </div>
+
+        <button onClick={goForward} className="btn-fire w-full">
+          Next — Style <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+    )
+  }
+
+  // Step 3: Product (assets)
   function renderProduct() {
     return (
       <div className="space-y-5">
@@ -1041,7 +1082,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 2: Creator
+  // Step 4: Creator
   function renderCreator() {
     const creatorValue: CreatorInputValue = {
       mode: brief.creator.mode,
@@ -1095,7 +1136,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 3: Scene (product action)
+  // Step 5: Scene (product action)
   function renderScene() {
     return (
       <div className="space-y-6">
@@ -1121,7 +1162,7 @@ export default function CommercialStudio() {
 
         <div className="flex flex-col gap-3">
           <button onClick={goForward} disabled={!brief.scene.productAction} className="btn-fire w-full disabled:opacity-50">
-            Next — Style <ArrowRight className="h-4 w-4" />
+            Next — Camera <ArrowRight className="h-4 w-4" />
           </button>
           <SkipButton onClick={skipWithDefaults} />
         </div>
@@ -1129,7 +1170,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 4: Style (required)
+  // Step 2: Style (required)
   function renderStyle() {
     const presets = Object.values(STYLE_PRESETS)
     return (
@@ -1157,13 +1198,13 @@ export default function CommercialStudio() {
         </div>
 
         <button onClick={goForward} disabled={!brief.style.commercialStyle} className="btn-fire w-full disabled:opacity-50">
-          Next — Camera <ArrowRight className="h-4 w-4" />
+          Next — Assets <ArrowRight className="h-4 w-4" />
         </button>
       </div>
     )
   }
 
-  // Step 5: Camera direction (multi-select, up to 3)
+  // Step 6: Camera direction (multi-select, up to 3)
   function renderCamera() {
     const selectedCams = brief.style.cameraDirection
     const preset = brief.style.commercialStyle ? STYLE_PRESETS[brief.style.commercialStyle] : null
@@ -1197,7 +1238,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 6: Environment
+  // Step 7: Environment
   function renderEnvironment() {
     return (
       <div className="space-y-6">
@@ -1231,7 +1272,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 7: Lighting
+  // Step 8: Lighting
   function renderLighting() {
     return (
       <div className="space-y-6">
@@ -1265,7 +1306,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 8: Voice
+  // Step 9: Voice
   function renderVoice() {
     const voiceModes = [
       { id: 'ai_generated', label: 'AI Generated', hint: 'We pick the best voice for your style' },
@@ -1385,7 +1426,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 9: Script
+  // Step 10: Script
   function renderScript() {
     const modes = [
       { id: 'product',    label: 'From product',       hint: 'AI writes from your product brief' },
@@ -1434,7 +1475,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 10: Storyboard review (composition engine preview)
+  // Step 11: Storyboard review (composition engine preview)
   function renderStoryboard() {
     const payload = (() => {
       try { return composeRenderPrompt(brief) } catch { return null }
@@ -1501,7 +1542,7 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 11: Director feed (Phase 0.3)
+  // Step 12: Director feed (Phase 0.3)
   const STAGE_LABELS: Record<string, string> = {
     analyzing:    'Brief reviewed',
     casting:      'Creator chosen',
@@ -1516,27 +1557,27 @@ export default function CommercialStudio() {
     const isGenerating = directorPhase === 'directing' || directorPhase === 'generating'
     const currentLabel = SCENE_LABELS[currentSceneIdx] ?? `Scene ${currentSceneIdx + 1}`
     const scenesDone = completedScenes.length
-    // Quick Create = a single video; Full Ad = build up to all six beats.
-    const canAddMore = adMode === 'full' && scenesDone < SCENE_LABELS.length
+    // Quick Create = a single video; Full Ad = build up to the chosen count.
+    const canAddMore = adMode === 'full' && scenesDone < activeSceneLabels.length
     const canStitch = scenesDone >= 2
 
     return (
       <div className="space-y-6">
         <StepHeader
-          title={scenesDone === 0 ? (adMode === 'quick' ? 'Quick Create' : 'AI Director') : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${SCENE_LABELS.length}`}
+          title={scenesDone === 0 ? (adMode === 'quick' ? 'Quick Create' : 'AI Director') : `Scene ${scenesDone + (directorPhase === 'done' ? 0 : 1)} of ${activeSceneLabels.length}`}
           desc={isGenerating ? `Generating — ${currentLabel}` : scenesDone > 0 ? (adMode === 'full' ? 'Keep going or stitch your scenes into a full ad.' : 'Your video is ready below.') : 'Sit back — the director is working.'}
           onBack={directorPhase === 'idle' ? goBack : undefined}
         />
 
-        {/* ── Ad structure — the six beats that make a full commercial (full mode) ─ */}
+        {/* ── Ad structure — the chosen number of beats that make the commercial ─ */}
         {adMode === 'full' && (
         <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-3.5">
           <div className="mb-2.5 flex items-center justify-between">
             <p className="text-[11px] font-bold uppercase tracking-widest text-ink-faint">Ad structure</p>
-            <span className="text-[10px] text-ink-faint">{scenesDone}/{SCENE_LABELS.length} beats · all six = a full commercial</span>
+            <span className="text-[10px] text-ink-faint">{scenesDone}/{activeSceneLabels.length} beats</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {SCENE_LABELS.map((label, i) => {
+            {activeSceneLabels.map((label, i) => {
               const done = i < scenesDone
               const current = i === scenesDone
               return (
@@ -1578,7 +1619,7 @@ export default function CommercialStudio() {
                 </div>
               ))}
               {/* Empty slot placeholders — labeled with the upcoming scene beat (full mode) */}
-              {adMode === 'full' && SCENE_LABELS.slice(completedScenes.length).map((label, i) => (
+              {adMode === 'full' && activeSceneLabels.slice(completedScenes.length).map((label, i) => (
                 <div key={`empty-${i}`} className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-white/[0.08] bg-void-900/30 p-2 text-center">
                   <span className="grid h-5 w-5 place-items-center rounded-full bg-void-700/60 text-[10px] font-bold text-ink-faint">{completedScenes.length + i + 1}</span>
                   <span className="text-[9px] font-semibold leading-tight text-ink-faint">{label}</span>
@@ -1602,7 +1643,7 @@ export default function CommercialStudio() {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-3 text-xs text-ink-faint">{adMode === 'full' ? "You'll be able to generate up to 6 scenes and stitch them into one complete ad." : 'Quick Create renders a single video in your chosen format.'}</p>
+                <p className="mt-3 text-xs text-ink-faint">{adMode === 'full' ? `You'll generate ${desiredVideoCount} scenes and stitch them into one complete ad.` : 'Quick Create renders a single video in your chosen format.'}</p>
               </div>
             )}
             {savedBrand && scenesDone === 0 && (
@@ -1639,7 +1680,7 @@ export default function CommercialStudio() {
             <div className="flex flex-col items-center gap-6 p-6">
               <CircularProgress
                 pct={genProgress}
-                label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${SCENE_LABELS.length}`}
+                label={directorPhase === 'generating' ? `Rendering ${currentLabel}…` : `Scene ${currentSceneIdx + 1} of ${activeSceneLabels.length}`}
               />
 
               <div className="w-full space-y-2">
@@ -1862,17 +1903,18 @@ export default function CommercialStudio() {
 
   function renderStep() {
     switch (stepNum) {
-      case 1:  return renderProduct()
-      case 2:  return renderCreator()
-      case 3:  return renderScene()
-      case 4:  return renderStyle()
-      case 5:  return renderCamera()
-      case 6:  return renderEnvironment()
-      case 7:  return renderLighting()
-      case 8:  return renderVoice()
-      case 9:  return renderScript()
-      case 10: return renderStoryboard()
-      case 11: return renderDirector()
+      case 1:  return renderCount()
+      case 2:  return renderStyle()
+      case 3:  return renderProduct()
+      case 4:  return renderCreator()
+      case 5:  return renderScene()
+      case 6:  return renderCamera()
+      case 7:  return renderEnvironment()
+      case 8:  return renderLighting()
+      case 9:  return renderVoice()
+      case 10: return renderScript()
+      case 11: return renderStoryboard()
+      case 12: return renderDirector()
       default: return null
     }
   }
@@ -1909,7 +1951,7 @@ export default function CommercialStudio() {
           </AnimatePresence>
           <span className="eyebrow hidden sm:inline-flex">
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
-            Step {stepNum} of 11
+            Step {stepNum} of 12
           </span>
         </div>
       </div>

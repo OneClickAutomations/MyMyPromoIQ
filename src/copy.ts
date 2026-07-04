@@ -325,7 +325,7 @@ export const adForge = {
   },
   build: {
     title: 'Build From Scratch',
-    subtitle: '11 guided steps. Full creative control.',
+    subtitle: '12 guided steps. Full creative control.',
     detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — Veo 3 animates it into a video with native audio.',
     cta: 'Start building',
   },
