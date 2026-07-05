@@ -337,17 +337,44 @@ async function describeFromImage(imageUrl: string, title: string | null): Promis
   }
 }
 
+// Sites known to actively block datacenter/serverless IPs with a CAPTCHA or
+// "robot check" interstitial instead of the real page — no header trick gets
+// past this reliably, so detect it and tell the user plainly rather than
+// silently returning nothing.
+const BOT_BLOCK_SIGNATURES = [
+  /to discuss automated access/i,
+  /api-services-support@amazon/i,
+  /enter the characters you see below/i,
+  /<title>\s*robot check\s*<\/title>/i,
+  /captcha/i,
+  /are you a human/i,
+  /pardon our interruption/i,
+]
+
 async function extractProductFromUrl(pageUrl: string): Promise<{ title: string | null; description: string | null; imageUrl: string | null; images: string[] }> {
   const resp = await fetch(pageUrl, {
     headers: {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-      'accept': 'text/html,application/xhtml+xml',
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
       'accept-language': 'en-US,en;q=0.9',
+      'upgrade-insecure-requests': '1',
+      'sec-fetch-dest': 'document',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-site': 'none',
+      'sec-fetch-user': '?1',
+      'sec-ch-ua': '"Chromium";v="124", "Not-A.Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
     },
     redirect: 'follow',
   })
   if (!resp.ok) throw new Error(`Could not fetch product page (${resp.status}).`)
   const html = await resp.text()
+
+  if (BOT_BLOCK_SIGNATURES.some(re => re.test(html))) {
+    const host = (() => { try { return new URL(pageUrl).hostname.replace(/^www\./, '') } catch { return 'this site' } })()
+    throw new Error(`${host} blocked this request as automated traffic and didn't serve the real page. Switch to the Upload tab and add the product photo directly instead.`)
+  }
 
   // 1. Open Graph (most reliable on Shopify/D2C) — a page can list several
   //    og:image tags (gallery angles), so collect all of them, not just one.

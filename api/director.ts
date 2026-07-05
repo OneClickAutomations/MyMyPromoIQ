@@ -66,19 +66,28 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     : ''
   const brandSection = [brandVoice ? `Brand voice: ${brandVoice}.` : '', cta ? `End on this CTA: "${cta}".` : ''].filter(Boolean).join(' ')
 
-  const system = `You are an expert short-form video director planning a ${styleBlurb}. You break a commercial into ${desired} sequential clips for Google Veo 3.
+  const system = `You are an expert short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3.
+
+THE #1 RULE — COMPLETENESS OVER COUNT:
+Regardless of how few clips you're given, the finished sequence must play as one complete, usable, standalone commercial — a full arc from hook to call-to-action, never a fragment that stops mid-pitch. A complete sales narrative has five elements: (1) hook/attention, (2) problem or desire, (3) solution/demonstration, (4) credibility or proof, (5) call-to-action. When ${desired} is smaller than 5, you do NOT get to drop elements — you COMPRESS multiple elements into the same clip's dialogue and visual direction instead. Concretely:
+- 1 clip: hook + problem + solution + proof + CTA all land in that single clip's dialogue and action, in that order, still fitting the word budget below.
+- 2 clips: clip 1 = hook + problem + solution; clip 2 = proof + CTA.
+- 3 clips: clip 1 = hook + problem; clip 2 = solution + proof; clip 3 = CTA.
+- 4 clips: hook; problem + solution; proof; CTA.
+- 5+ clips: one element per clip (hook, problem, solution, proof, cta), with any extra clips elaborating the solution/proof.
+Never write a clip that only teases or sets up without also paying it off somewhere in the sequence — by the last clip, someone who has only ever seen this ad must understand what the product does, why they'd want it, and what to do next.
 
 HARD RULES:
 - Exactly ${desired} clips, ordered 1..${desired}.
 - Each clip durationSeconds is one of 4,5,6,7,8.
-- Dialogue is what a person SPEAKS in that clip. Natural pace ≈ 2.5 words/second, so the word count MUST fit: 4s→≤10 words, 5s→≤12, 6s→≤15, 7s→≤17, 8s→≤20. If an idea needs more words, shorten it — do not overstuff.
+- Dialogue is what a person SPEAKS in that clip. Natural pace ≈ 2.5 words/second, so the word count MUST fit: 4s→≤10 words, 5s→≤12, 6s→≤15, 7s→≤17, 8s→≤20. If an idea needs more words, shorten it — do not overstuff. Compression means writing TIGHTER, more efficient lines that still cover every compressed element, not cramming more words in.
 - visualDescription: physically observable, camera-direction language (no mood adjectives).
 - creatorAction: what the person physically does with the product.
-- beat: one of hook, problem, solution, demo, proof, cta, bridge, reveal, outro.
-- The final clip's beat is cta or outro.
+- beat: one of hook, problem, solution, demo, proof, cta, bridge, reveal, outro — pick the DOMINANT element for clips that compress more than one (e.g. a clip compressing hook+problem+solution is still tagged "hook").
+- The final clip's beat is cta or outro, and must contain an explicit call-to-action.
 
 Respond with STRICT JSON only, no markdown:
-{"recommendedClipCount":N,"reasoning":"one sentence","clips":[{"order":1,"beat":"hook","durationSeconds":5,"visualDescription":"...","dialogue":"...","cameraDirection":"...","creatorAction":"..."}]}`
+{"recommendedClipCount":N,"reasoning":"one sentence explaining how the narrative was compressed to fit","clips":[{"order":1,"beat":"hook","durationSeconds":5,"visualDescription":"...","dialogue":"...","cameraDirection":"...","creatorAction":"..."}]}`
 
   const anthropic = new Anthropic()
   const message = await anthropic.messages.create({
