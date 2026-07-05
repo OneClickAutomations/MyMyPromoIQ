@@ -45,9 +45,24 @@ export default function CameraStudio({ onCapture, onClose }: Props) {
   const [permissionError, setPermissionError] = useState('')
   const [loading, setLoading] = useState(true)
 
+  // In-app browsers (Instagram/Facebook/TikTok/LINE) commonly block camera
+  // access outright with no permission prompt at all — retrying never helps,
+  // the only fix is opening the link in a real browser. Detect this up front
+  // so the error message actually tells the user something they can act on.
+  const IN_APP_BROWSER = /FBAN|FBAV|Instagram|Line\/|TikTok|MicroMessenger/i.test(navigator.userAgent)
+
   const startCamera = useCallback(async (mode: 'user' | 'environment') => {
     setLoading(true)
     setPermissionError('')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setLoading(false)
+      setPermissionError(
+        IN_APP_BROWSER
+          ? "This app's built-in browser blocks camera access. Open this page in Chrome or Safari instead, or upload a photo."
+          : "This browser doesn't support camera access. Try Chrome or Safari, or upload a photo instead.",
+      )
+      return
+    }
     try {
       streamRef.current?.getTracks().forEach(t => t.stop())
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -65,14 +80,18 @@ export default function CameraStudio({ onCapture, onClose }: Props) {
       setLoading(false)
       const name = err instanceof Error ? err.name : ''
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        setPermissionError('Camera access denied. Please allow camera access in your browser settings and reload.')
+        setPermissionError(
+          IN_APP_BROWSER
+            ? "Camera access was blocked. This app's built-in browser often can't grant it — open this page in Chrome or Safari, or upload a photo instead."
+            : 'Camera access denied. Allow camera access in your browser settings and try again, or upload a photo instead.',
+        )
       } else if (name === 'NotFoundError') {
-        setPermissionError('No camera found on this device.')
+        setPermissionError('No camera found on this device. Upload a photo instead.')
       } else {
-        setPermissionError('Could not start the camera. Please check your browser or device settings.')
+        setPermissionError('Could not start the camera. Try again, or upload a photo instead.')
       }
     }
-  }, [])
+  }, [IN_APP_BROWSER])
 
   useEffect(() => {
     startCamera(facingMode)
@@ -202,12 +221,20 @@ export default function CameraStudio({ onCapture, onClose }: Props) {
               <Camera className="h-8 w-8 text-white/40" />
             </div>
             <p className="text-sm font-semibold text-white">{permissionError}</p>
-            <button
-              onClick={() => startCamera(facingMode)}
-              className="mt-5 rounded-xl bg-fire-start px-5 py-2.5 text-sm font-semibold text-white hover:bg-fire-end transition-colors"
-            >
-              Try again
-            </button>
+            <div className="mt-5 flex justify-center gap-2.5">
+              <button
+                onClick={() => startCamera(facingMode)}
+                className="rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/20 transition-colors"
+              >
+                Try again
+              </button>
+              <button
+                onClick={onClose}
+                className="rounded-xl bg-fire-start px-4 py-2.5 text-sm font-semibold text-white hover:bg-fire-end transition-colors"
+              >
+                Upload a photo instead
+              </button>
+            </div>
           </div>
         ) : (
           /* Camera layout: toolbar | preview | zoom */

@@ -391,6 +391,7 @@ export default function CommercialStudio() {
   const wizardQueue = useGenerationQueue(2, 1)
   const [wizardAssembling, setWizardAssembling] = useState(false)
   const [wizardAssembledUrl, setWizardAssembledUrl] = useState<string | null>(null)
+  const [wizardAssemblyError, setWizardAssemblyError] = useState('')
 
   // ── Draft save toast
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
@@ -802,6 +803,7 @@ export default function CommercialStudio() {
 
   function generateAllClips(clips: StoryboardClip[]) {
     setWizardAssembledUrl(null)
+    setWizardAssemblyError('')
     setWizardPhase('rendering')
     void wizardQueue.run(clips, wizardGenerateOne)
   }
@@ -814,13 +816,22 @@ export default function CommercialStudio() {
   async function assembleWizardAd() {
     const urls = wizardQueue.tiles.filter(t => t.status === 'complete' && t.videoUrl).map(t => t.videoUrl!)
     if (urls.length < 1) return
+    setWizardAssemblyError('')
     setWizardAssembling(true)
     try {
-      const { videoDataUrl } = await stitchVideos(urls)
+      // A single clip IS the finished ad — skip the network round-trip to
+      // ffmpeg (and its failure surface) entirely rather than stitching one
+      // video against itself.
+      const videoDataUrl = urls.length === 1 ? urls[0] : (await stitchVideos(urls)).videoDataUrl
       setWizardAssembledUrl(videoDataUrl)
       patch({ status: 'complete', render: { ...brief.render, outputUrl: videoDataUrl, statusLog: [] } })
-    } catch { /* keep individual clips available */ }
-    finally { setWizardAssembling(false) }
+    } catch (e) {
+      // Previously swallowed silently — the user just saw nothing happen,
+      // which read as "the video was generated but isn't visible anywhere."
+      setWizardAssemblyError(e instanceof Error ? e.message : 'Could not assemble the final commercial.')
+    } finally {
+      setWizardAssembling(false)
+    }
   }
 
   // Kick off planning the moment the user reaches the Storyboard step.
@@ -830,6 +841,16 @@ export default function CommercialStudio() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepNum])
+
+  // Once "Generate All" is clicked, the rest happens without further input —
+  // the moment every clip has settled, assemble automatically instead of
+  // waiting on a manual "Assemble commercial" tap the user might never see.
+  useEffect(() => {
+    if (wizardPhase === 'rendering' && wizardQueue.allSettled && wizardQueue.completedCount >= 1 && !wizardAssembledUrl && !wizardAssembling) {
+      assembleWizardAd()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wizardPhase, wizardQueue.allSettled, wizardQueue.completedCount, wizardAssembledUrl, wizardAssembling])
 
   // ── Left-rail stepper ─────────────────────────────────────────────────────
 
@@ -1447,29 +1468,33 @@ export default function CommercialStudio() {
               onDownload={url => window.open(url, '_blank', 'noopener')}
             />
 
-            {wizardQueue.allSettled && wizardQueue.completedCount >= 1 && !wizardAssembledUrl && (
-              <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <Layers className="h-5 w-5 text-fire-start" />
-                    <p className="text-sm font-semibold text-ink">
-                      You have {wizardQueue.completedCount}/{wizardQueue.total} clips — assemble into one ~{doneSeconds}-second commercial?
-                    </p>
-                  </div>
-                  <button onClick={assembleWizardAd} disabled={wizardAssembling} className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-50">
-                    {wizardAssembling ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
-                    {wizardAssembling ? 'Assembling…' : 'Assemble commercial'}
-                  </button>
-                </div>
+            {/* Assembly is automatic once every clip settles — no extra tap needed. */}
+            {wizardAssembling && (
+              <div className="flex items-center gap-2.5 rounded-2xl border border-fire-start/20 bg-fire-start/[0.06] p-5">
+                <RefreshCw className="h-4 w-4 animate-spin text-fire-start" />
+                <p className="text-sm font-semibold text-ink">
+                  Assembling your ~{doneSeconds}-second commercial…
+                </p>
+              </div>
+            )}
+
+            {wizardAssemblyError && (
+              <div className="rounded-2xl border border-fire-start/20 bg-fire-start/5 p-5">
+                <p className="text-sm font-semibold text-fire-start">Could not assemble the final commercial</p>
+                <p className="mt-1 text-sm text-ink-muted">{wizardAssemblyError}</p>
+                <p className="mt-1 text-xs text-ink-faint">Your individual clips above are still complete and downloadable.</p>
+                <button onClick={assembleWizardAd} className="btn-fire mt-4 py-2.5 px-5 text-sm">
+                  <RefreshCw className="h-4 w-4" /> Retry assembly
+                </button>
               </div>
             )}
 
             {wizardAssembledUrl && (
               <div className="rounded-2xl border border-white/10 bg-void-800/50 p-5">
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300">
-                  <Check className="h-4 w-4" /> Commercial assembled
+                  <Check className="h-4 w-4" /> Your commercial is ready
                 </div>
-                <video src={wizardAssembledUrl} controls playsInline className="mx-auto max-h-[70vh] rounded-xl" />
+                <video src={wizardAssembledUrl} controls autoPlay playsInline className="mx-auto max-h-[70vh] rounded-xl" />
                 <div className="mt-3 flex justify-center gap-2">
                   <a href={wizardAssembledUrl} download="commercial.mp4" className="btn-fire gap-1.5 px-5 py-2.5 text-sm">
                     <Download className="h-4 w-4" /> Download commercial

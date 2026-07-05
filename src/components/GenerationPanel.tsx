@@ -24,11 +24,11 @@ function Tile({ tile, index, onRetry, onRemix, onDownload }: {
 
       {tile.status === 'complete' && tile.videoUrl ? (
         <>
+          {/* autoPlay (not just hover-to-play) — a hover-only preview never
+              plays on touch devices, which read as "the video isn't there." */}
           <video
-            src={`${tile.videoUrl}#t=0.1`} muted loop playsInline preload="metadata"
+            src={`${tile.videoUrl}#t=0.1`} muted loop autoPlay playsInline preload="metadata"
             className="h-full w-full object-cover"
-            onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
-            onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
           />
           <div className="absolute bottom-1.5 right-1.5 flex gap-1">
             <button onClick={onRemix} title="Remix — regenerate this clip"
