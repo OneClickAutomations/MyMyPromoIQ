@@ -186,14 +186,18 @@ export default function ProductInput({ value, onChange, className = '' }: {
       const r = await extractProductFromUrl(u)
       const next: Partial<ProductInputValue> = { sourceUrl: u }
       if (r.title) next.name = r.title
+      // The server already falls back to a Claude-written description from
+      // the photo when the page's own meta tags don't have one — so this is
+      // rarely empty, and the user is never forced to hand-type it.
       if (r.description) next.description = r.description
-      if (r.imageUrl) {
-        const resized = await resizeToDataUrl(r.imageUrl).catch(() => r.imageUrl!)
-        next.images = [resized, ...value.images].slice(0, MAX_IMAGES)
-        next.primaryImage = value.primaryImage || resized
+      const gallery = r.images?.length ? r.images : r.imageUrl ? [r.imageUrl] : []
+      if (gallery.length) {
+        const resized = await Promise.all(gallery.map(url => resizeToDataUrl(url).catch(() => url)))
+        next.images = [...resized, ...value.images].slice(0, MAX_IMAGES)
+        next.primaryImage = value.primaryImage || resized[0]
       }
       patch(next)
-      if (!r.imageUrl && !r.title) setError('Nothing usable found at that URL — try the product page directly.')
+      if (!gallery.length && !r.title) setError('Nothing usable found at that URL — try the product page directly.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read that URL.')
     } finally {
@@ -397,19 +401,25 @@ export default function ProductInput({ value, onChange, className = '' }: {
 
       {/* Name + description */}
       <div className="mt-5 space-y-3">
-        <input
-          value={value.name}
-          onChange={e => patch({ name: e.target.value })}
-          placeholder="Product name (e.g. Glow Vitamin C Serum)"
-          className="w-full rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
-        />
-        <textarea
-          value={value.description}
-          onChange={e => patch({ description: e.target.value })}
-          placeholder="One or two lines about what it is and who it's for. The AI uses this to write the script."
-          rows={2}
-          className="w-full resize-none rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
-        />
+        <div>
+          <p className="mb-1.5 text-xs font-semibold text-ink-muted">Product name</p>
+          <input
+            value={value.name}
+            onChange={e => patch({ name: e.target.value })}
+            placeholder="e.g. Glow Vitamin C Serum"
+            className="w-full rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+          />
+        </div>
+        <div>
+          <p className="mb-1.5 text-xs font-semibold text-ink-muted">Description</p>
+          <textarea
+            value={value.description}
+            onChange={e => patch({ description: e.target.value })}
+            placeholder="One or two lines about what it is and who it's for. The AI uses this to write the script."
+            rows={2}
+            className="w-full resize-none rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+          />
+        </div>
       </div>
     </div>
   )

@@ -27,6 +27,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import Anthropic from '@anthropic-ai/sdk'
 
 const APIFY_BASE = 'https://api.apify.com/v2'
 const SOURCING_TTL_HOURS = 72
@@ -297,7 +298,46 @@ function metaContent(html: string, attrName: string, attrValue: string): string 
   return null
 }
 
-async function extractProductFromUrl(pageUrl: string): Promise<{ title: string | null; description: string | null; imageUrl: string | null }> {
+function absolutize(url: string | null, pageUrl: string): string | null {
+  if (!url) return null
+  if (url.startsWith('//')) return 'https:' + url
+  if (url.startsWith('http')) return url
+  try { return new URL(url, pageUrl).toString() } catch { return null }
+}
+
+/** Auto-generate a short product description from whatever we could scrape —
+ *  the hero image (vision) plus title, if any — so a user pasting a URL never
+ *  has to hand-type a description just because a site doesn't expose one in
+ *  its meta tags (common on JS-rendered storefronts). Non-fatal: returns null
+ *  on any failure, and the caller proceeds without a description rather than
+ *  failing the whole extraction over a nice-to-have. */
+async function describeFromImage(imageUrl: string, title: string | null): Promise<string | null> {
+  try {
+    const imgResp = await fetch(imageUrl)
+    if (!imgResp.ok) return null
+    const mime = imgResp.headers.get('content-type') || 'image/jpeg'
+    const data = Buffer.from(await imgResp.arrayBuffer()).toString('base64')
+    const anthropic = new Anthropic()
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 150,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mime as any, data } },
+          { type: 'text', text: `Write a one or two sentence product description grounded ONLY in what you observe in this photo (what it is, material/color, who it's for).${title ? ` The product is called "${title}".` : ''} Output only the description text, no preamble.` },
+        ],
+      }],
+    })
+    const text = message.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').trim()
+    return text || null
+  } catch (err) {
+    console.warn('[sourcing] auto-description from image failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+async function extractProductFromUrl(pageUrl: string): Promise<{ title: string | null; description: string | null; imageUrl: string | null; images: string[] }> {
   const resp = await fetch(pageUrl, {
     headers: {
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
@@ -309,15 +349,22 @@ async function extractProductFromUrl(pageUrl: string): Promise<{ title: string |
   if (!resp.ok) throw new Error(`Could not fetch product page (${resp.status}).`)
   const html = await resp.text()
 
-  // 1. Open Graph (most reliable on Shopify/D2C)
+  // 1. Open Graph (most reliable on Shopify/D2C) — a page can list several
+  //    og:image tags (gallery angles), so collect all of them, not just one.
   let title = metaContent(html, 'property', 'og:title')
   let description = metaContent(html, 'property', 'og:description')
-  let imageUrl = metaContent(html, 'property', 'og:image')
+  const galleryImages: string[] = []
+  for (const m of html.matchAll(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']*?)["']/gi)) {
+    if (m[1]) galleryImages.push(m[1])
+  }
 
   // 2. Twitter card fallback
   if (!title) title = metaContent(html, 'name', 'twitter:title')
   if (!description) description = metaContent(html, 'name', 'twitter:description')
-  if (!imageUrl) imageUrl = metaContent(html, 'name', 'twitter:image')
+  if (!galleryImages.length) {
+    const twImg = metaContent(html, 'name', 'twitter:image')
+    if (twImg) galleryImages.push(twImg)
+  }
 
   // 3. Standard meta fallback
   if (!description) description = metaContent(html, 'name', 'description')
@@ -328,7 +375,8 @@ async function extractProductFromUrl(pageUrl: string): Promise<{ title: string |
     if (t) title = decodeHtmlEntities(t.split(/\s*[|\-–—]\s*/)[0].trim())
   }
 
-  // 5. JSON-LD structured data (Shopify, WooCommerce, schema.org Product)
+  // 5. JSON-LD structured data (Shopify, WooCommerce, schema.org Product) —
+  //    the richest source: title, description, AND a full image gallery.
   const ldMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
   for (const [, json] of ldMatches) {
     try {
@@ -338,21 +386,28 @@ async function extractProductFromUrl(pageUrl: string): Promise<{ title: string |
         if (item?.['@type'] === 'Product') {
           if (!title && item.name) title = String(item.name)
           if (!description && item.description) description = String(item.description).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
-          if (!imageUrl) {
-            const img = Array.isArray(item.image) ? item.image[0] : item.image
-            if (typeof img === 'string') imageUrl = img
-            else if (img?.url) imageUrl = img.url
+          const imgs = Array.isArray(item.image) ? item.image : item.image ? [item.image] : []
+          for (const img of imgs) {
+            const u = typeof img === 'string' ? img : img?.url
+            if (u) galleryImages.push(u)
           }
         }
       }
     } catch { /* malformed JSON-LD — skip */ }
   }
 
-  // Ensure imageUrl is absolute
-  if (imageUrl && imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl
-  if (imageUrl && !imageUrl.startsWith('http')) imageUrl = null
+  // Absolutize and de-dupe, capping at 5 angles (matches ProductInput's limit).
+  const images = [...new Set(galleryImages.map(u => absolutize(u, pageUrl)).filter((u): u is string => !!u))].slice(0, 5)
+  let imageUrl = images[0] ?? null
 
-  return { title, description, imageUrl }
+  // If the page gave us an image but no text description (common on
+  // JS-rendered storefronts whose meta tags are minimal), have Claude write
+  // one from the photo so the user is never blocked on manual typing.
+  if (!description && imageUrl) {
+    description = await describeFromImage(imageUrl, title)
+  }
+
+  return { title, description, imageUrl, images }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

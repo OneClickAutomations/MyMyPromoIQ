@@ -216,6 +216,8 @@ export type ProductExtract = {
   title: string | null
   description: string | null
   imageUrl: string | null
+  /** Every gallery image found (og:image + JSON-LD), up to 5, imageUrl is images[0]. */
+  images?: string[]
 }
 
 /** Scrape a product page URL and return title, description, and hero image. */
