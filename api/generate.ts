@@ -138,6 +138,7 @@ async function writeDirectorPrompt(
   sceneLabel?: string,
   script?: string,
   productReference?: { data: string; mime: string },
+  creatorReference?: { data: string; mime: string },
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -181,6 +182,9 @@ RULES (violating any one produces unusable output):
 
 2. ANCHOR the product in every sentence.
    State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
+${creatorReference ? `
+2b. ANCHOR the creator's appearance to their reference photo.
+   A reference image of the creator is also attached. Describe their hair style/color, facial features, skin tone, clothing, and hands EXACTLY as observed in that photo — never invent or vary these across scenes. The only appearance details that may change are ones the scene direction below explicitly calls for (e.g. a different action, pose, or setting); absent an explicit instruction, hair, face, clothing, hands, and skin tone must stay identical to the photo.` : ''}
 
 3. PRECISE camera language only.
    Good: "locked tripod, slow push-in starting at chest level", "handheld with slight natural drift", "overhead tight on hands, product fills 70% of frame", "fast zoom-in to face then snap to product"
@@ -211,6 +215,10 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
   if (identitySection.trim()) userLines.push(identitySection.trim())
   userLines.push(`\nWrite the ${style.label} motion prompt.`)
 
+  const imageBlocks = [productReference, creatorReference]
+    .filter((r): r is { data: string; mime: string } => !!r)
+    .map(r => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: r.mime as any, data: r.data } }))
+
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 650,
@@ -218,11 +226,8 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
     messages: [
       {
         role: 'user',
-        content: productReference
-          ? [
-              { type: 'image', source: { type: 'base64', media_type: productReference.mime as any, data: productReference.data } },
-              { type: 'text', text: userLines.join('\n\n') },
-            ]
+        content: imageBlocks.length
+          ? [...imageBlocks, { type: 'text', text: userLines.join('\n\n') }]
           : userLines.join('\n\n'),
       },
     ],
@@ -413,6 +418,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       : undefined
 
+    // Creator consistency: the same uploaded/transformed photo Veo uses as its
+    // conditioning image is also shown to Claude, so hair, face, clothing,
+    // hands, and skin tone stay locked to the real photo instead of drifting
+    // scene-to-scene from a text-only description.
+    const creatorReference = creatorImageUrl
+      ? await fetchImageAsBase64(creatorImageUrl).catch(err => {
+          console.warn('[generate] creator reference fetch failed, continuing text-only:', err instanceof Error ? err.message : err)
+          return undefined
+        })
+      : undefined
+
     const directorPrompt = await writeDirectorPrompt(
       productDescription.trim(),
       styleId,
@@ -421,6 +437,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sceneLabel,
       script,
       productReference,
+      creatorReference,
     )
 
     // Veo takes exactly one conditioning image per job. When a creator photo is

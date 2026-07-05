@@ -79,18 +79,28 @@ export default function SeedImageStudio({
     const objectUrl = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
-      const MAX = 1280
-      const scale = Math.min(MAX / img.width, MAX / img.height, 1)
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(img.width * scale)
-      canvas.height = Math.round(img.height * scale)
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(objectUrl)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
-      setRefUrl(dataUrl)
-      setResult(null)
-      setTurnaroundResult(null)
-      setTurnaroundError('')
+      // Same class of bug fixed in ProductInput/CreatorInput: a canvas draw/
+      // toDataURL failure (privacy-hardened browsers block or randomize canvas
+      // reads for fingerprinting protection) throws inside this callback. Left
+      // uncaught, that exception just vanishes — no error, no state update,
+      // and the upload silently does nothing. Catch it and tell the user.
+      try {
+        const MAX = 1280
+        const scale = Math.min(MAX / img.width, MAX / img.height, 1)
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+        setRefUrl(dataUrl)
+        setResult(null)
+        setTurnaroundResult(null)
+        setTurnaroundError('')
+      } catch (err) {
+        setError(err instanceof Error ? `Could not process that image: ${err.message}` : 'Could not process that image.')
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
     }
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl)
