@@ -5,9 +5,8 @@ import Reveal from './Reveal'
 export default function Problem() {
   return (
     <section id="product" className="relative overflow-hidden py-28 md:py-36">
-      {/* Ambient glow behind each column — red for the pain, fire for the win */}
+      {/* Ambient fire glow behind the winning column */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute left-[8%] top-1/2 h-[420px] w-[420px] -translate-y-1/2 rounded-full bg-rose-500/[0.06] blur-[130px]" />
         <div className="absolute right-[8%] top-1/2 h-[480px] w-[480px] -translate-y-1/2 rounded-full bg-fire-end/10 blur-[130px]" />
       </div>
 
@@ -34,12 +33,12 @@ export default function Problem() {
         <Reveal delay={0.12}>
           <div className="mx-auto mt-14 grid max-w-5xl gap-4 lg:grid-cols-2 lg:gap-6">
             {/* ── Pain column ── */}
-            <div className="relative rounded-[28px] border border-rose-500/15 bg-gradient-to-b from-rose-500/[0.05] to-void-900/40 p-6 sm:p-8">
+            <div className="relative rounded-[28px] border border-white/8 bg-void-900/40 p-6 sm:p-8">
               <div className="mb-6 flex items-center gap-2.5">
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500/10 text-rose-400 ring-1 ring-rose-500/20">
-                  <X className="h-4 w-4" />
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-rose-500 shadow-[0_0_20px_-4px_rgba(244,63,94,0.7)]">
+                  <X className="h-4 w-4 text-white" />
                 </span>
-                <span className="text-sm font-bold uppercase tracking-widest text-rose-300/90">
+                <span className="text-sm font-bold uppercase tracking-widest text-ink-faint">
                   {problem.oldLabel}
                 </span>
               </div>
@@ -47,18 +46,18 @@ export default function Problem() {
                 {problem.rows.map((r, i) => (
                   <li
                     key={i}
-                    className="flex items-center justify-between gap-4 rounded-2xl border border-rose-500/[0.08] bg-void-800/40 p-4"
+                    className="flex items-center justify-between gap-4 rounded-2xl bg-void-800/40 p-4"
                   >
                     <div className="flex items-start gap-3">
-                      <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rose-500/15 ring-1 ring-rose-500/30">
-                        <X className="h-2.5 w-2.5 text-rose-400" />
+                      <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-rose-500 shadow-[0_0_12px_-2px_rgba(244,63,94,0.75)]">
+                        <X className="h-2.5 w-2.5 text-white" />
                       </span>
-                      <span className="text-sm leading-snug text-ink-muted line-through decoration-rose-400/50">
+                      <span className="text-sm leading-snug text-ink-muted line-through decoration-ink-faint/40">
                         {r.pain}
                       </span>
                     </div>
                     <div className="shrink-0 text-right">
-                      <div className="text-lg font-extrabold tracking-tight text-rose-400/90">
+                      <div className="text-lg font-extrabold tracking-tight text-ink-muted">
                         {r.painMetric}
                       </div>
                       <div className="text-[10px] uppercase tracking-wide text-ink-faint">
