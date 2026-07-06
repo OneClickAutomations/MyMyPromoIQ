@@ -512,8 +512,10 @@ async function runApifyActorAsync(actorId: string, input: Record<string, unknown
   if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
     throw new Error(`Apify run ended with status: ${status}`)
   }
-  // RUNNING means the actor didn't finish within 42 s; bail to the demo set.
-  if (status === 'RUNNING' || !datasetId) return []
+  // RUNNING means the actor didn't finish within 42 s. Signal that distinctly so
+  // the user sees "scraper timed out, try again" rather than a generic fallback.
+  if (status === 'RUNNING') throw new Error('TIMEOUT: the scraper did not finish in time')
+  if (!datasetId) return []
 
   const itemsResp = await fetch(
     `${APIFY_BASE}/datasets/${datasetId}/items?token=${encodeURIComponent(token)}&clean=true&limit=${META_ACTOR.maxResults}`,
@@ -530,10 +532,12 @@ async function runApifyActorAsync(actorId: string, input: Record<string, unknown
  *
  * Only Meta is wired (per the chosen actor). TikTok stays on the demo set.
  */
-async function runApifyAdapter(type: string, value: string, platform: string): Promise<RawAd[] | null> {
+type AdapterResult = { ads: RawAd[] | null; error?: string }
+
+async function runApifyAdapter(type: string, value: string, platform: string): Promise<AdapterResult> {
   const token = process.env.APIFY_TOKEN
-  if (!token || !META_ACTOR.enabled) return null
-  if (platform === 'tiktok') return null // Meta-only actor; let TikTok use the seed set.
+  if (!token || !META_ACTOR.enabled) return { ads: null }
+  if (platform === 'tiktok') return { ads: null } // Meta-only actor; let TikTok use the seed set.
 
   try {
     const input = { startUrls: [{ url: META_ACTOR.searchUrl(type, value) }], resultsLimit: META_ACTOR.maxResults }
@@ -546,11 +550,34 @@ async function runApifyAdapter(type: string, value: string, platform: string): P
     // ish results beat an empty page.
     const relevant = filterByRelevance(mapped, value)
     const out = relevant.length ? relevant : mapped
-    return out.length ? out : null
+    if (out.length) return { ads: out }
+    return { ads: null, error: 'The scraper ran but returned no ads for this search.' }
   } catch (err) {
-    console.error('[/api/discover] Apify adapter error — falling back to demo set:', err)
-    return null
+    const raw = err instanceof Error ? err.message : String(err)
+    console.error('[/api/discover] Apify adapter error — falling back to demo set:', raw)
+    return { ads: null, error: raw }
   }
+}
+
+/** Turn an adapter failure into one honest, actionable sentence for the user. */
+function buildScraperNotice(hasToken: boolean, platform: string, error?: string): string {
+  const suffix = ' Showing curated sample ads meanwhile.'
+  if (!hasToken) return 'Connect a scraper (set APIFY_TOKEN) to see live ads.' + suffix
+  if (platform === 'tiktok') return 'Live TikTok ad search isn\'t wired yet — only Meta is live.' + suffix
+  const e = (error ?? '').toLowerCase()
+  // Apify returns 402/403 (and messages mentioning payment/credit/limit) when the
+  // account is out of monthly compute credits or the plan is blocked.
+  if (/\b(402|403)\b/.test(e) || /(payment|credit|quota|billing|insufficient|limit exceeded|monthly usage)/.test(e)) {
+    return 'Live ad search is paused — your Apify account looks out of credits or blocked. Check your Apify billing/usage, then search again.' + suffix
+  }
+  if (e.includes('timeout')) {
+    return 'The ad scraper didn\'t finish in time (Meta was slow). Try that search again in a moment.' + suffix
+  }
+  if (e.includes('no ads for this search')) {
+    return 'No live ads matched this search. Try a broader keyword.' + suffix
+  }
+  if (error) return `Live ad search hit an error (${error.slice(0, 120)}).` + suffix
+  return 'Live ad search is temporarily unavailable.' + suffix
 }
 
 // Query tokens worth matching on — drop stopwords and short filler so the
@@ -625,13 +652,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const hasToken = !!process.env.APIFY_TOKEN
     let raw: RawAd[] | null = null
-    let live = false
+    let scraperError: string | undefined
 
-    if (process.env.APIFY_TOKEN) {
-      raw = await runApifyAdapter(type, value, platform)
-      live = !!raw
+    if (hasToken) {
+      const result = await runApifyAdapter(type, value, platform)
+      raw = result.ads
+      scraperError = result.error
     }
+    const live = !!raw
 
     if (!raw) {
       raw = SEED_ADS.filter(ad => matchesQuery(ad, type, value))
@@ -644,7 +674,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       live,
       resultCount: ads.length,
       ads,
-      notice: live ? undefined : 'Showing curated sample ads — connect a scraper (APIFY_TOKEN) for live results.',
+      // On fallback, tell the user the REAL reason (billing, timeout, no token,
+      // TikTok-not-wired) instead of always blaming a missing token.
+      notice: live ? undefined : buildScraperNotice(hasToken, platform, scraperError),
     })
   } catch (err) {
     console.error('[/api/discover]', err)
