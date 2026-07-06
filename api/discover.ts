@@ -476,7 +476,9 @@ const META_ACTOR = {
       },
       // Sourcing is a separate call (/api/sourcing) — left unmatched here so the
       // score reflects "not yet sourced" until the sourcing lookup runs.
-      product: { name: productName },
+      // sourceUrl is the verifiable permalink to this exact ad in Meta's public
+      // Ad Library, so the user can confirm the real source of a scraped result.
+      product: { name: productName, sourceUrl: `https://www.facebook.com/ads/library/?id=${externalAdId}` },
       sceneCount: hasVideo ? 3 : 1,
       durationSeconds: hasVideo ? 20 : 8,
     }
@@ -537,11 +539,37 @@ async function runApifyAdapter(type: string, value: string, platform: string): P
     const input = { startUrls: [{ url: META_ACTOR.searchUrl(type, value) }], resultsLimit: META_ACTOR.maxResults }
     const items = await runApifyActorAsync(META_ACTOR.actorId, input, token)
     const mapped = items.map(it => META_ACTOR.mapItem(it)).filter((a): a is RawAd => a !== null)
-    return mapped.length ? mapped : null
+    // Meta's keyword_unordered search is loose — it returns ads matching ANY
+    // token, so "breast feeding tracker" pulls in unrelated ads too. Keep only
+    // ads where a meaningful query token actually appears in the ad's own text.
+    // If that leaves nothing (over-filtered), keep the raw set — some relevant-
+    // ish results beat an empty page.
+    const relevant = filterByRelevance(mapped, value)
+    const out = relevant.length ? relevant : mapped
+    return out.length ? out : null
   } catch (err) {
     console.error('[/api/discover] Apify adapter error — falling back to demo set:', err)
     return null
   }
+}
+
+// Query tokens worth matching on — drop stopwords and short filler so the
+// relevance test keys on the meaningful nouns ("breast", "feeding", "tracker").
+const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'your', 'you', 'best', 'buy', 'shop', 'new', 'get', 'top'])
+function queryTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .split(/[^a-z0-9]+/)
+    .filter(t => t.length > 2 && !STOPWORDS.has(t))
+}
+function filterByRelevance(ads: RawAd[], value: string): RawAd[] {
+  const tokens = queryTokens(value)
+  if (!tokens.length) return ads
+  return ads.filter(ad => {
+    const hay = `${ad.product.name ?? ''} ${ad.creative.headline ?? ''} ${ad.creative.bodyText ?? ''} ${ad.pageOrShopName}`.toLowerCase()
+    return tokens.some(t => hay.includes(t))
+  })
 }
 
 // ── Ad-media image proxy (GET /api/discover?img=<url>) ────────────────────────

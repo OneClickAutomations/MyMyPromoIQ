@@ -15,7 +15,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import {
   Compass, Search, Wand, X, Check, ArrowRight,
-  Package, Clock, Bolt, RefreshCw, LinkIcon,
+  Package, Clock, Bolt, RefreshCw, LinkIcon, PlayIcon,
 } from '../components/icons'
 import { runDiscoverySearch, analyzeSourceAd, runSourcingLookup, type SourcingResponse } from '../lib/discovery/api'
 import ProductInput, { EMPTY_PRODUCT, isProductReady, type ProductInputValue } from '../components/ProductInput'
@@ -104,6 +104,10 @@ function FactorRow({ label, value, signal }: { label: string; value: number; sig
 
 // ── Result card ───────────────────────────────────────────────────────────────
 function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
+  // mediaUrls[0] is ALWAYS a still image (the backend puts a video's poster
+  // frame first, then images, then the raw video). Render it as an <img> —
+  // an earlier version fed this image URL into a <video> tag for video ads,
+  // which renders as a black box (the Meta video ad thumbnails you saw blank).
   const media = proxiedMedia(ad.creative.mediaUrls[0])
   const isVideo = ad.creative.mediaType === 'video'
   return (
@@ -114,21 +118,15 @@ function AdCard({ ad, onOpen }: { ad: SourceAd; onOpen: () => void }) {
     >
       <div className="relative aspect-[4/5] overflow-hidden bg-void-700">
         {media
-          ? isVideo
-            ? (
-              <video
-                src={media}
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                onMouseEnter={e => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
-                onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 0 }}
-              />
-            )
-            : <img src={media} alt={ad.product.name ?? ad.pageOrShopName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
+          ? <img src={media} alt={ad.product.name ?? ad.pageOrShopName} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
           : <div className="grid h-full place-items-center"><Package className="h-8 w-8 text-ink-faint" /></div>}
+        {isVideo && media && (
+          <span className="absolute inset-0 grid place-items-center">
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-black/55 ring-1 ring-white/25 backdrop-blur-sm">
+              <PlayIcon className="ml-0.5 h-5 w-5 text-white" />
+            </span>
+          </span>
+        )}
         <div className="absolute left-2 top-2"><ScoreBadge rating={ad.score.rating} total={ad.score.total} /></div>
         <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm">
           {ad.platform}
@@ -380,28 +378,44 @@ function DetailDrawer({ ad, onClose, onClone }: { ad: SourceAd; onClose: () => v
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {/* Render the still (poster/image) — the raw Meta video URL is
+              hotlink-protected and won't play cross-origin, so the poster +
+              the "View original ad" link below is the reliable path. */}
           {ad.creative.mediaUrls[0] && (
-            ad.creative.mediaType === 'video'
-              ? (
-                <video
-                  src={proxiedMedia(ad.creative.mediaUrls[0])}
-                  controls
-                  muted
-                  loop
-                  playsInline
-                  className="aspect-[4/5] w-full rounded-xl object-cover"
-                />
-              )
-              : <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
+            <div className="relative">
+              <img src={proxiedMedia(ad.creative.mediaUrls[0])} alt="" className="aspect-[4/5] w-full rounded-xl object-cover" />
+              {ad.creative.mediaType === 'video' && (
+                <span className="absolute inset-0 grid place-items-center">
+                  <span className="grid h-14 w-14 place-items-center rounded-full bg-black/55 ring-1 ring-white/25 backdrop-blur-sm">
+                    <PlayIcon className="ml-0.5 h-6 w-6 text-white" />
+                  </span>
+                </span>
+              )}
+            </div>
           )}
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate font-bold text-ink">{ad.product.name ?? ad.pageOrShopName}</p>
-              <p className="truncate text-xs text-ink-muted">{ad.pageOrShopName} · {ad.platform} · {ad.delivery.daysRunning}d running</p>
+              <p className="truncate text-xs text-ink-muted">
+                <span className="font-semibold uppercase tracking-wide text-ink-faint">{ad.platform}</span>
+                {' · '}{ad.pageOrShopName} · {ad.delivery.daysRunning}d running
+              </p>
             </div>
             <ScoreBadge rating={ad.score.rating} total={ad.score.total} />
           </div>
+
+          {/* Verifiable source — link to the original ad in the platform's ad library. */}
+          {ad.product.sourceUrl && (
+            <a
+              href={ad.product.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-fire-start hover:text-fire-end"
+            >
+              <LinkIcon className="h-3.5 w-3.5" /> View original ad on {ad.platform === 'meta' ? 'Meta' : 'TikTok'}
+            </a>
+          )}
 
           {/* One-line verdict */}
           {(analyzing || analysis?.verdict) && (
