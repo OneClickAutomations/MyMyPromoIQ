@@ -566,15 +566,22 @@ function CloneConfirm({ ad, onCancel, onConfirm }: {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-type Phase = 'entry' | 'search' | 'searching' | 'results' | 'cloning'
+// Search first: the user searches the ad library by keyword/product/service,
+// judges an ad on its actual analysis (score, SWOT, Ad DNA), and ONLY once
+// they've decided it's worth cloning do we ask for their own product to build
+// the campaign around. Requiring a product before search ever ran had it
+// backwards — you can't decide an ad is "winning" around a product you were
+// forced to describe before seeing any evidence.
+type Phase = 'search' | 'searching' | 'results' | 'clone-product' | 'cloning'
 
 export default function Discovery() {
   const navigate = useNavigate()
-  const [phase, setPhase] = useState<Phase>('entry')
+  const [phase, setPhase] = useState<Phase>('search')
 
-  // Unified flow: capture the user's product FIRST, then search ads to clone.
-  // The old has_product/find_product fork is gone — there is one path now.
+  // Captured only once the user commits to cloning a specific ad (see
+  // 'clone-product' phase) — never a gate in front of search.
   const [product, setProduct] = useState<ProductInputValue>(EMPTY_PRODUCT)
+  const [pendingClone, setPendingClone] = useState<{ ad: SourceAd; mode: 'quick' | 'studio' } | null>(null)
 
   const [queryValue, setQueryValue] = useState('')
   const [platform, setPlatform] = useState<PlatformFilter>('both')
@@ -608,11 +615,10 @@ export default function Discovery() {
     }
   }
 
-  async function handleConfirmClone(mode: 'quick' | 'studio') {
-    const ad = confirmAd
-    if (!ad) return
+  async function handleConfirmClone(mode: 'quick' | 'studio', ad: SourceAd) {
     setConfirmAd(null)
     setOpenAd(null)
+    setPendingClone(null)
     setCloneError('')
 
     // The scraped ad's own creative — kept as the DNA/pacing reference.
@@ -712,41 +718,13 @@ export default function Discovery() {
 
   return (
     <AppShell>
-      {phase === 'entry' && (
+      {phase === 'search' && (
         <div className="mx-auto max-w-2xl space-y-6">
           <div>
             <h1 className="text-2xl font-bold text-ink md:text-3xl">Clone a winning ad</h1>
             <p className="mt-1.5 text-sm text-ink-muted">
-              Start with your product. Next you'll find a proven, currently-running ad and we'll rebuild its hook, pacing, and structure around your product.
+              Search by keyword, product, or service — or paste a competitor's URL — to see scored, currently-running ads. Open one to see the full breakdown (score, SWOT, hook, structure) before you decide it's worth cloning.
             </p>
-          </div>
-
-          <ProductInput value={product} onChange={setProduct} />
-
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-ink-faint">
-              {isProductReady(product) ? 'Ready — find an ad to clone.' : 'Add a product image or name to continue.'}
-            </p>
-            <button
-              onClick={() => {
-                if (!queryValue.trim() && product.name.trim()) setQueryValue(product.name.trim())
-                setPhase('search')
-              }}
-              disabled={!isProductReady(product)}
-              className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-40"
-            >
-              Find winning ads <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {phase === 'search' && (
-        <div className="mx-auto max-w-2xl space-y-6">
-          <button onClick={() => setPhase('entry')} className="text-xs font-semibold text-ink-faint hover:text-ink">← Back to product</button>
-          <div>
-            <h1 className="text-2xl font-bold text-ink">Search ad libraries</h1>
-            <p className="mt-1.5 text-sm text-ink-muted">Search a niche or paste a competitor product URL to see scored, currently-running ads to clone.</p>
           </div>
 
           <div className="space-y-4">
@@ -778,6 +756,39 @@ export default function Discovery() {
 
             <button onClick={handleSearch} disabled={!queryValue.trim()} className="btn-fire w-full disabled:opacity-40">
               <Compass className="h-4 w-4" /> Search
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'clone-product' && pendingClone && (
+        <div className="mx-auto max-w-2xl space-y-6">
+          <button onClick={() => { setPhase('results'); setPendingClone(null) }} className="text-xs font-semibold text-ink-faint hover:text-ink">← Back to results</button>
+          <div>
+            <h1 className="text-2xl font-bold text-ink md:text-3xl">Now add your product</h1>
+            <p className="mt-1.5 text-sm text-ink-muted">
+              <span className="font-semibold text-fire-start">
+                {pendingClone.ad.product.name ?? pendingClone.ad.creative.headline ?? pendingClone.ad.pageOrShopName}
+              </span>{' '}
+              is the winning ad — we'll rebuild its hook, pacing, and structure around your product.
+            </p>
+          </div>
+
+          <ProductInput value={product} onChange={setProduct} />
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button
+              onClick={() => handleConfirmClone(pendingClone.mode, pendingClone.ad)}
+              className="text-xs font-semibold text-ink-faint underline decoration-dotted underline-offset-4 hover:text-ink"
+            >
+              Skip — clone with this ad's own product
+            </button>
+            <button
+              onClick={() => handleConfirmClone(pendingClone.mode, pendingClone.ad)}
+              disabled={!isProductReady(product)}
+              className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-40"
+            >
+              Clone this ad <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -883,10 +894,27 @@ export default function Discovery() {
         )}
       </AnimatePresence>
 
-      {/* Clone confirm */}
+      {/* Clone confirm — the user has already seen the ad's analysis (score,
+          SWOT, Ad DNA) in the drawer, so this is the "yes, clone it" decision.
+          Their own product isn't captured yet; route to that step next rather
+          than assume they already provided one. */}
       <AnimatePresence>
         {confirmAd && (
-          <CloneConfirm ad={confirmAd} onCancel={() => setConfirmAd(null)} onConfirm={(mode) => handleConfirmClone(mode)} />
+          <CloneConfirm
+            ad={confirmAd}
+            onCancel={() => setConfirmAd(null)}
+            onConfirm={mode => {
+              const ad = confirmAd
+              setConfirmAd(null)
+              setOpenAd(null)
+              if (isProductReady(product)) {
+                handleConfirmClone(mode, ad)
+              } else {
+                setPendingClone({ ad, mode })
+                setPhase('clone-product')
+              }
+            }}
+          />
         )}
       </AnimatePresence>
     </AppShell>
