@@ -25,9 +25,13 @@ function Tile({ tile, index, onRetry, onRemix, onDownload }: {
       {tile.status === 'complete' && tile.videoUrl ? (
         <>
           {/* autoPlay (not just hover-to-play) — a hover-only preview never
-              plays on touch devices, which read as "the video isn't there." */}
+              plays on touch devices, which read as "the video isn't there."
+              The #t=0.1 first-frame hint is only appended to hosted URLs; a
+              muxed clip is a huge data: URL and the fragment is pointless
+              (and best kept off it). */}
           <video
-            src={`${tile.videoUrl}#t=0.1`} muted loop autoPlay playsInline preload="metadata"
+            src={/^data:/i.test(tile.videoUrl!) ? tile.videoUrl : `${tile.videoUrl}#t=0.1`}
+            muted loop autoPlay playsInline preload="metadata"
             className="h-full w-full object-cover"
           />
           <div className="absolute bottom-1.5 right-1.5 flex gap-1">

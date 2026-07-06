@@ -39,8 +39,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!Array.isArray(videoUrls) || videoUrls.length < 2 || videoUrls.length > MAX_CLIPS) {
     return res.status(400).json({ error: `Provide 2–${MAX_CLIPS} video URLs.` })
   }
-  if (videoUrls.some((u: unknown) => typeof u !== 'string' || !/^https?:\/\//i.test(u))) {
-    return res.status(400).json({ error: 'All entries must be valid https:// URLs.' })
+  // Clips are either hosted https:// URLs (silent Veo renders) OR inline
+  // data:video/... base64 URLs (clips that had a voiceover muxed in — that's
+  // the common case when a voice is selected). Both are valid here; rejecting
+  // data: URLs is exactly what made assembly fail whenever a voice was picked.
+  if (videoUrls.some((u: unknown) => typeof u !== 'string' || !/^(https?:\/\/|data:)/i.test(u))) {
+    return res.status(400).json({ error: 'All entries must be https:// or data: video URLs.' })
   }
 
   const id = randomUUID()
@@ -63,9 +67,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // before ffmpeg ever started. This is the fix for the 504
     // FUNCTION_INVOCATION_TIMEOUT, not a bigger timeout — there isn't one.
     const clipPaths = await Promise.all(videoUrls.map(async (url, i) => {
-      const vresp = await fetch(url as string)
-      if (!vresp.ok) throw new Error(`Could not fetch clip ${i + 1} (${vresp.status}).`)
-      const vbuf = Buffer.from(await vresp.arrayBuffer())
+      let vbuf: Buffer
+      if (/^data:/i.test(url as string)) {
+        // Decode inline base64 directly — Node's fetch doesn't reliably read
+        // large data: URLs, and there's no network round-trip to make anyway.
+        const b64 = (url as string).includes(',') ? (url as string).split(',')[1] : ''
+        vbuf = Buffer.from(b64, 'base64')
+        if (!vbuf.length) throw new Error(`Clip ${i + 1} is an empty data URL.`)
+      } else {
+        const vresp = await fetch(url as string)
+        if (!vresp.ok) throw new Error(`Could not fetch clip ${i + 1} (${vresp.status}).`)
+        vbuf = Buffer.from(await vresp.arrayBuffer())
+      }
       if (vbuf.length > MAX_VIDEO_BYTES) throw new Error(`Clip ${i + 1} exceeds 80 MB.`)
       const p = join(dir, `clip${String(i).padStart(2, '0')}.mp4`)
       await writeFile(p, vbuf)

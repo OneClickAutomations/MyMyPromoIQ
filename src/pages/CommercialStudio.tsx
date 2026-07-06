@@ -392,6 +392,11 @@ export default function CommercialStudio() {
   const [wizardAssembling, setWizardAssembling] = useState(false)
   const [wizardAssembledUrl, setWizardAssembledUrl] = useState<string | null>(null)
   const [wizardAssemblyError, setWizardAssemblyError] = useState('')
+  // Guards auto-assembly to fire exactly ONCE per generation run. Without it, a
+  // failed stitch left assembledUrl null + assembling false, so the auto-assemble
+  // effect's condition went true again and re-fired in a loop (the "blinking" the
+  // user saw). Reset at the start of each new Generate-All.
+  const wizardAutoAssembledRef = useRef(false)
 
   // ── Draft save toast
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
@@ -804,6 +809,7 @@ export default function CommercialStudio() {
   function generateAllClips(clips: StoryboardClip[]) {
     setWizardAssembledUrl(null)
     setWizardAssemblyError('')
+    wizardAutoAssembledRef.current = false
     setWizardPhase('rendering')
     void wizardQueue.run(clips, wizardGenerateOne)
   }
@@ -843,14 +849,21 @@ export default function CommercialStudio() {
   }, [stepNum])
 
   // Once "Generate All" is clicked, the rest happens without further input —
-  // the moment every clip has settled, assemble automatically instead of
-  // waiting on a manual "Assemble commercial" tap the user might never see.
+  // the moment every clip has settled, assemble automatically. Fires ONCE per
+  // run (the ref guard): a failed stitch must NOT auto-retry in a loop; the
+  // user gets a manual "Retry assembly" button instead.
   useEffect(() => {
-    if (wizardPhase === 'rendering' && wizardQueue.allSettled && wizardQueue.completedCount >= 1 && !wizardAssembledUrl && !wizardAssembling) {
+    if (
+      wizardPhase === 'rendering' &&
+      wizardQueue.allSettled &&
+      wizardQueue.completedCount >= 1 &&
+      !wizardAutoAssembledRef.current
+    ) {
+      wizardAutoAssembledRef.current = true
       assembleWizardAd()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wizardPhase, wizardQueue.allSettled, wizardQueue.completedCount, wizardAssembledUrl, wizardAssembling])
+  }, [wizardPhase, wizardQueue.allSettled, wizardQueue.completedCount])
 
   // ── Left-rail stepper ─────────────────────────────────────────────────────
 
