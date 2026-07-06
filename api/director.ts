@@ -51,7 +51,24 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
   const {
     productName, description, style,
     clipCount, referenceBeats, referenceDurationSeconds, brandVoice, cta,
+    creator,
   } = body
+
+  // Who's on camera. Without this, the planner invents a person and defaults to
+  // "a woman" in visualDescription/creatorAction — wrong when the user uploaded
+  // their own photo. For an uploaded real creator we tell Claude to stay neutral
+  // ("the creator"/"the presenter") and NEVER assign a gender or appearance,
+  // since the actual look is fixed by the photo Veo conditions on. For a
+  // generated creator we pass whatever attributes were chosen.
+  let creatorSection = ''
+  if (creator?.source === 'uploaded') {
+    creatorSection = '\nCREATOR: A specific real person (the user) whose exact appearance is fixed by an uploaded photo. Refer to them ONLY as "the creator" or "the presenter". Do NOT state or imply their gender, age, ethnicity, hair, or any physical appearance — describe only their ACTIONS and what they say. Never write "a woman", "a man", "she", or "he".'
+  } else if (creator?.source === 'generated') {
+    const attrs = [creator.gender, creator.ageRange, creator.ethnicity, creator.description].filter(Boolean).join(', ')
+    creatorSection = attrs
+      ? `\nCREATOR: ${attrs}. Keep this exact person consistent across every clip.`
+      : '\nCREATOR: Refer to the on-camera person neutrally as "the creator"; do not invent a specific gender or appearance.'
+  }
 
   // Desired clip count: explicit, else inferred from a reference ad's length, else 4.
   let desired = Number(clipCount)
@@ -81,7 +98,7 @@ HARD RULES:
 - Exactly ${desired} clips, ordered 1..${desired}.
 - Each clip durationSeconds is one of 4,5,6,7,8.
 - Dialogue is what a person SPEAKS in that clip. Natural pace ≈ 2.5 words/second, so the word count MUST fit: 4s→≤10 words, 5s→≤12, 6s→≤15, 7s→≤17, 8s→≤20. If an idea needs more words, shorten it — do not overstuff. Compression means writing TIGHTER, more efficient lines that still cover every compressed element, not cramming more words in.
-- visualDescription: physically observable, camera-direction language (no mood adjectives).
+- visualDescription: physically observable, camera-direction language (no mood adjectives). If a CREATOR is specified below, honor it exactly — never invent or contradict the creator's gender or appearance.
 - creatorAction: what the person physically does with the product.
 - beat: one of hook, problem, solution, demo, proof, cta, bridge, reveal, outro — pick the DOMINANT element for clips that compress more than one (e.g. a clip compressing hook+problem+solution is still tagged "hook").
 - The final clip's beat is cta or outro, and must contain an explicit call-to-action.
@@ -98,7 +115,7 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
-Style: ${styleBlurb}${refSection}
+Style: ${styleBlurb}${refSection}${creatorSection}
 ${brandSection}
 
 Plan the ${desired} clips.`,

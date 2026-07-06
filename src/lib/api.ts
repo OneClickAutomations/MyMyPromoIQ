@@ -570,6 +570,17 @@ export type StoryboardPlanInput = {
   referenceDurationSeconds?: number
   brandVoice?: string
   cta?: string
+  /** Who's on camera, so the planner never invents a creator (e.g. "a woman").
+   *  'uploaded' = a specific real person whose look is fixed by their photo —
+   *  describe them neutrally, never assign a gender/appearance. 'generated' =
+   *  describe per attributes. */
+  creator?: {
+    source: 'uploaded' | 'generated'
+    gender?: string
+    ageRange?: string
+    ethnicity?: string
+    description?: string
+  }
 }
 
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {

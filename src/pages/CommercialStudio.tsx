@@ -712,6 +712,20 @@ export default function CommercialStudio() {
   // planned and shown up front, every clip is editable/regeneratable, and
   // "Generate All" fires the whole queue at once instead of a click-per-scene.
 
+  // Creator context for the storyboard planner, so it never invents a person
+  // (the "a woman" bug). An uploaded/transformed photo = a fixed real person:
+  // stay neutral, don't assign a gender/look. A generated creator = pass the
+  // chosen attributes so the description matches.
+  function planCreatorContext() {
+    const hasUploadedPhoto = !!(brief.creator.transformedImageUrl || brief.creator.seedImages?.[0]?.url)
+    if (hasUploadedPhoto) return { source: 'uploaded' as const }
+    const a = brief.creator.attributes
+    if (a && (a.gender || a.ageRange || a.ethnicity)) {
+      return { source: 'generated' as const, gender: a.gender || undefined, ageRange: a.ageRange || undefined, ethnicity: a.ethnicity || undefined }
+    }
+    return undefined
+  }
+
   async function runWizardPlan(clipCount?: number) {
     setWizardPhase('planning')
     setWizardPlanError('')
@@ -724,6 +738,7 @@ export default function CommercialStudio() {
         referenceBeats: [...activeSceneLabels],
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
+        creator: planCreatorContext(),
       })
       setWizardPlan(plan)
       setWizardPhase('plan')
@@ -750,6 +765,7 @@ export default function CommercialStudio() {
         referenceBeats: [clip.beat],
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
+        creator: planCreatorContext(),
       })
       const fresh = one.clips[0]
       if (fresh) {

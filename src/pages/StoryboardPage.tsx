@@ -112,6 +112,12 @@ export default function StoryboardPage() {
         referenceDurationSeconds: c.referenceDurationSeconds,
         brandVoice: c.brandVoice,
         cta: c.cta,
+        // Bring Your Own Creator: an uploaded/saved photo is a fixed real
+        // person — tell the planner to stay neutral so it doesn't invent a
+        // gender/appearance that contradicts the photo Veo conditions on.
+        creator: creatorValue.mode !== 'generated' && creatorValue.resolvedImageUrl
+          ? { source: 'uploaded' }
+          : undefined,
       })
       setPlan(plan)
       setPhase('plan')
