@@ -18,8 +18,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
-import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash } from './icons'
-import { extractProductFromUrl, generateImage } from '../lib/api'
+import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid } from './icons'
+import { extractProductFromUrl, generateImage, generateModelSheet } from '../lib/api'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -29,10 +29,13 @@ export interface ProductInputValue {
   name: string
   description: string
   sourceUrl?: string
+  /** 2×3 multi-angle turnaround sheet of the hero, once generated. Used as a
+   *  vision reference at generation time so the product stays faithful. */
+  turnaroundImage?: string
 }
 
 export const EMPTY_PRODUCT: ProductInputValue = {
-  images: [], primaryImage: '', name: '', description: '', sourceUrl: undefined,
+  images: [], primaryImage: '', name: '', description: '', sourceUrl: undefined, turnaroundImage: undefined,
 }
 
 type Method = 'upload' | 'camera' | 'url'
@@ -149,6 +152,10 @@ export default function ProductInput({ value, onChange, className = '' }: {
   const [aiBusy, setAiBusy] = useState<'bg' | 'enhance' | null>(null)
   const [preview, setPreview] = useState<{ before: string; after: string | null } | null>(null)
 
+  // Turnaround / model-sheet state (a 2×3 multi-angle reference of the hero).
+  const [turnaroundBusy, setTurnaroundBusy] = useState(false)
+  const [turnaroundErr, setTurnaroundErr] = useState('')
+
   const patch = useCallback((u: Partial<ProductInputValue>) => onChange({ ...value, ...u }), [value, onChange])
 
   async function addImages(sources: string[]) {
@@ -239,6 +246,29 @@ export default function ProductInput({ value, onChange, className = '' }: {
     if (!images.includes(preview.after)) images.unshift(preview.after)
     patch({ images: images.slice(0, MAX_IMAGES), primaryImage: preview.after })
     setPreview(null)
+  }
+
+  // Generate a 2×3 multi-angle turnaround of the hero shot. This gives the
+  // video generator six consistent views to interpret the product from,
+  // instead of a single angle — the key to keeping the product faithful when
+  // the creator handles or demonstrates it. Stored on the value so generation
+  // can pass it as a vision reference.
+  async function generateTurnaround() {
+    if (!value.primaryImage || turnaroundBusy) return
+    setTurnaroundBusy(true); setTurnaroundErr('')
+    try {
+      const parts = dataUrlParts(value.primaryImage)
+      const { sheetDataUrl } = await generateModelSheet(
+        parts
+          ? { imageBase64: parts.base64, mimeType: parts.mimeType, subjectType: 'product', subjectHint: value.name || undefined }
+          : { imageUrl: value.primaryImage, subjectType: 'product', subjectHint: value.name || undefined },
+      )
+      patch({ turnaroundImage: sheetDataUrl })
+    } catch (e) {
+      setTurnaroundErr(e instanceof Error ? e.message : 'Could not generate the turnaround — try a clearer photo.')
+    } finally {
+      setTurnaroundBusy(false)
+    }
   }
 
   const hasImages = value.images.length > 0
@@ -370,15 +400,42 @@ export default function ProductInput({ value, onChange, className = '' }: {
 
           {/* AI clean-up */}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={() => runAi('bg')} disabled={!!aiBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+            <button onClick={() => runAi('bg')} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
               {aiBusy === 'bg' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Wand className="h-3.5 w-3.5" />}
               Remove background
             </button>
-            <button onClick={() => runAi('enhance')} disabled={!!aiBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+            <button onClick={() => runAi('enhance')} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
               {aiBusy === 'enhance' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Spark className="h-3.5 w-3.5" />}
               Enhance photo
             </button>
+            <button onClick={generateTurnaround} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+              {turnaroundBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Grid className="h-3.5 w-3.5" />}
+              {value.turnaroundImage ? 'Regenerate turnaround' : 'Generate turnaround'}
+            </button>
           </div>
+
+          {/* Turnaround / model sheet — six consistent angles the video
+              generator uses to keep the product faithful when it's handled. */}
+          {(turnaroundBusy || value.turnaroundImage || turnaroundErr) && (
+            <div className="mt-4 rounded-xl border border-white/[0.08] bg-void-900 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Grid className="h-3.5 w-3.5 text-fire-start" />
+                <p className="text-xs font-semibold text-ink">360° turnaround reference</p>
+                {value.turnaroundImage && !turnaroundBusy && (
+                  <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300"><Check className="h-3 w-3" /> Saved as reference</span>
+                )}
+              </div>
+              {turnaroundBusy ? (
+                <div className="flex aspect-[3/2] items-center justify-center rounded-lg bg-void-800/60 text-sm text-ink-muted">
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin text-fire-start" /> Rendering six angles…
+                </div>
+              ) : value.turnaroundImage ? (
+                <img src={value.turnaroundImage} alt="Product turnaround sheet" className="w-full rounded-lg" />
+              ) : null}
+              {turnaroundErr && <p className="mt-2 text-xs text-amber-300">{turnaroundErr}</p>}
+              <p className="mt-2 text-[11px] text-ink-faint">Six angles help the AI keep your product accurate when the creator holds or demonstrates it.</p>
+            </div>
+          )}
 
           <AnimatePresence>
             {preview && (

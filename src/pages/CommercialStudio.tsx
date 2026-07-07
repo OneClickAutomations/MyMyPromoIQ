@@ -41,7 +41,6 @@ import {
   generateVoiceover,
   muxVideoAudio,
   stitchVideos,
-  generateModelSheet,
   planStoryboard,
   type StatusResponse,
   type StoredCreator,
@@ -168,73 +167,6 @@ function BestResults({ title = 'For best results', tips }: { title?: string; tip
             </li>
           ))}
         </ul>
-      )}
-    </div>
-  )
-}
-
-// ── Turnaround model-sheet generator (Gemini) ──────────────────────────────────
-// Turns one reference photo into a 2x3 multi-angle sheet for consistency review.
-function ModelSheetGenerator({ imageUrl, subjectType, subjectHint, onGenerated }: {
-  imageUrl: string
-  subjectType: 'product' | 'character'
-  subjectHint?: string
-  /** Called with the sheet's data URL once generated, so the caller can persist
-   *  it (e.g. onto the brief) and use it as a vision reference at generation time. */
-  onGenerated?: (sheetDataUrl: string) => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [sheet, setSheet] = useState<string | null>(null)
-  const [err, setErr] = useState('')
-
-  async function go() {
-    if (!imageUrl || busy) return
-    setBusy(true); setErr(''); setSheet(null)
-    try {
-      const { sheetDataUrl } = await generateModelSheet({ imageUrl, subjectType, subjectHint })
-      setSheet(sheetDataUrl)
-      onGenerated?.(sheetDataUrl)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not generate the turnaround.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const label = subjectType === 'character' ? 'character' : 'product'
-  return (
-    <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-4">
-      <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-fire-start/15">
-          <Layers className="h-4 w-4 text-fire-start" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-ink">Generate a 360° turnaround reference</p>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            AI reimagines your {label} from 6 angles on one sheet — a consistency reference to review before you generate.
-          </p>
-        </div>
-      </div>
-
-      <button onClick={go} disabled={!imageUrl || busy}
-        className="btn-ghost mt-3 flex w-full items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-40">
-        {busy
-          ? <><RefreshCw className="h-4 w-4 animate-spin" /> Rendering turnaround…</>
-          : <><Spark className="h-4 w-4" /> {sheet ? 'Regenerate turnaround' : 'Generate turnaround'}</>}
-      </button>
-
-      {err && <p className="mt-2 text-xs text-amber-300">{err}</p>}
-
-      {sheet && (
-        <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08]">
-          <img src={sheet} alt={`${label} turnaround model sheet`} className="w-full" />
-          <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] bg-void-900 px-3 py-2">
-            <span className="text-[11px] text-ink-faint">6-angle reference sheet</span>
-            <a href={sheet} download={`${label}-turnaround.png`} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-fire-start hover:text-fire-end">
-              <Download className="h-3.5 w-3.5" /> Download
-            </a>
-          </div>
-        </div>
       )}
     </div>
   )
@@ -691,6 +623,7 @@ export default function CommercialStudio() {
     name: brief.product.productName,
     description: descInput,
     sourceUrl: undefined,
+    turnaroundImage: brief.product.turnaroundImageUrl,
   }
   function onWizardProduct(v: ProductInputValue) {
     const img = v.primaryImage
@@ -704,7 +637,9 @@ export default function CommercialStudio() {
     setProductFile(null)
     setProductPreview(img)
     if (v.description || v.name) setDescInput(v.description || v.name)
-    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description } })
+    // Persist the turnaround sheet (generated inside ProductInput) so it's used
+    // as Claude's vision reference at generation time.
+    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description, turnaroundImageUrl: v.turnaroundImage ?? brief.product.turnaroundImageUrl } })
   }
 
   // ── Storyboard plan → Generate All ────────────────────────────────────────
@@ -1013,17 +948,8 @@ export default function CommercialStudio() {
           <p className="rounded-xl border border-fire-start/20 bg-fire-start/5 px-4 py-3 text-sm text-fire-start">{step1Error}</p>
         )}
 
-        {/* Turnaround model sheet — also the vision reference Claude sees when
-            writing the director prompt, so the product's real color/material/
-            label/shape ground the description instead of being invented. */}
-        {productImageUrl && (
-          <ModelSheetGenerator
-            imageUrl={productImageUrl}
-            subjectType="product"
-            subjectHint={brief.product.productName || undefined}
-            onGenerated={sheetDataUrl => patch({ product: { ...brief.product, turnaroundImageUrl: sheetDataUrl } })}
-          />
-        )}
+        {/* The turnaround generator now lives inside ProductInput (above), next
+            to Remove background / Enhance, so it's available in every mode. */}
 
         <button onClick={handleProductNext} disabled={!canAdvanceStep1 || uploadingImage} className="btn-fire w-full disabled:opacity-50">
           {uploadingImage ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Uploading…</> : <>Next — Creator <ArrowRight className="h-4 w-4" /></>}
