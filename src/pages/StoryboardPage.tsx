@@ -173,6 +173,9 @@ export default function StoryboardPage() {
       brandCta: ctx.cta,
       creatorImageUrl,
       creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
+      // Continuity across the multi-clip commercial.
+      sceneIndex: clip.order,
+      sceneCount: plan?.clips.length,
     })
     const res = await pollUntilDone(requestId, () => {})
     if (res.status === 'completed' && res.videoUrl) return res.videoUrl

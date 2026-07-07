@@ -139,6 +139,8 @@ async function writeDirectorPrompt(
   script?: string,
   productReference?: { data: string; mime: string },
   creatorReference?: { data: string; mime: string },
+  sceneIndex?: number,
+  sceneCount?: number,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -170,6 +172,24 @@ async function writeDirectorPrompt(
   const sceneFocusSection = sceneLabel && sceneFocusMap[sceneLabel]
     ? `\n${sceneFocusMap[sceneLabel]}\n`
     : ''
+
+  // Cross-clip continuity. Each clip is a separate Veo generation, so without
+  // this every clip opens with its own product-hero establishing shot and the
+  // stitched commercial feels like the same ad repeating. Tell clips 2..N they
+  // are a CONTINUATION and must NOT re-establish — begin mid-action so the
+  // sequence reads as one uninterrupted take.
+  const idx = typeof sceneIndex === 'number' ? sceneIndex : 0
+  const total = typeof sceneCount === 'number' ? sceneCount : 1
+  let continuitySection = ''
+  if (total > 1) {
+    if (idx <= 1) {
+      continuitySection = `\nSEQUENCE — This is clip 1 of ${total} in ONE continuous commercial. Open the scene and hook the viewer. The creator, wardrobe, lighting, and setting you establish here MUST carry through the rest of the sequence.\n`
+    } else if (idx >= total) {
+      continuitySection = `\nSEQUENCE — This is the FINAL clip (${idx} of ${total}) of ONE continuous commercial. Do NOT restart with a product beauty-shot or a new establishing frame — the camera is already rolling on the same creator in the same setting. Continue seamlessly from the previous moment and land the close/CTA.\n`
+    } else {
+      continuitySection = `\nSEQUENCE — This is clip ${idx} of ${total} in ONE continuous commercial. Do NOT re-introduce the product with a static hero shot and do NOT re-establish the scene — the SAME creator is already on screen mid-action, in the same wardrobe, lighting and setting as the previous clip. Begin mid-motion and continue the single take as if there was never a cut.\n`
+    }
+  }
 
   const system = `You are an expert UGC video director. Your job is to write image-to-video prompts for Google Veo 3 that produce scroll-stopping, authentic-feeling content. Veo 3 responds to physically specific, observable descriptions — not mood words or adjectives.
 
@@ -211,6 +231,7 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
   userLines.push(`Style direction: ${style.brief}`)
   userLines.push(`Camera direction: ${STYLE_CAMERA[styleId]}`)
   if (brandSection.trim()) userLines.push(brandSection.trim())
+  if (continuitySection.trim()) userLines.push(continuitySection.trim())
   if (sceneFocusSection.trim()) userLines.push(sceneFocusSection.trim())
   if (identitySection.trim()) userLines.push(identitySection.trim())
   userLines.push(`\nWrite the ${style.label} motion prompt.`)
@@ -371,7 +392,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // description matches the real product instead of being invented from
       // text alone. This is separate from Veo's single conditioning image.
       productReferenceImageUrl,
-    } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[] }
+      // Multi-clip continuity: this clip's 1-based position in the sequence and
+      // the total, so clips 2..N continue the take instead of each re-opening
+      // on a product establishing shot.
+      sceneIndex,
+      sceneCount,
+    } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
     // upload round-trip needed — Node's fetch reads data: URLs natively), so
@@ -438,6 +464,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       script,
       productReference,
       creatorReference,
+      Number(sceneIndex) || undefined,
+      Number(sceneCount) || undefined,
     )
 
     // Veo takes exactly one conditioning image per job. When a creator photo is

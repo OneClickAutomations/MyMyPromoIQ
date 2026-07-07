@@ -43,6 +43,10 @@ export type GenerateInput = {
   /** Turnaround sheet (preferred) or hero photo — shown to Claude as a vision
    *  reference so the written product description matches reality. */
   productReferenceImageUrl?: string
+  /** 1-based position of this clip in a multi-clip commercial, and the total,
+   *  so clips 2..N continue the take instead of re-opening on the product. */
+  sceneIndex?: number
+  sceneCount?: number
 }
 
 export type GenerateResponse = {

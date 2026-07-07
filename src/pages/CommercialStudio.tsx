@@ -737,6 +737,10 @@ export default function CommercialStudio() {
       // Product consistency: prefer the 6-angle turnaround as Claude's vision
       // reference when one exists; the server falls back to productImageUrl otherwise.
       productReferenceImageUrl: brief.product.turnaroundImageUrl || undefined,
+      // Continuity: this clip's place in the sequence so clips 2..N continue the
+      // take instead of each re-opening on the product still.
+      sceneIndex: clip.order,
+      sceneCount: wizardPlan?.clips.length,
     })
     const final: StatusResponse = await pollUntilDone(requestId, () => {}, {
       intervalMs: 5_000,
