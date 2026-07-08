@@ -344,6 +344,36 @@ export const adForge = {
   },
 }
 
+export const dashboard = {
+  greeting: 'Welcome back',
+  subgreeting: 'Pick up where you left off, or start something new.',
+  actions: {
+    start: 'Start',
+    clone: { title: 'Clone a Winning Ad', subtitle: 'Find what works. Make it yours.' },
+    build: { title: 'Build From Scratch', subtitle: 'Full creative control.' },
+    quick: { title: 'Quick Generate', subtitle: 'Product in. Video out.' },
+  },
+  inProgress: 'In Progress',
+  recent: 'Recent',
+  continue: 'Continue',
+  stats: {
+    videos: 'Videos generated',
+    analyzed: 'Ads analyzed',
+    sourced: 'Products sourced',
+    credits: 'Credits remaining',
+  },
+  emptyProjects: {
+    heading: 'Nothing in progress',
+    body: 'Start a new ad and it will show up here while it generates.',
+    action: 'Create your first ad',
+  },
+  emptyRecent: {
+    heading: 'No videos yet',
+    body: 'Your finished commercials will collect here, ready to download and remix.',
+    action: 'Create your first ad',
+  },
+}
+
 export const footer = {
   tagline: 'UGC video ads on autopilot. You get the output. We hide the pipeline.',
   columns: [
