@@ -48,8 +48,10 @@ wire after confirming from the dashboard, not before.
   `MODELS` + typed arg shapes (`SeedanceArgs`, `KlingArgs`, `NanoBananaArgs`,
   `SoulVideoArgs`, `MarketingStudioArgs`). Residual: short-slug vs vendor-path
   form confirmed on first live call.
-- [x] **3. Swap image gen** — api/modelsheet.ts routes to Higgsfield nano_banana_pro when HF creds present (turnaround/edit/generate), Supabase-hosts data-URL refs, downloads output back to a data URL. Gemini kept as fallback until cleanup. NEEDS a live smoke test on the branch preview.
-  cutout, enhance) once the image model slugs are confirmed.
+- [x] **3. Swap image gen** — api/modelsheet.ts routes to Higgsfield
+  nano_banana_pro when HF creds present (turnaround/edit/generate),
+  Supabase-hosts data-URL refs, downloads output back to a data URL. Gemini kept
+  as fallback until cleanup. NEEDS a live smoke test on the branch preview.
 - [ ] **4. Swap video gen** — `api/generate.ts` Veo → Higgsfield; `api/status.ts`
   polls Higgsfield and downloads output to Supabase Storage (Higgsfield URLs
   expire — the download-to-storage step is mandatory).
