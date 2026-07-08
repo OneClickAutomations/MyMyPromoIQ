@@ -171,7 +171,8 @@ export default function StoryboardPlanner({
 
   const clips = plan.clips
   const total = useMemo(() => recomputeTotals(clips), [clips])
-  const anyOver = clips.some(c => wordFit(c.dialogue, c.durationSeconds) === 'over')
+  const isOver = (c: StoryboardClip) => wordFit(c.dialogue, c.durationSeconds) === 'over'
+  const anyOver = clips.some(isOver)
 
   function setClips(next: StoryboardClip[]) {
     const reindexed = reindex(next)
@@ -206,6 +207,13 @@ export default function StoryboardPlanner({
 
   const selectedClips = clips.filter(c => selected.has(c.id))
   const generateCount = selectedClips.length || clips.length
+  // Block generation of a set that contains an over-budget clip — an
+  // over-budget line either gets rushed or trimmed, so it's a defect to fix
+  // (edit the dialogue or split the clip), not to ship. Scoped to the exact
+  // set being generated so it stays recoverable.
+  const effectiveSet = selectedClips.length ? selectedClips : clips
+  const effectiveOver = effectiveSet.some(isOver)
+  const selectedOver = selectedClips.some(isOver)
 
   return (
     <div className="space-y-5">
@@ -290,7 +298,11 @@ export default function StoryboardPlanner({
       {/* Sticky action bar */}
       <div className="sticky bottom-0 z-20 -mx-1 rounded-2xl border border-white/10 bg-void-900/90 p-4 backdrop-blur">
         {anyOver && (
-          <p className="mb-2.5 text-xs text-amber-300">Some clips are over their word budget — they may sound rushed. Trim the amber/red ones for best results.</p>
+          <p className="mb-2.5 text-xs text-rose-300">
+            {effectiveOver
+              ? 'A clip in this set is over its word budget — trim the red clip(s) above (or split into more clips) before generating.'
+              : 'Some clips are over their word budget. They\'re excluded from your current selection, but trim them before generating those.'}
+          </p>
         )}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-ink-muted">
@@ -301,11 +313,11 @@ export default function StoryboardPlanner({
           </p>
           <div className="flex items-center gap-2">
             {selectedClips.length > 0 && (
-              <button onClick={() => onGenerate(selectedClips)} className="btn-ghost gap-1.5 px-4 py-2.5 text-sm">
+              <button onClick={() => onGenerate(selectedClips)} disabled={selectedOver} title={selectedOver ? 'A selected clip is over its word budget' : undefined} className="btn-ghost gap-1.5 px-4 py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed">
                 <Bolt className="h-4 w-4" /> Generate selected ({selectedClips.length})
               </button>
             )}
-            <button onClick={() => onGenerate(selectedClips.length ? selectedClips : clips)} className="btn-fire gap-1.5 px-5 py-2.5 text-sm">
+            <button onClick={() => onGenerate(effectiveSet)} disabled={effectiveOver} title={effectiveOver ? 'A clip in this set is over its word budget — trim it first' : undefined} className="btn-fire gap-1.5 px-5 py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed">
               <Bolt className="h-4 w-4" /> Generate {selectedClips.length ? 'selected' : 'all clips'}
             </button>
           </div>
