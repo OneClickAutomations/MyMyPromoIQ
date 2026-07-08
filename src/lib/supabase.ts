@@ -11,8 +11,16 @@ import { createClient } from '@supabase/supabase-js'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
-/** True when the client-side Supabase env vars are present (build-time VITE_). */
-export const supabaseConfigured = !!SUPABASE_URL && !!SUPABASE_ANON_KEY
+/** True when the client-side Supabase env vars look real (build-time VITE_).
+ *  Rejects the obvious `.env.example` placeholders so a stale placeholder shows
+ *  the setup screen instead of failing later with a cryptic "Invalid API key". */
+export const supabaseConfigured =
+  !!SUPABASE_URL &&
+  /^https:\/\/[a-z0-9-]+\.supabase\.co/i.test(SUPABASE_URL) &&
+  !SUPABASE_URL.includes('your-project') &&
+  !!SUPABASE_ANON_KEY &&
+  SUPABASE_ANON_KEY.length > 30 &&
+  SUPABASE_ANON_KEY !== 'eyJ...'
 
 /** Singleton browser client — persists the session, used for both auth and DB. */
 export const supabase = createClient(SUPABASE_URL || 'http://placeholder.local', SUPABASE_ANON_KEY || 'placeholder', {
