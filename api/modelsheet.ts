@@ -22,6 +22,72 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@supabase/supabase-js'
+import { submitJob, pollJob, firstImageUrl, MODELS, HiggsfieldError, type NanoBananaArgs } from '../src/lib/higgsfield'
+
+// ── Higgsfield image path (rebuild Stage 3) ──────────────────────────────────
+// When Higgsfield credentials are present, image generation routes to Nano
+// Banana Pro; otherwise it falls back to the existing Gemini path so the branch
+// works either way until the Gemini cleanup stage. Higgsfield's `image` field
+// wants a URL/media id (not a data URL) and it returns a hosted URL, so this
+// path hosts data-URL references to Supabase first and downloads the result
+// back to a data URL to preserve the existing { imageDataUrl, sheetDataUrl }
+// contract the frontend already consumes.
+
+function higgsfieldEnabled(): boolean {
+  return !!((process.env.HIGGSFIELD_API_KEY && (process.env.HIGGSFIELD_SECRET || process.env.HIGGSFIELD_API_SECRET))
+    || (process.env.HIGGSFIELD_API_TOKEN || '').includes(':'))
+}
+
+/** Host a base64/data-URL image on Supabase Storage and return its public URL —
+ *  Higgsfield references images by URL, not by inline data. An https URL passes
+ *  through untouched. */
+async function hostRefUrl(imageUrl?: string, imageBase64?: string, mimeType?: string): Promise<string | undefined> {
+  if (imageUrl && /^https?:\/\//i.test(imageUrl)) return imageUrl
+  const raw = imageBase64 || (imageUrl?.startsWith('data:') ? imageUrl : undefined)
+  if (!raw) return undefined
+  const b64 = raw.includes(',') ? raw.split(',')[1] : raw
+  const mime = mimeType || raw.match(/^data:(.*?);base64/)?.[1] || 'image/jpeg'
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !serviceKey) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send an uploaded image to Higgsfield.')
+  const supabase = createClient(supabaseUrl, serviceKey)
+  const bucket = 'product-images'
+  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+  const path = `hf-refs/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(bucket).upload(path, Buffer.from(b64, 'base64'), { contentType: mime, upsert: true })
+  if (error) throw new Error(`Could not host the reference image: ${error.message}`)
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
+/** Download a hosted image URL and return it as a data URL (matches the
+ *  existing contract; also insulates callers from Higgsfield's 7-day URL TTL). */
+async function toDataUrl(url: string): Promise<string> {
+  const resp = await fetch(url)
+  if (!resp.ok) throw new Error(`Could not fetch generated image (${resp.status}).`)
+  const mime = resp.headers.get('content-type') || 'image/png'
+  const b64 = Buffer.from(await resp.arrayBuffer()).toString('base64')
+  return `data:${mime};base64,${b64}`
+}
+
+/** Generate an image via Higgsfield Nano Banana Pro and return it as a data URL. */
+async function generateImageHiggsfield(
+  prompt: string,
+  refUrl: string | undefined,
+  opts: { aspectRatio?: NanoBananaArgs['aspect_ratio']; resolution?: NanoBananaArgs['resolution'] } = {},
+): Promise<string> {
+  const args: NanoBananaArgs = { prompt, resolution: opts.resolution ?? '2k' }
+  if (refUrl) args.image = refUrl
+  if (opts.aspectRatio) args.aspect_ratio = opts.aspectRatio
+  const { request_id } = await submitJob(MODELS.nanoBananaPro, args as unknown as Record<string, unknown>)
+  const result = await pollJob(request_id, { intervalMs: 3_000, timeoutMs: 50_000 })
+  if (result.status === 'nsfw') throw new Error('The image was flagged by content moderation. Try a different photo or prompt.')
+  if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
+  const outUrl = firstImageUrl(result)
+  if (!outUrl) throw new Error('Higgsfield returned no image.')
+  return toDataUrl(outUrl)
+}
 
 // Model candidates for native image output via generateContent, best-first.
 // gemini-2.0-flash-preview-image-generation (the previous default here) was a
@@ -178,14 +244,17 @@ function summarizeUpstreamError(detail: string): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it in Vercel → Settings → Environment Variables to enable image generation.' })
+  const useHiggsfield = higgsfieldEnabled()
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!useHiggsfield && !geminiKey) {
+    return res.status(503).json({ error: 'No image provider configured. Add HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET (or GEMINI_API_KEY) in Vercel → Environment Variables.' })
   }
 
   const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt } =
     (req.body ?? {}) as Record<string, string>
   const type = subjectType === 'character' ? 'character' : 'product'
+  // Turnarounds/products read best square; character stills default to vertical.
+  const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 
   try {
     // ── generate: text-only, no reference image ──────────────────────────────
@@ -195,30 +264,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? 'Photorealistic portrait of a person for a UGC ad, natural skin texture with visible pores (never plastic or airbrushed), authentic lighting, vertical 9:16 framing, single subject, no text or watermark.'
         : 'Photorealistic product photo for an ad, clean composition, accurate materials and color, soft studio lighting, sharp focus, no text or watermark.'
       const prompt = `${editPrompt.trim()}. ${guidance}`
-      const imageDataUrl = await generateImage(apiKey, prompt, undefined, 0.7)
+      const imageDataUrl = useHiggsfield
+        ? await generateImageHiggsfield(prompt, undefined, { aspectRatio: aspect })
+        : await generateImage(geminiKey!, prompt, undefined, 0.7)
       return res.status(200).json({ imageDataUrl, prompt })
     }
-
-    // ── edit / sheet: both need a reference image ────────────────────────────
-    const img = await resolveImage(imageUrl, imageBase64, mimeType)
 
     if (mode === 'edit') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Pick or write an edit instruction.' })
       const prompt = buildIdentityLockedEditPrompt(type, editPrompt)
-      const imageDataUrl = await generateImage(apiKey, prompt, img, 0.5)
+      const imageDataUrl = useHiggsfield
+        ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
+        : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.5)
       return res.status(200).json({ imageDataUrl, prompt })
     }
 
     // mode 'sheet' (default) — turnaround model sheet.
-    const subject = (subjectHint?.trim()) || (await describeSubject(img, type)) ||
-      (type === 'character' ? 'the person shown in the reference image' : 'the product shown in the reference image')
+    let subject = subjectHint?.trim() || ''
+    if (!subject && !useHiggsfield) {
+      // Gemini path already has the reference in base64 for the vision describe.
+      subject = (await describeSubject(await resolveImage(imageUrl, imageBase64, mimeType), type))
+    }
+    subject = subject || (type === 'character' ? 'the person shown in the reference image' : 'the product shown in the reference image')
     const prompt = buildPrompt(type, subject)
-    const imageDataUrl = await generateImage(apiKey, prompt, img, 0.4)
+    const imageDataUrl = useHiggsfield
+      ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
+      : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.4)
     // Keep sheetDataUrl for backward compatibility; imageDataUrl is the new name.
     return res.status(200).json({ sheetDataUrl: imageDataUrl, imageDataUrl, subject, prompt })
   } catch (err) {
     console.error('[/api/modelsheet]', err)
-    const message = err instanceof Error ? err.message : 'Image generation failed.'
+    const message = err instanceof HiggsfieldError || err instanceof Error ? err.message : 'Image generation failed.'
     return res.status(502).json({ error: message })
   }
 }
