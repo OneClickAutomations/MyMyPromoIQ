@@ -12,8 +12,66 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@supabase/supabase-js'
+import { submitJob, MODELS, type SeedanceArgs } from '../src/lib/higgsfield'
 
 type Quality = 'lite' | 'turbo' | 'standard'
+
+// ── Higgsfield video path (rebuild Stage 4) ──────────────────────────────────
+// When Higgsfield creds are present, video generation routes to Seedance 2.0;
+// otherwise it falls back to the existing Veo path so the branch works either
+// way until the Veo cleanup stage. Higgsfield references the conditioning image
+// by URL (start_image), so a data-URL reference is hosted to Supabase first.
+// The returned request id is prefixed "hf:" so /api/status polls Higgsfield.
+
+function higgsfieldEnabled(): boolean {
+  return !!((process.env.HIGGSFIELD_API_KEY && (process.env.HIGGSFIELD_SECRET || process.env.HIGGSFIELD_API_SECRET))
+    || (process.env.HIGGSFIELD_API_TOKEN || '').includes(':'))
+}
+
+/** https URLs pass through; data-URL/base64 refs are hosted to Supabase so
+ *  Higgsfield can fetch the conditioning image by URL. */
+async function hostRefUrl(imageUrl?: string): Promise<string | undefined> {
+  if (!imageUrl) return undefined
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl
+  if (!imageUrl.startsWith('data:')) return undefined
+  const b64 = imageUrl.includes(',') ? imageUrl.split(',')[1] : imageUrl
+  const mime = imageUrl.match(/^data:(.*?);base64/)?.[1] || 'image/jpeg'
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !serviceKey) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send the conditioning image to Higgsfield.')
+  const supabase = createClient(supabaseUrl, serviceKey)
+  const bucket = 'product-images'
+  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+  const path = `hf-refs/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(bucket).upload(path, Buffer.from(b64, 'base64'), { contentType: mime, upsert: true })
+  if (error) throw new Error(`Could not host the conditioning image: ${error.message}`)
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
+/** Submit a Seedance 2.0 image-to-video job. Returns an "hf:"-prefixed request
+ *  id for /api/status. Generates SILENT video — the app layers the ElevenLabs
+ *  voiceover downstream (api/mux.ts), so native audio is intentionally off. */
+async function submitHiggsfieldVideo(
+  prompt: string,
+  imageUrl?: string,
+  opts?: { durationSeconds?: number },
+): Promise<{ requestId: string; status: string; provider: string }> {
+  const startImage = await hostRefUrl(imageUrl)
+  const d = opts?.durationSeconds
+  const duration: SeedanceArgs['duration'] = d && d <= 4 ? 4 : d === 5 ? 5 : 8
+  const args: SeedanceArgs = {
+    prompt,
+    aspect_ratio: (process.env.VEO_ASPECT_RATIO as SeedanceArgs['aspect_ratio']) || '9:16',
+    resolution: '1080p',
+    duration,
+    generate_audio: false,
+  }
+  if (startImage) args.start_image = startImage
+  const { request_id, status } = await submitJob(MODELS.seedance, args as unknown as Record<string, unknown>)
+  return { requestId: `hf:${request_id}`, status: status || 'queued', provider: 'higgsfield-seedance' }
+}
 type StyleId = 'testimonial' | 'unboxing' | 'day-in-life' | 'fast-cut'
 
 const QUALITIES: Quality[] = ['lite', 'turbo', 'standard']
@@ -468,13 +526,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Number(sceneCount) || undefined,
     )
 
-    // Veo takes exactly one conditioning image per job. When a creator photo is
-    // present, it wins — identity drift on a face is far more noticeable (and
-    // more consequential, since it's a real person) than on a product, and the
+    // Exactly one conditioning image per job. When a creator photo is present it
+    // wins — identity drift on a face is far more noticeable (and more
+    // consequential, since it's a real person) than on a product, and the
     // product's appearance/scale is already carried in the text prompt.
-    const veoReferenceImage = creatorImageUrl || productImageUrl
-    const { requestId, status } = await submitVeoJob(directorPrompt, veoReferenceImage || undefined, { negativePrompt })
+    const referenceImage = creatorImageUrl || productImageUrl
 
+    if (higgsfieldEnabled()) {
+      const out = await submitHiggsfieldVideo(directorPrompt, referenceImage || undefined, {
+        durationSeconds: Number((req.body as Record<string, unknown>)?.durationSeconds) || undefined,
+      })
+      return res.status(200).json({ ...out, directorPrompt })
+    }
+
+    const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt })
     return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
   } catch (err) {
     console.error('[/api/generate]', err)

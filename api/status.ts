@@ -14,6 +14,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { getJobStatus, videoUrl as hfVideoUrl } from '../src/lib/higgsfield'
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const BUCKET = 'product-images'
@@ -114,6 +115,34 @@ async function pollVeo(opName: string, res: VercelResponse) {
   })
 }
 
+/** Poll a Higgsfield request and, when done, re-host the resulting clip.
+ *  Higgsfield output URLs expire in ~7 days, so the download-to-Supabase step
+ *  is mandatory — never hand the raw Higgsfield URL to the client as the final
+ *  asset (it must survive for stitching, muxing, and history). */
+async function pollHiggsfield(requestId: string, res: VercelResponse) {
+  const result = await getJobStatus(requestId)
+  if (result.status === 'queued' || result.status === 'in_progress') {
+    return res.status(200).json({ status: 'pending', videoUrl: null, raw: result.status })
+  }
+  if (result.status === 'nsfw') {
+    return res.status(200).json({ status: 'failed', videoUrl: null, raw: 'nsfw' })
+  }
+  if (result.status !== 'completed') {
+    return res.status(200).json({ status: 'failed', videoUrl: null, raw: (result.error || result.status).slice(0, 200) })
+  }
+  const url = hfVideoUrl(result)
+  if (!url) {
+    console.error('[/api/status] hf-no-video-url — result:', JSON.stringify(result).slice(0, 500))
+    return res.status(200).json({ status: 'failed', videoUrl: null, raw: 'hf-no-video-url' })
+  }
+  const fileResp = await fetch(url)
+  if (!fileResp.ok) throw new Error(`Higgsfield file download failed (${fileResp.status}).`)
+  const buf = Buffer.from(await fileResp.arrayBuffer())
+  const hosted = await rehostRender(buf)
+  if (hosted) return res.status(200).json({ status: 'completed', videoUrl: hosted, raw: 'done' })
+  return res.status(200).json({ status: 'completed', videoUrl: `data:video/mp4;base64,${buf.toString('base64')}`, raw: 'done-inline' })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== 'GET') {
@@ -125,11 +154,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'id query parameter is required.' })
     }
 
+    if (id.startsWith('hf:')) {
+      return await pollHiggsfield(id.slice(3), res)
+    }
     if (id.startsWith('veo:')) {
       return await pollVeo(id.slice(4), res)
     }
 
-    return res.status(400).json({ error: `Unknown request id format: "${id.slice(0, 40)}". Expected a veo:-prefixed id.` })
+    return res.status(400).json({ error: `Unknown request id format: "${id.slice(0, 40)}". Expected an hf:- or veo:-prefixed id.` })
   } catch (err) {
     console.error('[/api/status]', err)
     const message = err instanceof Error ? err.message : 'Status check failed.'

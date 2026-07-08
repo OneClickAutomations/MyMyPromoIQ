@@ -52,9 +52,11 @@ wire after confirming from the dashboard, not before.
   nano_banana_pro when HF creds present (turnaround/edit/generate),
   Supabase-hosts data-URL refs, downloads output back to a data URL. Gemini kept
   as fallback until cleanup. NEEDS a live smoke test on the branch preview.
-- [ ] **4. Swap video gen** — `api/generate.ts` Veo → Higgsfield; `api/status.ts`
-  polls Higgsfield and downloads output to Supabase Storage (Higgsfield URLs
-  expire — the download-to-storage step is mandatory).
+- [x] **4. Swap video gen** — `api/generate.ts` submits Seedance 2.0 (`hf:`-
+  prefixed id) when HF creds present, hosting data-URL refs to Supabase; Veo
+  kept as fallback. `api/status.ts` polls Higgsfield on `hf:` ids and downloads
+  the (7-day) output URL to Supabase before returning it. Silent video — the
+  ElevenLabs mux stays downstream. NEEDS a live smoke test on the branch preview.
 - [ ] **5. Soul Characters** — onboarding + soul selector; character-consistent gen.
 - [ ] **6. Marketing Studio ad_reference clone path** — highest-quality clone.
 - [ ] **7. Auth: Clerk → Supabase** — rewritten for a Vite SPA (`supabase.auth`,
