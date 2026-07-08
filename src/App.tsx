@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, RedirectToSignIn } from './hooks/useAuth'
 import LandingPage from './LandingPage'
 import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'

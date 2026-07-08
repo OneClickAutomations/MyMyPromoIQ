@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import BrandVoiceSetup, { loadBrandProfile } from '../components/BrandVoiceSetup'
 import { adForge } from '../copy'

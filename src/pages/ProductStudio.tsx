@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { motion, AnimatePresence } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import { Plus, Edit, Trash, X, Package } from '../components/icons'

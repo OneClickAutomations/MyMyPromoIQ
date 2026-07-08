@@ -59,9 +59,27 @@ wire after confirming from the dashboard, not before.
   ElevenLabs mux stays downstream. NEEDS a live smoke test on the branch preview.
 - [ ] **5. Soul Characters** — onboarding + soul selector; character-consistent gen.
 - [ ] **6. Marketing Studio ad_reference clone path** — highest-quality clone.
-- [ ] **7. Auth: Clerk → Supabase** — rewritten for a Vite SPA (`supabase.auth`,
-  RLS on `auth.uid()`); email/password + Google OAuth. High-blast-radius (19 files).
+- [x] **7. Auth: Clerk → Supabase** — Clerk-compatible shim over Supabase Auth
+  (`src/hooks/useAuth.tsx` exports `useUser`/`useClerk`/`SignedIn`/`SignedOut`/
+  `UserButton`/`RedirectToSignIn`) so consumers only changed import path. New
+  `AuthForm` (email/password + Google), `main.tsx` gates on Supabase config,
+  `SetupNotice` rewritten. NEEDS the Supabase dashboard config below + a live
+  sign-up test.
 - [ ] **8. Cleanup** — remove Gemini/Clerk keys, imports, dead code; verify 12 api files.
+
+## Supabase dashboard config (required for Stage 7 auth)
+
+1. **Env vars** (Vercel, Preview + Production): `VITE_SUPABASE_URL`,
+   `VITE_SUPABASE_ANON_KEY` (client, build-time), and keep `SUPABASE_SERVICE_KEY`
+   (server). Redeploy after adding — VITE vars are baked in at build.
+2. **Auth → Providers → Email**: enabled. For fast testing, turn **off** "Confirm
+   email" so sign-up logs in immediately (turn on later for production).
+3. **Auth → Providers → Google** (optional): add a Google OAuth client
+   (Google Cloud Console) with redirect `https://<project>.supabase.co/auth/v1/callback`.
+4. **Auth → URL Configuration**: Site URL = production URL; add the preview URL(s)
+   to the Redirect URLs allowlist (needed for OAuth + email links).
+5. Note: existing rows are keyed on old Clerk user ids, so history starts fresh
+   under the new Supabase uids (expected for the rebuild).
 
 ## Notes
 

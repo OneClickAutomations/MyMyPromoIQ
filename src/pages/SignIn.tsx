@@ -1,4 +1,4 @@
-import { SignIn } from '@clerk/clerk-react'
+import AuthForm from '../components/AuthForm'
 import { Link } from 'react-router-dom'
 import { Bolt, Check } from '../components/icons'
 import { brand } from '../copy'
@@ -109,43 +109,7 @@ export default function SignInPage() {
             <p className="mt-1.5 text-sm text-ink-muted">Pick up right where you left off.</p>
           </div>
 
-          <SignIn
-            routing="path"
-            path="/sign-in"
-            fallbackRedirectUrl="/dashboard"
-            signUpUrl="/sign-up"
-            appearance={{
-              variables: {
-                colorPrimary: '#FF6B35',
-                colorBackground: '#0D0D0F',
-                colorText: '#F2F2F2',
-                colorTextSecondary: '#8A8A96',
-                colorInputBackground: '#1A1A1F',
-                colorInputText: '#F2F2F2',
-                borderRadius: '12px',
-              },
-              elements: {
-                rootBox: 'w-full',
-                card: 'bg-transparent shadow-none p-0 border-0',
-                headerTitle: 'hidden',
-                headerSubtitle: 'hidden',
-                socialButtonsBlockButton:
-                  'border border-white/10 bg-void-800 text-ink hover:bg-void-700 transition-colors rounded-xl h-11',
-                formFieldInput:
-                  'bg-void-800 border-void-500 text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:ring-fire-start/30 rounded-xl h-11',
-                formButtonPrimary:
-                  'bg-gradient-fire text-white font-semibold hover:opacity-90 transition-opacity rounded-xl h-11',
-                footerActionLink: 'text-fire-start hover:text-fire-end font-semibold',
-                footerAction: 'hidden',
-                identityPreviewText: 'text-ink',
-                formFieldLabel: 'text-ink text-sm font-medium',
-                dividerLine: 'bg-white/10',
-                dividerText: 'text-ink-muted',
-                formResendCodeLink: 'text-fire-start',
-                alertText: 'text-sm',
-              },
-            }}
-          />
+          <AuthForm mode="sign-in" />
 
           <p className="mt-6 text-center text-sm text-ink-muted">
             Don't have an account?{' '}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { UserButton, useUser, useClerk } from '@clerk/clerk-react'
+import { UserButton, useUser, useClerk } from '../hooks/useAuth'
 import { brand } from '../copy'
 import { Bolt, Clock, Compass, Grid, LogOut, Menu, Moon, Package, Palette, Settings, Sun, Users, Wand, Film, X } from './icons'
 

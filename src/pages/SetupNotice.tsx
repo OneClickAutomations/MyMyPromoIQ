@@ -2,16 +2,16 @@ import { Bolt } from '../components/icons'
 import { brand } from '../copy'
 
 /**
- * Shown when VITE_CLERK_PUBLISHABLE_KEY is missing or still a placeholder.
+ * Shown when the client-side Supabase env vars are missing.
  * Replaces the previous hard crash with actionable setup instructions.
  */
 export default function SetupNotice() {
   const steps = [
-    { n: 1, text: 'Create a free app at clerk.com', link: 'https://clerk.com' },
-    { n: 2, text: 'Copy the Publishable key (pk_test_…) from API Keys' },
-    { n: 3, text: 'Paste it into .env as VITE_CLERK_PUBLISHABLE_KEY' },
-    { n: 4, text: 'In Clerk → Paths, set Sign-in=/sign-in, Sign-up=/sign-up' },
-    { n: 5, text: 'Restart the dev server (npm run dev)' },
+    { n: 1, text: 'Open your project at supabase.com', link: 'https://supabase.com/dashboard' },
+    { n: 2, text: 'Settings → API: copy the Project URL and the anon (public) key' },
+    { n: 3, text: 'Set them as VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY' },
+    { n: 4, text: 'Authentication → Providers: enable Email (and Google, optionally)' },
+    { n: 5, text: 'Redeploy so the build picks up the vars (they are build-time)' },
   ]
 
   return (
@@ -28,11 +28,10 @@ export default function SetupNotice() {
           <span className="text-xl font-bold tracking-tight">{brand.name}</span>
         </div>
 
-        <h1 className="text-2xl font-extrabold tracking-tight">Almost there — connect auth</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">Almost there — connect Supabase</h1>
         <p className="mt-2 text-sm text-ink-muted">
-          {brand.name} uses <span className="font-semibold text-ink">Clerk</span> for login and
-          accounts (no Supabase or Netlify Identity needed). Add your Clerk publishable key to
-          enable sign-in.
+          {brand.name} uses <span className="font-semibold text-ink">Supabase</span> for login,
+          accounts, and data. Add your Supabase project URL and anon key to enable sign-in.
         </p>
 
         <ol className="mt-6 space-y-3">
@@ -62,7 +61,7 @@ export default function SetupNotice() {
         <div className="mt-6 rounded-xl border border-white/5 bg-void-800 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-gold">.env</p>
           <pre className="mt-2 overflow-x-auto text-xs text-ink-muted">
-            <code>VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_key_here</code>
+            <code>VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=eyJ...your-anon-key</code>
           </pre>
         </div>
       </div>

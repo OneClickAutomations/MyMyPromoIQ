@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'

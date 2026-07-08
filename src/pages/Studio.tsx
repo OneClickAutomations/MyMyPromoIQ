@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useTransition } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'

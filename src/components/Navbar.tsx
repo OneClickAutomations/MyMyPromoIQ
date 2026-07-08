@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, UserButton } from '../hooks/useAuth'
 import { nav, brand } from '../copy'
 import { Bolt } from './icons'
 

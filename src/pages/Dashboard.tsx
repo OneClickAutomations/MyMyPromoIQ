@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import HistoryGrid from '../components/HistoryGrid'
