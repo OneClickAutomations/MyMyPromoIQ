@@ -16,10 +16,27 @@ preview deploy.
 
 ## Env vars to set in Vercel (rebuild branch)
 
-- `HIGGSFIELD_API_KEY` + `HIGGSFIELD_API_SECRET`  (preferred), or
+- `HIGGSFIELD_API_KEY` + `HIGGSFIELD_SECRET`  (per the official skills repo; the
+  client also accepts the older `HIGGSFIELD_API_SECRET` spelling), or
 - `HIGGSFIELD_API_TOKEN="key:secret"`  (combined fallback)
 - Keep: `ANTHROPIC_API_KEY`, `APIFY_TOKEN`, `ELEVENLABS_API_KEY`, `SUPABASE_*`
 - Remove when its stage lands: `GEMINI_API_KEY`, `CLERK_*`
+
+## Verified model slugs (from higgsfield-ai/skills)
+
+Image: `nano_banana_2`, `nano_banana_pro`, `text2image_soul_v2`,
+`bytedance/seedream/v4/text-to-image`. Video: `seedance_2_0`, `kling3_0`,
+`kling3_0_turbo`, `soul_cinematic`, `marketing_studio_video`. Analysis:
+`brain_activity`. Marketing modes + the hook/setting gating live in
+`src/lib/higgsfield.ts` (`MARKETING_MODES`, `MARKETING_MODES_WITH_HOOKS`).
+
+**One open question for the first live call:** does `POST /{slug}` take the short
+slug (`seedance_2_0`) or the vendor-path form (`higgsfield-ai/...`)? Only the
+`MODELS` constants change if it's the latter.
+
+**Workflows** (remove-background, upscale, assemble, dubbing, voice-change) are
+CLI `generate workflow` commands; their REST route isn't in the public API page —
+wire after confirming from the dashboard, not before.
 
 ## Stages
 
@@ -27,11 +44,10 @@ preview deploy.
 - [x] **1. Higgsfield client** — `src/lib/higgsfield.ts`, verified contract
   (submit → poll `/requests/{id}/status` → `completed` gives `images[].url` /
   `video.url`; cancel; optional `?hf_webhook=`). Typed, server-only, `HiggsfieldError`.
-- [ ] **2. Model catalog** — fill `MODELS` with the real slugs for soul video,
-  seedance/kling video, nano-banana image edit, marketing studio, background
-  removal, upscale, assembly, dubbing. **Blocked on the model catalog**
-  (docs/llms.txt is access-gated) — source each from the Higgsfield dashboard's
-  per-model API reference. Until then only the two confirmed slugs are wired.
+- [x] **2. Model catalog** — verified slugs from higgsfield-ai/skills wired into
+  `MODELS` + typed arg shapes (`SeedanceArgs`, `KlingArgs`, `NanoBananaArgs`,
+  `SoulVideoArgs`, `MarketingStudioArgs`). Residual: short-slug vs vendor-path
+  form confirmed on first live call.
 - [ ] **3. Swap image gen** — `api/modelsheet.ts` Gemini → Higgsfield (turnaround,
   cutout, enhance) once the image model slugs are confirmed.
 - [ ] **4. Swap video gen** — `api/generate.ts` Veo → Higgsfield; `api/status.ts`

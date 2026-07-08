@@ -84,12 +84,14 @@ export class HiggsfieldError extends Error {
  */
 function authHeader(): string {
   const key = ENV.HIGGSFIELD_API_KEY
-  const secret = ENV.HIGGSFIELD_API_SECRET
+  // The official skills repo / MCP config uses HIGGSFIELD_SECRET; accept the
+  // earlier HIGGSFIELD_API_SECRET spelling too so either env setup works.
+  const secret = ENV.HIGGSFIELD_SECRET || ENV.HIGGSFIELD_API_SECRET
   if (key && secret) return `Key ${key}:${secret}`
   const combined = ENV.HIGGSFIELD_API_TOKEN || ENV.HF_KEY
   if (combined && combined.includes(':')) return `Key ${combined}`
   throw new HiggsfieldError(
-    'Higgsfield credentials are not set. Add HIGGSFIELD_API_KEY and HIGGSFIELD_API_SECRET ' +
+    'Higgsfield credentials are not set. Add HIGGSFIELD_API_KEY and HIGGSFIELD_SECRET ' +
       '(or a combined HIGGSFIELD_API_TOKEN="key:secret") in Vercel → Settings → Environment Variables.',
     503,
   )
@@ -191,27 +193,105 @@ export function videoUrl(result: HiggsfieldResult): string | null {
 }
 
 /**
- * Model registry — the exact `vendor/model/variant` slugs. The queue API keys on
- * these, and their argument schemas differ per model.
+ * Model registry — job slugs from the official `higgsfield-ai/skills` repo.
  *
- * VERIFIED (from the docs "How to use API" page and the Python client README):
- *   - higgsfield-ai/soul/standard          — Soul character image generation
- *   - bytedance/seedream/v4/text-to-image  — text-to-image
- *
- * The rebuild targets several more models (Soul video, Seedance/Kling video,
- * Nano Banana Pro image, Marketing Studio, background removal, upscale, assembly,
- * dubbing). Their slugs are NOT in the public "How to use API" page and the full
- * model catalog (docs/llms.txt) is access-gated. Do NOT guess them — the rebuild
- * prompt's names (`seedance_2_0`, `nano_banana_pro`, ...) are product labels, not
- * the real `vendor/model/variant` slugs. Fill each from the model's own
- * API-reference page in the Higgsfield dashboard as it's wired, and add it here.
+ * NOTE ON SLUG FORM: the docs "How to use API" page showed `vendor/model/variant`
+ * (e.g. `higgsfield-ai/soul/standard`); the skills repo / CLI uses short job
+ * slugs (`seedance_2_0`). These are the CLI `job_set_type` values. Whether
+ * `POST /{slug}` accepts the short form directly, or needs the vendor-path form,
+ * is the ONE thing a first live call on the branch preview confirms — if it
+ * needs the long form, only these constants change.
  */
 export const MODELS = {
-  soulImage: 'higgsfield-ai/soul/standard',
-  seedreamTextToImage: 'bytedance/seedream/v4/text-to-image',
-  // TODO(catalog): confirm and add — soul video, seedance/kling video,
-  // nano-banana image edit, marketing studio, background removal, upscale,
-  // assembly, dubbing. Source: Higgsfield dashboard → each model's API reference.
+  // ── Image ──
+  nanoBanana2: 'nano_banana_2',      // standard character/reference image work
+  nanoBananaPro: 'nano_banana_pro',  // harder briefs, product compositing
+  soulImageV2: 'text2image_soul_v2', // Soul V2 stills
+  seedreamTextToImage: 'bytedance/seedream/v4/text-to-image', // confirmed vendor-path form
+  // ── Video ──
+  seedance: 'seedance_2_0',          // default UGC clip model
+  kling: 'kling3_0',
+  klingTurbo: 'kling3_0_turbo',
+  soulCinematic: 'soul_cinematic',   // Soul character cinematic video
+  marketingStudioVideo: 'marketing_studio_video', // highest-quality ad path
+  // ── Analysis ──
+  viralityPredictor: 'brain_activity',
 } as const
 
 export type KnownModelId = (typeof MODELS)[keyof typeof MODELS]
+
+/**
+ * Marketing Studio modes. Hooks/settings are ONLY valid for the modes listed in
+ * MARKETING_MODES_WITH_HOOKS — passing hook_id/setting_id to any other mode is
+ * an error, so callers must gate on this.
+ */
+export const MARKETING_MODES = [
+  'ugc', 'ugc_how_to', 'ugc_unboxing', 'product_showcase', 'product_review',
+  'tv_spot', 'wild_card', 'ugc_virtual_try_on', 'virtual_try_on',
+] as const
+export type MarketingMode = (typeof MARKETING_MODES)[number]
+export const MARKETING_MODES_WITH_HOOKS: MarketingMode[] = [
+  'ugc', 'ugc_how_to', 'ugc_unboxing', 'product_review', 'ugc_virtual_try_on',
+]
+
+// ── REST body shapes (snake_case, mapped from the CLI flags). These are the
+//    best-verified mapping from the skills-repo flag names; the exact key
+//    spelling is confirmed on the first live call and fixed here if it differs.
+
+export interface SeedanceArgs {
+  prompt: string
+  start_image?: string   // URL or media id (--start-image)
+  end_image?: string
+  audio?: string
+  duration?: 4 | 5 | 8 | 10 | 12 | 15
+  resolution?: '720p' | '1080p' | '4k'
+  aspect_ratio?: '9:16' | '16:9' | '1:1'
+  mode?: 'std'
+  bitrate_mode?: 'high'
+  generate_audio?: boolean
+}
+
+export interface KlingArgs {
+  prompt: string
+  start_image: string    // REQUIRED for kling3_0
+  end_image?: string
+  duration?: 5 | 10
+  mode?: 'pro' | 'std'
+}
+
+export interface NanoBananaArgs {
+  prompt: string
+  image?: string         // reference image (product or character) — URL or id
+  aspect_ratio?: '16:9' | '9:16' | '1:1' | '3:4' | '4:3'
+  resolution?: '2k' | '4k'
+}
+
+export interface SoulVideoArgs {
+  prompt: string
+  soul_id: string        // trained soul reference (--soul-id)
+  quality?: '1.5k' | '2k'
+  aspect_ratio?: '9:16' | '16:9' | '1:1'
+}
+
+export interface MarketingStudioArgs {
+  prompt: string
+  mode: MarketingMode
+  product_ids?: string[]                       // ["<product_id>"]
+  avatars?: Array<{ id: string; type: 'preset' }>
+  url?: string                                 // fetch product from URL (skips create)
+  duration?: number
+  resolution?: '480p' | '720p'
+  aspect_ratio?: '9:16' | '16:9' | '1:1'
+  generate_audio?: boolean
+  hook_id?: string                             // only for MARKETING_MODES_WITH_HOOKS
+  setting_id?: string                          // only for MARKETING_MODES_WITH_HOOKS
+}
+
+/**
+ * Workflow operations (background removal, upscale, assemble, dubbing,
+ * voice-change) are CLI `generate workflow …` commands. Their REST endpoint
+ * shape is not in the public API page and the CLI abstracts it, so wire these
+ * only after confirming the workflow REST route from the dashboard / a live
+ * call. Left unimplemented deliberately rather than guessed.
+ */
+
