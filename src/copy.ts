@@ -156,7 +156,7 @@ export const generator = {
   eyebrow: 'Live · Real Generation',
   title: 'Stop reading. Generate one.',
   subtitle:
-    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and Google Veo 3 renders a real UGC video — right here, right now.',
+    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and our engine renders a real UGC video — right here, right now.',
   // Style ids must match the backend (netlify/lib/director.ts).
   styles: [
     { id: 'testimonial', label: 'Testimonial', hint: 'Person to camera, warm + handheld' },
@@ -326,13 +326,13 @@ export const adForge = {
   build: {
     title: 'Build From Scratch',
     subtitle: '12 guided steps. Full creative control.',
-    detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — Veo 3 animates it into a video with native audio.',
+    detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — our engine animates it into a video with native audio.',
     cta: 'Start building',
   },
   quick: {
     title: 'Quick Generate',
     subtitle: 'Fastest path from product to video.',
-    detail: 'Five fields, one click. Upload your product photo and Claude writes the director brief — Veo 3 renders the video in minutes.',
+    detail: 'Five fields, one click. Upload your product photo and Claude writes the director brief — our engine renders the video in minutes.',
     cta: 'Quick generate',
   },
   review: {

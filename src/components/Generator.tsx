@@ -282,7 +282,7 @@ export default function Generator() {
                     </a>
                     {directorPrompt && (
                       <p className="mt-3 text-center text-[11px] text-ink-faint">
-                        Directed by Claude · rendered by Google Veo 3
+                        Directed by Claude · rendered on our engine
                       </p>
                     )}
                   </motion.div>
