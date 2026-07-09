@@ -58,14 +58,36 @@ wire after confirming from the dashboard, not before.
   the (7-day) output URL to Supabase before returning it. Silent video — the
   ElevenLabs mux stays downstream. NEEDS a live smoke test on the branch preview.
 - [ ] **5. Soul Characters** — onboarding + soul selector; character-consistent gen.
+  **BLOCKED**: the API only documents *generating with* an existing `soul_id`
+  (`SoulVideoArgs`, `soul_cinematic`/`text2image_soul_v2`) — there is no
+  documented endpoint to train/create a new soul. Building onboarding would
+  mean guessing that endpoint. Needs the Higgsfield docs page or dashboard
+  screenshot for soul creation before this can start.
 - [ ] **6. Marketing Studio ad_reference clone path** — highest-quality clone.
+  **BLOCKED**: `MarketingStudioArgs` needs `product_ids`, `avatars[].id`,
+  `hook_id`, `setting_id` — none of these have a documented list/create
+  endpoint, so real values can't be obtained without guessing. Needs docs (or
+  dashboard access) for: create/list product, list avatars, list hooks,
+  list settings.
 - [x] **7. Auth: Clerk → Supabase** — Clerk-compatible shim over Supabase Auth
   (`src/hooks/useAuth.tsx` exports `useUser`/`useClerk`/`SignedIn`/`SignedOut`/
   `UserButton`/`RedirectToSignIn`) so consumers only changed import path. New
   `AuthForm` (email/password + Google), `main.tsx` gates on Supabase config,
   `SetupNotice` rewritten. NEEDS the Supabase dashboard config below + a live
   sign-up test.
-- [ ] **8. Cleanup** — remove Gemini/Clerk keys, imports, dead code; verify 12 api files.
+- [x] **8a. Cleanup — Clerk** — removed the unused `@clerk/clerk-react` package;
+  de-duplicated and corrected the legal pages (Privacy/Terms/DPA/Cookies) that
+  still named Clerk as the auth processor and Google/Veo as the sole renderer;
+  rewrote the stale `.env.example` (was still Netlify + Clerk + an unread
+  `VIDEO_PROVIDER`/`ARCADS_API_KEY` scheme) to match what the code actually
+  reads. Confirmed: tsc clean, build clean, still 12 api files, no purple.
+- [ ] **8b. Cleanup — Gemini/Veo fallback** — NOT yet removed. Per the note
+  below, keep the Gemini/Veo fallback paths in `api/modelsheet.ts`,
+  `api/generate.ts`, `api/status.ts` until Higgsfield is confirmed reliable
+  across all three paths (sheet/edit/generate images, and video) on a live
+  smoke test — background-removal (edit mode) is the only one verified working
+  so far, and it needed two bug fixes (response-size cap, poll-timeout
+  headroom) to get there.
 
 ## Supabase dashboard config (required for Stage 7 auth)
 
