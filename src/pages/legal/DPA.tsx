@@ -72,16 +72,9 @@ export default function DataProcessingAgreement() {
         </thead>
         <tbody>
           <tr>
-            <td><strong>Clerk, Inc.</strong></td>
-            <td>Authentication &amp; identity management</td>
-            <td>Name, email, session data</td>
-            <td>USA</td>
-            <td>SCCs / DPA</td>
-          </tr>
-          <tr>
             <td><strong>Supabase, Inc.</strong></td>
-            <td>Database &amp; backend</td>
-            <td>Campaign data, user IDs, scene metadata</td>
+            <td>Authentication, database &amp; media storage</td>
+            <td>Name, email, session data, campaign data, user IDs, scene metadata, product images, generated videos</td>
             <td>USA / EU</td>
             <td>SCCs / DPA</td>
           </tr>
@@ -93,23 +86,9 @@ export default function DataProcessingAgreement() {
             <td>SCCs / DPA</td>
           </tr>
           <tr>
-            <td><strong>Google LLC</strong></td>
-            <td>Video rendering &amp; image generation (Veo / Gemini API)</td>
+            <td><strong>Higgsfield</strong></td>
+            <td>Video rendering &amp; image generation</td>
             <td>Product images, director prompts</td>
-            <td>USA</td>
-            <td>SCCs / DPA</td>
-          </tr>
-          <tr>
-            <td><strong>Supabase, Inc.</strong></td>
-            <td>Database &amp; media storage</td>
-            <td>Product images, generated videos, campaign data</td>
-            <td>USA</td>
-            <td>SCCs / DPA</td>
-          </tr>
-          <tr>
-            <td><strong>Clerk, Inc.</strong></td>
-            <td>Authentication</td>
-            <td>Email, name, session data</td>
             <td>USA</td>
             <td>SCCs / DPA</td>
           </tr>

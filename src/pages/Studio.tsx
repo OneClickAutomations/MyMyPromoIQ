@@ -502,8 +502,7 @@ export default function Studio() {
     setGenError('')
     setWorkflowStep(3)
 
-    // Persistence via server API (service key — bypasses RLS, so it works
-    // regardless of the Clerk↔Supabase JWT bridge).
+    // Persistence via server API (service key — bypasses RLS).
     let campaignId: string | null = null
     let sceneDbId = scenes[idx].dbId
     let canPersist = true

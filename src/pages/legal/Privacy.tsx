@@ -17,7 +17,7 @@ export default function PrivacyPolicy() {
 
       <h3>2.1 Account Data</h3>
       <ul>
-        <li>Name and email address (provided during sign-up via Clerk)</li>
+        <li>Name and email address (provided during sign-up via Supabase Auth)</li>
         <li>Authentication identifiers and session tokens</li>
         <li>Profile information you optionally provide</li>
       </ul>
@@ -67,15 +67,9 @@ export default function PrivacyPolicy() {
         </thead>
         <tbody>
           <tr>
-            <td><strong>Clerk</strong></td>
-            <td>Authentication &amp; identity</td>
-            <td>Name, email, session tokens</td>
-            <td>USA (SOC 2 Type II)</td>
-          </tr>
-          <tr>
             <td><strong>Supabase</strong></td>
-            <td>Database &amp; storage</td>
-            <td>Campaign data, scene metadata</td>
+            <td>Authentication, database &amp; media storage</td>
+            <td>Name, email, session tokens, campaign data, product images, generated videos</td>
             <td>USA / EU (ISO 27001)</td>
           </tr>
           <tr>
@@ -85,21 +79,9 @@ export default function PrivacyPolicy() {
             <td>USA</td>
           </tr>
           <tr>
-            <td><strong>Google</strong></td>
-            <td>Video rendering &amp; image generation (Veo / Gemini API)</td>
+            <td><strong>Higgsfield</strong></td>
+            <td>Video rendering &amp; image generation</td>
             <td>Product images, director prompts</td>
-            <td>USA</td>
-          </tr>
-          <tr>
-            <td><strong>Supabase</strong></td>
-            <td>Database &amp; media storage</td>
-            <td>Product images, generated videos, campaign data</td>
-            <td>USA</td>
-          </tr>
-          <tr>
-            <td><strong>Clerk</strong></td>
-            <td>Authentication</td>
-            <td>Email, name, session data</td>
             <td>USA</td>
           </tr>
           <tr>

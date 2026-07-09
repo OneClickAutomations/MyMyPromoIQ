@@ -118,7 +118,7 @@ export default function TermsOfService() {
 
       <h2>12. Third-Party Services</h2>
       <p>
-        The Service integrates third-party AI and infrastructure providers (Anthropic, Google, Clerk, Supabase, Stripe, Vercel). We are not responsible for the uptime, outputs, or policies of these providers. Their terms and policies apply to the portions of the pipeline they operate.
+        The Service integrates third-party AI and infrastructure providers (Anthropic, Higgsfield, Supabase, Stripe, Vercel). We are not responsible for the uptime, outputs, or policies of these providers. Their terms and policies apply to the portions of the pipeline they operate.
       </p>
 
       <h2>13. Governing Law and Dispute Resolution</h2>
