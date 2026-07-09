@@ -39,6 +39,22 @@ function higgsfieldEnabled(): boolean {
     || (process.env.HIGGSFIELD_API_TOKEN || '').includes(':'))
 }
 
+/** Upload raw image bytes to the public product-images bucket, return public URL.
+ *  Returns null when Supabase Storage isn't configured (caller decides fallback). */
+async function uploadToBucket(buf: Buffer, mime: string, prefix: string): Promise<string | null> {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !serviceKey) return null
+  const supabase = createClient(supabaseUrl, serviceKey)
+  const bucket = 'product-images'
+  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+  const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(bucket).upload(path, buf, { contentType: mime, upsert: true })
+  if (error) throw new Error(`Could not host image: ${error.message}`)
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
 /** Host a base64/data-URL image on Supabase Storage and return its public URL —
  *  Higgsfield references images by URL, not by inline data. An https URL passes
  *  through untouched. */
@@ -48,27 +64,24 @@ async function hostRefUrl(imageUrl?: string, imageBase64?: string, mimeType?: st
   if (!raw) return undefined
   const b64 = raw.includes(',') ? raw.split(',')[1] : raw
   const mime = mimeType || raw.match(/^data:(.*?);base64/)?.[1] || 'image/jpeg'
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_KEY
-  if (!supabaseUrl || !serviceKey) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send an uploaded image to Higgsfield.')
-  const supabase = createClient(supabaseUrl, serviceKey)
-  const bucket = 'product-images'
-  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
-  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
-  const path = `hf-refs/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
-  const { error } = await supabase.storage.from(bucket).upload(path, Buffer.from(b64, 'base64'), { contentType: mime, upsert: true })
-  if (error) throw new Error(`Could not host the reference image: ${error.message}`)
-  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+  const url = await uploadToBucket(Buffer.from(b64, 'base64'), mime, 'hf-refs')
+  if (!url) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send an uploaded image to Higgsfield.')
+  return url
 }
 
-/** Download a hosted image URL and return it as a data URL (matches the
- *  existing contract; also insulates callers from Higgsfield's 7-day URL TTL). */
-async function toDataUrl(url: string): Promise<string> {
-  const resp = await fetch(url)
+/** Re-host a generated image (a hosted https URL) onto Supabase and return the
+ *  durable public URL. Returning a URL — not an inlined base64 data URL — keeps
+ *  the JSON response tiny: a 2k image as base64 would blow Vercel's 4.5 MB
+ *  response-body cap and crash the function (FUNCTION_INVOCATION_FAILED). Also
+ *  insulates callers from Higgsfield's 7-day URL TTL. Falls back to the source
+ *  URL if Supabase Storage isn't configured. */
+async function rehostToSupabase(sourceUrl: string): Promise<string> {
+  const resp = await fetch(sourceUrl)
   if (!resp.ok) throw new Error(`Could not fetch generated image (${resp.status}).`)
   const mime = resp.headers.get('content-type') || 'image/png'
-  const b64 = Buffer.from(await resp.arrayBuffer()).toString('base64')
-  return `data:${mime};base64,${b64}`
+  const buf = Buffer.from(await resp.arrayBuffer())
+  const hosted = await uploadToBucket(buf, mime, 'hf-out').catch(() => null)
+  return hosted || sourceUrl
 }
 
 /** Generate an image via Higgsfield Nano Banana Pro and return it as a data URL. */
@@ -86,7 +99,7 @@ async function generateImageHiggsfield(
   if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
   const outUrl = firstImageUrl(result)
   if (!outUrl) throw new Error('Higgsfield returned no image.')
-  return toDataUrl(outUrl)
+  return rehostToSupabase(outUrl)
 }
 
 // Model candidates for native image output via generateContent, best-first.
