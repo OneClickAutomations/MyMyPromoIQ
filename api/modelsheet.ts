@@ -94,7 +94,12 @@ async function generateImageHiggsfield(
   if (refUrl) args.image = refUrl
   if (opts.aspectRatio) args.aspect_ratio = opts.aspectRatio
   const { request_id } = await submitJob(MODELS.nanoBananaPro, args as unknown as Record<string, unknown>)
-  const result = await pollJob(request_id, { intervalMs: 3_000, timeoutMs: 50_000 })
+  // Kept well under Vercel's 60s hard ceiling: this poll runs inside a request
+  // that also uploads the reference image beforehand (hostRefUrl) and downloads
+  // + re-hosts the result afterward (rehostToSupabase). A 50s poll left too
+  // little headroom for those — the whole function got SIGKILLed mid-flight
+  // (FUNCTION_INVOCATION_FAILED) instead of hitting our own handled timeout path.
+  const result = await pollJob(request_id, { intervalMs: 3_000, timeoutMs: 35_000 })
   if (result.status === 'nsfw') throw new Error('The image was flagged by content moderation. Try a different photo or prompt.')
   if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
   const outUrl = firstImageUrl(result)
