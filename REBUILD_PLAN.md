@@ -57,12 +57,30 @@ wire after confirming from the dashboard, not before.
   kept as fallback. `api/status.ts` polls Higgsfield on `hf:` ids and downloads
   the (7-day) output URL to Supabase before returning it. Silent video — the
   ElevenLabs mux stays downstream. NEEDS a live smoke test on the branch preview.
-- [ ] **5. Soul Characters** — onboarding + soul selector; character-consistent gen.
-  **BLOCKED**: the API only documents *generating with* an existing `soul_id`
-  (`SoulVideoArgs`, `soul_cinematic`/`text2image_soul_v2`) — there is no
-  documented endpoint to train/create a new soul. Building onboarding would
-  mean guessing that endpoint. Needs the Higgsfield docs page or dashboard
-  screenshot for soul creation before this can start.
+- [x] **5. Soul** — implemented against the verified `Higgsfield Soul API
+  Reference` (user-provided PDF of the expanded docs). **Correction to the
+  original plan**: Soul is NOT an identity-training system — there is no
+  create/train-a-soul endpoint. It's a library of preset visual styles
+  (`GET /v1/text2image/soul-styles`) you generate stills with
+  (`POST /v1/text2image/soul`), optionally conditioned on a reference image
+  via `image_reference`. `soul_id`/`SoulVideoArgs` (video) remain unverified
+  speculation — left untouched.
+  - Also corrected the auth header shape: the docs show `hf-api-key` +
+    `hf-secret` as two separate headers, not only the combined
+    `Authorization: Key {key}:{secret}` the original docs page implied. Both
+    are now sent (the combined header was already proven working, so kept it
+    too — harmless to send extra headers).
+  - `src/lib/higgsfield.ts`: `SoulImageArgs`, `SoulStyle`, `getSoulStyles()`,
+    `submitSoulImage()` (params-wrapped body, different shape from the flat
+    `submitJob()` used by other models).
+  - `api/modelsheet.ts`: new `mode: 'soul-styles'` and `mode: 'soul'`
+    (Higgsfield-only, no Gemini fallback — Soul has no Gemini equivalent).
+  - `src/lib/api.ts`: `getSoulStyles()`, `generateSoulImage()` client calls.
+  - `src/components/SeedImageStudio.tsx`: optional "Soul style" picker (preset
+    style thumbnails from the catalog) for character seed-image generation;
+    picking a style routes generation through Soul instead of Gemini/Nano
+    Banana. NEEDS a live smoke test on the branch preview (style thumbnails
+    load + a generation completes).
 - [ ] **6. Marketing Studio ad_reference clone path** — highest-quality clone.
   **BLOCKED**: `MarketingStudioArgs` needs `product_ids`, `avatars[].id`,
   `hook_id`, `setting_id` — none of these have a documented list/create

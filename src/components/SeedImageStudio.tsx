@@ -15,7 +15,7 @@
  * uses mode 'sheet'.
  */
 import { useRef, useState } from 'react'
-import { generateImage, generateModelSheet, uploadAsset } from '../lib/api'
+import { generateImage, generateModelSheet, uploadAsset, getSoulStyles, generateSoulImage, type SoulStyle } from '../lib/api'
 import { Upload, Wand, RefreshCw, Check, Trash, Spark, Grid, ImageIcon } from './icons'
 
 export type SeedImage = { url: string; label?: string }
@@ -69,6 +69,30 @@ export default function SeedImageStudio({
   const mode: 'generate' | 'edit' = refUrl ? 'edit' : 'generate'
   const presets = PRESETS[subjectType]
 
+  // Soul — Higgsfield's preset visual-style library (not identity training; see
+  // the note on SoulImageArgs). Optional, character-only: pick a style and it's
+  // applied on top of the prompt (and the reference photo, if one is loaded).
+  const [showStyles, setShowStyles] = useState(false)
+  const [soulStyles, setSoulStyles] = useState<SoulStyle[] | null>(null)
+  const [stylesLoading, setStylesLoading] = useState(false)
+  const [stylesError, setStylesError] = useState('')
+  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null)
+
+  async function toggleStyles() {
+    const next = !showStyles
+    setShowStyles(next)
+    if (next && !soulStyles && !stylesLoading) {
+      setStylesLoading(true); setStylesError('')
+      try {
+        setSoulStyles(await getSoulStyles())
+      } catch (e) {
+        setStylesError(e instanceof Error ? e.message : 'Could not load styles.')
+      } finally {
+        setStylesLoading(false)
+      }
+    }
+  }
+
   function pickFile(file: File) {
     if (!file.type.startsWith('image/')) { setError('Choose a JPG, PNG, or WebP image.'); return }
     if (file.size > 20 * 1024 * 1024) { setError('Image must be under 20 MB.'); return }
@@ -119,12 +143,9 @@ export default function SeedImageStudio({
     if (!prompt.trim()) { setError(mode === 'edit' ? 'Pick or write an edit instruction.' : 'Describe the image to generate.'); return }
     setBusy(true); setError(''); setResult(null)
     try {
-      const { imageDataUrl } = await generateImage({
-        mode,
-        subjectType,
-        editPrompt: prompt.trim(),
-        ...refImageArgs(),
-      })
+      const { imageDataUrl } = selectedStyleId
+        ? await generateSoulImage({ subjectType, editPrompt: prompt.trim(), styleId: selectedStyleId, ...refImageArgs() })
+        : await generateImage({ mode, subjectType, editPrompt: prompt.trim(), ...refImageArgs() })
       setResult(imageDataUrl)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed.')
@@ -319,6 +340,54 @@ export default function SeedImageStudio({
             <option value="">Choose a quick edit…</option>
             {presets.map(p => <option key={p.label} value={p.instruction}>{p.label}</option>)}
           </select>
+        )}
+
+        {/* Soul style picker — optional, character-only preset visual style */}
+        {subjectType === 'character' && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={toggleStyles}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-fire-start transition-colors"
+            >
+              <Spark className="h-3.5 w-3.5" />
+              {selectedStyleId ? 'Soul style selected' : 'Soul style (optional)'}
+              {selectedStyleId && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={e => { e.stopPropagation(); setSelectedStyleId(null) }}
+                  className="ml-1 rounded-md bg-fire-start/10 px-1.5 py-0.5 text-[10px] font-bold text-fire-start"
+                >
+                  clear
+                </span>
+              )}
+            </button>
+            {showStyles && (
+              <div className="mt-2 rounded-xl border border-white/[0.08] bg-void-900 p-2">
+                {stylesLoading && <p className="p-2 text-xs text-ink-faint">Loading styles…</p>}
+                {stylesError && <p className="p-2 text-xs text-amber-300">{stylesError}</p>}
+                {soulStyles && (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {soulStyles.map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedStyleId(s.id === selectedStyleId ? null : s.id)}
+                        title={s.description || s.name}
+                        className={`flex-shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${
+                          selectedStyleId === s.id ? 'border-fire-start' : 'border-transparent hover:border-white/20'
+                        }`}
+                      >
+                        <img src={s.preview_url} alt={s.name} className="h-16 w-16 object-cover" />
+                        <p className="w-16 truncate bg-void-800 px-1 py-0.5 text-[9px] text-ink-faint">{s.name}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Prompt */}

@@ -358,6 +358,47 @@ export async function generateImage(input: ImageGenInput): Promise<{ imageDataUr
   return res.json()
 }
 
+// ── Soul (Higgsfield stylized image generation) ─────────────────────────────────
+// A library of preset visual styles, not identity training — see the note on
+// SoulImageArgs in src/lib/higgsfield.ts.
+
+export type SoulStyle = { id: string; name: string; description: string | null; preview_url: string }
+
+/** Fetch the Soul preset style catalog for a picker UI. Higgsfield-only (no Gemini fallback). */
+export async function getSoulStyles(): Promise<SoulStyle[]> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'soul-styles' }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const { styles } = (await res.json()) as { styles: SoulStyle[] }
+  return styles
+}
+
+export type SoulImageInput = {
+  subjectType: 'product' | 'character'
+  /** Description of the image to generate. */
+  editPrompt: string
+  /** A style id from getSoulStyles(). */
+  styleId?: string
+  /** Optional reference image to condition the look on. */
+  imageUrl?: string
+  imageBase64?: string
+  mimeType?: string
+}
+
+/** Generate a stylized image via Higgsfield Soul. Higgsfield-only (no Gemini fallback). */
+export async function generateSoulImage(input: SoulImageInput): Promise<{ imageDataUrl: string; prompt: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'soul', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 // ── Polling ────────────────────────────────────────────────────────────────────
 
 type SceneRow = {

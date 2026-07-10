@@ -76,20 +76,23 @@ export class HiggsfieldError extends Error {
 }
 
 /**
- * Build the `Key {key}:{secret}` auth header from env. Accepts either separate
- * key/secret vars or a single combined "key:secret" token (matching the Python
- * SDK's HF_KEY / HF_API_KEY+HF_API_SECRET options). Set these in Vercel:
+ * Resolve the {key, secret} pair from env. Accepts either separate key/secret
+ * vars or a single combined "key:secret" token (matching the Python SDK's
+ * HF_KEY / HF_API_KEY+HF_API_SECRET options). Set these in Vercel:
  *   HIGGSFIELD_API_KEY + HIGGSFIELD_API_SECRET   (preferred), or
  *   HIGGSFIELD_API_TOKEN = "key:secret"          (combined fallback)
  */
-function authHeader(): string {
+function credentials(): { key: string; secret: string } {
   const key = ENV.HIGGSFIELD_API_KEY
   // The official skills repo / MCP config uses HIGGSFIELD_SECRET; accept the
   // earlier HIGGSFIELD_API_SECRET spelling too so either env setup works.
   const secret = ENV.HIGGSFIELD_SECRET || ENV.HIGGSFIELD_API_SECRET
-  if (key && secret) return `Key ${key}:${secret}`
+  if (key && secret) return { key, secret }
   const combined = ENV.HIGGSFIELD_API_TOKEN || ENV.HF_KEY
-  if (combined && combined.includes(':')) return `Key ${combined}`
+  if (combined?.includes(':')) {
+    const [k, ...rest] = combined.split(':')
+    return { key: k, secret: rest.join(':') }
+  }
   throw new HiggsfieldError(
     'Higgsfield credentials are not set. Add HIGGSFIELD_API_KEY and HIGGSFIELD_SECRET ' +
       '(or a combined HIGGSFIELD_API_TOKEN="key:secret") in Vercel → Settings → Environment Variables.',
@@ -97,9 +100,20 @@ function authHeader(): string {
   )
 }
 
+/**
+ * Auth headers. The verified API reference (Soul endpoints) shows two
+ * separate headers — `hf-api-key` / `hf-secret` — rather than the single
+ * combined `Authorization: Key {key}:{secret}` the original docs page implied.
+ * Send both forms: the queue endpoints (submit/status/cancel) were already
+ * working against the combined header, so keep it, and add the two-header
+ * form the Soul reference confirms — harmless extra headers either way.
+ */
 function headers(): Record<string, string> {
+  const { key, secret } = credentials()
   return {
-    'Authorization': authHeader(),
+    'Authorization': `Key ${key}:${secret}`,
+    'hf-api-key': key,
+    'hf-secret': secret,
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   }
@@ -206,13 +220,16 @@ export const MODELS = {
   // ── Image ──
   nanoBanana2: 'nano_banana_2',      // standard character/reference image work
   nanoBananaPro: 'nano_banana_pro',  // harder briefs, product compositing
-  soulImageV2: 'text2image_soul_v2', // Soul V2 stills
+  // Soul stills do NOT use this flat POST /{slug} pattern — see submitSoulImage()
+  // above, which calls the verified `POST /v1/text2image/soul` directly with
+  // its params-wrapped body. The 'text2image_soul_v2' slug guessed here
+  // earlier was never confirmed and is now known wrong; removed.
   seedreamTextToImage: 'bytedance/seedream/v4/text-to-image', // confirmed vendor-path form
   // ── Video ──
   seedance: 'seedance_2_0',          // default UGC clip model
   kling: 'kling3_0',
   klingTurbo: 'kling3_0_turbo',
-  soulCinematic: 'soul_cinematic',   // Soul character cinematic video
+  soulCinematic: 'soul_cinematic',   // UNVERIFIED — see SoulVideoArgs note above
   marketingStudioVideo: 'marketing_studio_video', // highest-quality ad path
   // ── Analysis ──
   viralityPredictor: 'brain_activity',
@@ -266,11 +283,78 @@ export interface NanoBananaArgs {
   resolution?: '2k' | '4k'
 }
 
+/**
+ * UNVERIFIED — no docs page has been seen for `soul_cinematic` (video). Kept as
+ * a speculative shape from the skills-repo CLI flags; do not wire a call site
+ * against it until confirmed the same way the image Soul API below was.
+ */
 export interface SoulVideoArgs {
   prompt: string
   soul_id: string        // trained soul reference (--soul-id)
   quality?: '1.5k' | '2k'
   aspect_ratio?: '9:16' | '16:9' | '1:1'
+}
+
+/**
+ * Soul — stylized image generation, verified against the Higgsfield Soul API
+ * Reference (platform.higgsfield.ai docs, `POST /v1/text2image/soul` +
+ * `GET /v1/text2image/soul-styles`). NOTE: despite the "soul_id" naming
+ * elsewhere in this file, there is NO documented endpoint to train/create a
+ * custom identity — Soul is a library of preset visual styles (style_id) you
+ * generate with, optionally conditioned on a reference image. It does not do
+ * identity training.
+ */
+export interface SoulStyle {
+  id: string
+  name: string
+  description: string | null
+  preview_url: string
+}
+
+export interface SoulImageArgs {
+  prompt: string
+  width_and_height?: '1152x2048' | '2048x1152' | '2048x1536' | '1536x2048' | '1344x2016' | '1536x1536'
+  batch_size?: 1 | 4
+  enhance_prompt?: boolean
+  style_id?: string
+  style_strength?: number
+  quality?: '720p' | '1080p'
+  seed?: number
+  image_reference?: { type: 'image_url'; image_url: string }
+  /** Reference an already-registered custom reference — no documented
+   *  create/list endpoint exists yet, so this stays unset in practice. */
+  custom_reference_id?: string
+  custom_reference_strength?: number
+}
+
+/** `GET /v1/text2image/soul-styles` — the preset style catalog for a picker UI. */
+export async function getSoulStyles(): Promise<SoulStyle[]> {
+  const resp = await fetch(`${BASE_URL}/v1/text2image/soul-styles`, { method: 'GET', headers: headers() })
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '')
+    throw new HiggsfieldError(`Could not load Soul styles (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
+  }
+  return (await resp.json()) as SoulStyle[]
+}
+
+/**
+ * `POST /v1/text2image/soul` — unlike the flat-body queue models, this endpoint
+ * wraps the args in a `params` object alongside a sibling `webhook` key.
+ */
+export async function submitSoulImage(
+  args: SoulImageArgs,
+  opts?: { webhookUrl?: string },
+): Promise<HiggsfieldSubmitResponse> {
+  const resp = await fetch(`${BASE_URL}/v1/text2image/soul`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ params: args, webhook: opts?.webhookUrl ?? null }),
+  })
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '')
+    throw new HiggsfieldError(`Higgsfield Soul submit failed (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
+  }
+  return (await resp.json()) as HiggsfieldSubmitResponse
 }
 
 export interface MarketingStudioArgs {

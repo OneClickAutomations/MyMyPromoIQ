@@ -2,7 +2,7 @@
  * POST /api/modelsheet
  * Body: { mode?, imageUrl? | imageBase64?, mimeType?, subjectType, subjectHint?, editPrompt? }
  *
- * One Gemini image endpoint ("nano-banana"), three modes — kept in a single
+ * One Gemini image endpoint ("nano-banana"), five modes — kept in a single
  * serverless function to stay under Vercel's 12-function Hobby limit:
  *
  *   mode 'sheet'    (default) — turn ONE reference photo into a 2x3 multi-angle
@@ -15,15 +15,28 @@
  *   mode 'generate'           — generate a fresh image from a text description
  *                               only (no reference). Requires editPrompt.
  *                               Returns { imageDataUrl, prompt }.
+ *   mode 'soul-styles'        — list Higgsfield Soul's preset style catalog.
+ *                               Requires Higgsfield credentials (no Gemini
+ *                               fallback — Soul is Higgsfield-only).
+ *                               Returns { styles: SoulStyle[] }.
+ *   mode 'soul'               — generate a stylized image via Higgsfield Soul
+ *                               (a style_id from 'soul-styles' + a prompt,
+ *                               optionally conditioned on a reference image).
+ *                               Requires Higgsfield credentials. Returns
+ *                               { imageDataUrl, prompt }.
  *
  * Powers the Creator and Product studios (seed-image generation/editing) and the
- * turnaround reference. Requires GEMINI_API_KEY. ANTHROPIC_API_KEY enhances the
- * sheet prompt but isn't required. Self-contained (no src/ imports).
+ * turnaround reference. Requires GEMINI_API_KEY (for sheet/edit/generate) or
+ * Higgsfield credentials. ANTHROPIC_API_KEY enhances the sheet prompt but isn't
+ * required. Self-contained (no src/ imports, except the Higgsfield client).
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { submitJob, pollJob, firstImageUrl, MODELS, HiggsfieldError, type NanoBananaArgs } from '../src/lib/higgsfield'
+import {
+  submitJob, pollJob, firstImageUrl, MODELS, HiggsfieldError, type NanoBananaArgs,
+  getSoulStyles, submitSoulImage, type SoulImageArgs,
+} from '../src/lib/higgsfield'
 
 // ── Higgsfield image path (rebuild Stage 3) ──────────────────────────────────
 // When Higgsfield credentials are present, image generation routes to Nano
@@ -268,13 +281,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({ error: 'No image provider configured. Add HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET (or GEMINI_API_KEY) in Vercel → Environment Variables.' })
   }
 
-  const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt } =
+  const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt, styleId } =
     (req.body ?? {}) as Record<string, string>
   const type = subjectType === 'character' ? 'character' : 'product'
   // Turnarounds/products read best square; character stills default to vertical.
   const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 
   try {
+    // ── soul-styles: list the preset style catalog (Higgsfield-only) ─────────
+    if (mode === 'soul-styles') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Soul styles require Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      const styles = await getSoulStyles()
+      return res.status(200).json({ styles })
+    }
+
+    // ── soul: generate a stylized image via Higgsfield Soul (Higgsfield-only) ─
+    if (mode === 'soul') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Soul generation requires Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      if (!editPrompt?.trim()) return res.status(400).json({ error: 'Describe the image you want to generate.' })
+      const args: SoulImageArgs = { prompt: editPrompt.trim(), width_and_height: type === 'character' ? '1152x2048' : '1536x1536' }
+      if (styleId) args.style_id = styleId
+      const refUrl = await hostRefUrl(imageUrl, imageBase64, mimeType).catch(() => undefined)
+      if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
+      const { request_id } = await submitSoulImage(args)
+      const result = await pollJob(request_id, { intervalMs: 3_000, timeoutMs: 35_000 })
+      if (result.status === 'nsfw') return res.status(502).json({ error: 'The image was flagged by content moderation. Try a different photo or prompt.' })
+      if (result.status !== 'completed') return res.status(502).json({ error: result.error || `Image generation did not finish (status: ${result.status}).` })
+      const outUrl = firstImageUrl(result)
+      if (!outUrl) return res.status(502).json({ error: 'Higgsfield returned no image.' })
+      const imageDataUrl = await rehostToSupabase(outUrl)
+      return res.status(200).json({ imageDataUrl, prompt: args.prompt })
+    }
+
     // ── generate: text-only, no reference image ──────────────────────────────
     if (mode === 'generate') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Describe the image you want to generate.' })
