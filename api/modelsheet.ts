@@ -36,7 +36,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   pollJob, firstImageUrl, HiggsfieldError,
   getSoulStyles, submitSoulImage, type SoulImageArgs,
-} from '../src/lib/higgsfield'
+} from './_lib/higgsfield.js'
 
 // ── Higgsfield image path (rebuild Stage 3) ──────────────────────────────────
 // When Higgsfield credentials are present, image generation routes to Nano

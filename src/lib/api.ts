@@ -360,7 +360,7 @@ export async function generateImage(input: ImageGenInput): Promise<{ imageDataUr
 
 // ── Soul (Higgsfield stylized image generation) ─────────────────────────────────
 // A library of preset visual styles, not identity training — see the note on
-// SoulImageArgs in src/lib/higgsfield.ts.
+// SoulImageArgs in api/_lib/higgsfield.ts.
 
 export type SoulStyle = { id: string; name: string; description: string | null; preview_url: string }
 

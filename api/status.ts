@@ -14,7 +14,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { getJobStatus, videoUrl as hfVideoUrl } from '../src/lib/higgsfield'
+import { getJobStatus, videoUrl as hfVideoUrl } from './_lib/higgsfield.js'
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 const BUCKET = 'product-images'

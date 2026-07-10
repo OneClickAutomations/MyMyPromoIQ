@@ -13,7 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { submitDopVideo, type DopArgs, type DopModel } from '../src/lib/higgsfield'
+import { submitDopVideo, type DopArgs, type DopModel } from './_lib/higgsfield.js'
 
 type Quality = 'lite' | 'turbo' | 'standard'
 
