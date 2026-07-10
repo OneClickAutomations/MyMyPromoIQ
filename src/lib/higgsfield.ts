@@ -120,6 +120,28 @@ function headers(): Record<string, string> {
 }
 
 /**
+ * fetch with a hard timeout. Node's fetch has NO default timeout, so a request
+ * to a slow/missing endpoint (e.g. a model slug not on this account) can hang
+ * open until Vercel SIGKILLs the whole function at its 60s ceiling — which
+ * surfaces as an unrecoverable FUNCTION_INVOCATION_FAILED instead of a clean,
+ * catchable error. Abort well before that so callers always get a real error.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 20_000): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new HiggsfieldError(`Higgsfield request timed out after ${Math.round(timeoutMs / 1000)}s (${url.replace(BASE_URL, '')}).`, 504)
+    }
+    throw new HiggsfieldError(`Higgsfield request failed: ${e instanceof Error ? e.message : String(e)}`, 502)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * Submit a generation job to a model's queue. `modelId` is a verified slug (see
  * MODELS below), `args` are the model-specific arguments (prompt, aspect_ratio,
  * resolution, image URLs, etc. — these vary per model). Returns the request id
@@ -133,7 +155,7 @@ export async function submitJob(
   const url = new URL(`${BASE_URL}/${modelId}`)
   if (opts?.webhookUrl) url.searchParams.set('hf_webhook', opts.webhookUrl)
 
-  const resp = await fetch(url.toString(), {
+  const resp = await fetchWithTimeout(url.toString(), {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify(args),
@@ -150,10 +172,10 @@ export async function submitJob(
 
 /** Fetch the current status/result of a request. */
 export async function getJobStatus(requestId: string): Promise<HiggsfieldResult> {
-  const resp = await fetch(`${BASE_URL}/requests/${requestId}/status`, {
+  const resp = await fetchWithTimeout(`${BASE_URL}/requests/${requestId}/status`, {
     method: 'GET',
     headers: headers(),
-  })
+  }, 15_000)
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
     throw new HiggsfieldError(
@@ -167,10 +189,10 @@ export async function getJobStatus(requestId: string): Promise<HiggsfieldResult>
 
 /** Cancel a request — only succeeds while it is still `queued` (202 Accepted). */
 export async function cancelJob(requestId: string): Promise<boolean> {
-  const resp = await fetch(`${BASE_URL}/requests/${requestId}/cancel`, {
+  const resp = await fetchWithTimeout(`${BASE_URL}/requests/${requestId}/cancel`, {
     method: 'POST',
     headers: headers(),
-  })
+  }, 10_000)
   return resp.status === 202
 }
 
@@ -329,7 +351,7 @@ export interface SoulImageArgs {
 
 /** `GET /v1/text2image/soul-styles` — the preset style catalog for a picker UI. */
 export async function getSoulStyles(): Promise<SoulStyle[]> {
-  const resp = await fetch(`${BASE_URL}/v1/text2image/soul-styles`, { method: 'GET', headers: headers() })
+  const resp = await fetchWithTimeout(`${BASE_URL}/v1/text2image/soul-styles`, { method: 'GET', headers: headers() }, 15_000)
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
     throw new HiggsfieldError(`Could not load Soul styles (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
@@ -345,11 +367,11 @@ export async function submitSoulImage(
   args: SoulImageArgs,
   opts?: { webhookUrl?: string },
 ): Promise<HiggsfieldSubmitResponse> {
-  const resp = await fetch(`${BASE_URL}/v1/text2image/soul`, {
+  const resp = await fetchWithTimeout(`${BASE_URL}/v1/text2image/soul`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({ params: args, webhook: opts?.webhookUrl ?? null }),
-  })
+  }, 20_000)
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
     throw new HiggsfieldError(`Higgsfield Soul submit failed (${resp.status}): ${detail.slice(0, 300)}`, resp.status)

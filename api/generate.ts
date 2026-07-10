@@ -532,7 +532,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // product's appearance/scale is already carried in the text prompt.
     const referenceImage = creatorImageUrl || productImageUrl
 
-    if (higgsfieldEnabled()) {
+    // Video provider: PREFER VEO whenever a Gemini key is present. The
+    // Higgsfield video slug this submits to (`seedance_2_0`) is NOT confirmed
+    // on this account — the dashboard's video family is DoP (Lite/Standard/
+    // Turbo), which has no verified API reference yet. Routing to the unverified
+    // Seedance slug hung the function. Veo (via the Gemini key) is the only
+    // confirmed-working video path, so use it whenever GEMINI_API_KEY is set;
+    // fall to Higgsfield only for a Gemini-less deployment.
+    const useHiggsfieldVideo = higgsfieldEnabled() && !process.env.GEMINI_API_KEY
+    if (useHiggsfieldVideo) {
       const out = await submitHiggsfieldVideo(directorPrompt, referenceImage || undefined, {
         durationSeconds: Number((req.body as Record<string, unknown>)?.durationSeconds) || undefined,
       })

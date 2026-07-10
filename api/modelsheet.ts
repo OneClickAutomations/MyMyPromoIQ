@@ -287,6 +287,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Turnarounds/products read best square; character stills default to vertical.
   const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 
+  // Provider selection for the instruction-following image work (generate/edit/
+  // sheet): PREFER GEMINI. These tasks (background removal, edits, turnarounds,
+  // reference-conditioned generation) need an instruction/edit image model.
+  // Higgsfield's Nano Banana Pro slug (`nano_banana_pro`) is NOT confirmed
+  // present on this account — the dashboard shows Soul-family + Popcorn + DoP
+  // only — and routing to it hung/crashed the function. So use Gemini whenever
+  // its key is present, and only fall to Higgsfield when there is no Gemini key
+  // (a Higgsfield-only deployment). The verified Soul path (mode 'soul') is
+  // unaffected — it always uses Higgsfield.
+  const useHFForImages = useHiggsfield && !geminiKey
+
   try {
     // ── soul-styles: list the preset style catalog (Higgsfield-only) ─────────
     if (mode === 'soul-styles') {
@@ -320,7 +331,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? 'Photorealistic portrait of a person for a UGC ad, natural skin texture with visible pores (never plastic or airbrushed), authentic lighting, vertical 9:16 framing, single subject, no text or watermark.'
         : 'Photorealistic product photo for an ad, clean composition, accurate materials and color, soft studio lighting, sharp focus, no text or watermark.'
       const prompt = `${editPrompt.trim()}. ${guidance}`
-      const imageDataUrl = useHiggsfield
+      const imageDataUrl = useHFForImages
         ? await generateImageHiggsfield(prompt, undefined, { aspectRatio: aspect })
         : await generateImage(geminiKey!, prompt, undefined, 0.7)
       return res.status(200).json({ imageDataUrl, prompt })
@@ -329,7 +340,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (mode === 'edit') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Pick or write an edit instruction.' })
       const prompt = buildIdentityLockedEditPrompt(type, editPrompt)
-      const imageDataUrl = useHiggsfield
+      const imageDataUrl = useHFForImages
         ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
         : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.5)
       return res.status(200).json({ imageDataUrl, prompt })
@@ -337,13 +348,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // mode 'sheet' (default) — turnaround model sheet.
     let subject = subjectHint?.trim() || ''
-    if (!subject && !useHiggsfield) {
+    if (!subject && !useHFForImages) {
       // Gemini path already has the reference in base64 for the vision describe.
       subject = (await describeSubject(await resolveImage(imageUrl, imageBase64, mimeType), type))
     }
     subject = subject || (type === 'character' ? 'the person shown in the reference image' : 'the product shown in the reference image')
     const prompt = buildPrompt(type, subject)
-    const imageDataUrl = useHiggsfield
+    const imageDataUrl = useHFForImages
       ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
       : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.4)
     // Keep sheetDataUrl for backward compatibility; imageDataUrl is the new name.
