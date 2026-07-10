@@ -135,6 +135,36 @@ async function generateImageHiggsfield(
   return rehostToSupabase(outUrl)
 }
 
+// ── Dashboard studio art ──────────────────────────────────────────────────────
+// Curated prompt set for the home dashboard's cinematic cards. Each key maps to
+// a distinct mock UGC creator or product so no two cards feel cookie-cutter.
+// Generated on demand via Higgsfield Soul (mode 'dashboard-art', one key per
+// call to stay under the function time limit), rehosted to Supabase, and cached
+// client-side. Prompts are intentionally specific: real skin texture, warm
+// cinematic grade, single subject, vertical framing for the breakout/fan cards.
+const DASHBOARD_ART: Record<string, { prompt: string; kind: 'character' | 'product' }> = {
+  cloneCreator: {
+    kind: 'character',
+    prompt: 'Photoreal UGC selfie-style portrait of a confident woman in her late 20s holding a frosted glass skincare serum bottle up beside her face, looking straight into the phone camera mid-sentence, warm sunlit bathroom, soft window light, natural skin texture with visible pores, shallow depth of field, cinematic color grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildA: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of an energetic young man in a black tank top holding a matte black supplement pouch toward the camera in a bright modern kitchen, mid-gesture speaking, golden morning light, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildB: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of a stylish woman with curly hair in athletic wear holding a pastel protein shaker, laughing naturally at the phone camera, cozy living room with plants, warm afternoon light, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildC: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of a man in his 30s in a beige sweater holding an amber dropper bottle, relaxed on a linen couch by a sunlit window, golden hour, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  productHero: {
+    kind: 'product',
+    prompt: 'Premium product hero shot of a frosted glass serum bottle with a bamboo cap, floating above a dark warm surface with a dynamic water splash crown around it, dramatic studio rim light, macro detail, luxury advertising photography, warm amber background, centered, no text or watermark.',
+  },
+}
+
 // Model candidates for native image output via generateContent, best-first.
 // gemini-2.0-flash-preview-image-generation (the previous default here) was a
 // 2.0-preview model and has since been retired by Google — that retirement is
@@ -335,6 +365,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!outUrl) return res.status(502).json({ error: 'Higgsfield returned no image.' })
       const imageDataUrl = await rehostToSupabase(outUrl)
       return res.status(200).json({ imageDataUrl, prompt: args.prompt })
+    }
+
+    // ── dashboard-art: generate ONE curated dashboard card image (HF Soul) ────
+    // One key per call keeps each Soul job well under the function time limit;
+    // the client loops the keys and caches the returned URLs.
+    if (mode === 'dashboard-art') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Studio art generation requires Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      const artKey = (req.body as Record<string, string>)?.artKey
+      const spec = artKey ? DASHBOARD_ART[artKey] : undefined
+      if (!spec) return res.status(400).json({ error: `Unknown artKey. Expected one of: ${Object.keys(DASHBOARD_ART).join(', ')}.` })
+      const url = await generateImageHiggsfield(spec.prompt, undefined, { aspectRatio: spec.kind === 'character' ? '9:16' : '1:1' })
+      return res.status(200).json({ artKey, url })
     }
 
     // ── generate: text-only, no reference image ──────────────────────────────

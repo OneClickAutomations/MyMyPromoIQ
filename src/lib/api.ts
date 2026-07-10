@@ -399,6 +399,23 @@ export async function generateSoulImage(input: SoulImageInput): Promise<{ imageD
   return res.json()
 }
 
+// ── Dashboard studio art (fresh Higgsfield imagery for the home cards) ──────────
+
+/** The curated dashboard art keys, in the order the seeder generates them. */
+export const DASHBOARD_ART_KEYS = ['cloneCreator', 'buildA', 'buildB', 'buildC', 'productHero'] as const
+export type DashboardArtKey = (typeof DASHBOARD_ART_KEYS)[number]
+
+/** Generate ONE dashboard card image via Higgsfield Soul. Returns a hosted URL. */
+export async function generateDashboardArt(artKey: DashboardArtKey): Promise<{ artKey: string; url: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'dashboard-art', artKey }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 // ── Polling ────────────────────────────────────────────────────────────────────
 
 type SceneRow = {
