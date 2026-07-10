@@ -82,11 +82,25 @@ wire after confirming from the dashboard, not before.
     Banana. NEEDS a live smoke test on the branch preview (style thumbnails
     load + a generation completes).
 - [ ] **6. Marketing Studio ad_reference clone path** — highest-quality clone.
-  **BLOCKED**: `MarketingStudioArgs` needs `product_ids`, `avatars[].id`,
-  `hook_id`, `setting_id` — none of these have a documented list/create
-  endpoint, so real values can't be obtained without guessing. Needs docs (or
-  dashboard access) for: create/list product, list avatars, list hooks,
-  list settings.
+  **NOT AVAILABLE** — the account's dashboard (AI Models panel, user-provided
+  screenshot) lists every model on this account: Higgsfield Soul, Popcorn Auto,
+  Soul Character/Cinema/ID/Reference/Standard/V2 Standard (image), and DoP
+  Lite/Standard/Turbo + First-Last-Frame variants (video). No Marketing
+  Studio, and a manual search for it in the dashboard turned up nothing.
+  `MarketingStudioArgs`/`MODELS.marketingStudioVideo` in
+  `src/lib/higgsfield.ts` remain unverified guesses from the original rebuild
+  prompt — do not wire a call site against them. Abandoning this stage unless
+  the user's account later gains access to it.
+  **Related open question this surfaced**: the same dashboard also shows no
+  Seedance or Kling — the two video models `api/generate.ts` currently submits
+  to (`MODELS.seedance = 'seedance_2_0'`, `MODELS.kling = 'kling3_0'`), also
+  unverified guesses. `nano_banana_pro` (proven working via background
+  removal) *also* doesn't appear on this dashboard, so its absence isn't
+  proof a model doesn't exist — but the account's real, visible video family
+  is **DoP** (Lite/Standard/Turbo + first-last-frame variants). Getting a
+  verified DoP API reference (same expanded-docs treatment as Soul) is the
+  next high-value step: it would let `api/generate.ts` submit to a model
+  actually confirmed on this account instead of a guessed slug.
 - [x] **7. Auth: Clerk → Supabase** — Clerk-compatible shim over Supabase Auth
   (`src/hooks/useAuth.tsx` exports `useUser`/`useClerk`/`SignedIn`/`SignedOut`/
   `UserButton`/`RedirectToSignIn`) so consumers only changed import path. New
