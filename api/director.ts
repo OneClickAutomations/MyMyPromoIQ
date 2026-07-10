@@ -157,6 +157,62 @@ Plan the ${desired} clips.`,
   return res.status(200).json({ plan })
 }
 
+async function writeScript(body: Record<string, any>, res: VercelResponse) {
+  const { productName, description, style, niche, goal, tone, creator } = body
+  if (!description && !productName) {
+    return res.status(400).json({ error: 'description or productName is required' })
+  }
+
+  const styleBlurb = STYLE_BLURBS[style] ?? style ?? 'UGC ad'
+
+  let creatorLine = ''
+  if (creator?.source === 'uploaded') {
+    creatorLine = 'Creator: real person (appearance fixed by uploaded photo — do not describe appearance).'
+  } else if (creator?.source === 'generated') {
+    const attrs = [creator.gender, creator.ageRange, creator.ethnicity].filter(Boolean).join(', ')
+    if (attrs) creatorLine = `Creator: ${attrs}.`
+  }
+
+  const context = [
+    niche ? `Audience / niche: ${niche}` : '',
+    goal ? `Goal: ${goal}` : '',
+    tone ? `Tone: ${tone}` : '',
+    creatorLine,
+  ].filter(Boolean).join('\n')
+
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 300,
+    system: `You are an expert UGC ad scriptwriter. Write a single, compelling spoken line (the hook/script) for a ${styleBlurb} ad.
+
+Rules:
+- 10–25 words maximum — it must fit in a 4–8 second video clip
+- Natural spoken cadence — sounds human, not corporate
+- Opens with a pattern-interrupt or relatable hook
+- Ends with emotion, curiosity, or urgency — not a corporate CTA
+- No hashtags, no emojis, no "link in bio"
+- No quotation marks in output — just the raw line
+
+Output ONLY the script line. Nothing else.`,
+    messages: [{
+      role: 'user',
+      content: `Product: ${productName || 'the product'}
+What it does: ${description}
+Ad style: ${styleBlurb}
+${context}
+
+Write the spoken hook line.`,
+    }],
+  })
+
+  const script = (message.content.find((b: any) => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '') // strip any wrapper quotes
+    .trim()
+
+  return res.status(200).json({ script })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -169,6 +225,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director storyboard]', err)
       const message = err instanceof Error ? err.message : 'Storyboard planning failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'write-script') {
+    try {
+      return await writeScript(body, res)
+    } catch (err) {
+      console.error('[/api/director write-script]', err)
+      const message = err instanceof Error ? err.message : 'Script generation failed.'
       return res.status(502).json({ error: message })
     }
   }

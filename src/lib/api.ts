@@ -628,6 +628,24 @@ export type StoryboardPlanInput = {
   }
 }
 
+export async function writeAdScript(input: {
+  productName?: string
+  description: string
+  style: string
+  niche?: string
+  goal?: string
+  tone?: string
+  creator?: { source: 'uploaded' | 'generated'; gender?: string; ageRange?: string; ethnicity?: string }
+}): Promise<{ script: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'write-script', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {
   const res = await fetch('/api/director', {
     method: 'POST',

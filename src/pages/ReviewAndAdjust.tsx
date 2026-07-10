@@ -6,7 +6,7 @@ import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../componen
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import type { CreatorAttributes } from '../lib/studio/types'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, type StatusResponse } from '../lib/api'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -75,6 +75,14 @@ export default function ReviewAndAdjust() {
   const [script, setScript] = useState('')
   const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
 
+  // AI Magic script writer
+  const [showScriptAI, setShowScriptAI] = useState(false)
+  const [scriptNiche, setScriptNiche] = useState('')
+  const [scriptGoal, setScriptGoal] = useState('')
+  const [scriptTone, setScriptTone] = useState('')
+  const [scriptLoading, setScriptLoading] = useState(false)
+  const [scriptAIError, setScriptAIError] = useState('')
+
   const [phase, setPhase] = useState<Phase>('idle')
   const [stepIndex, setStepIndex] = useState(0)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -133,6 +141,43 @@ export default function ReviewAndAdjust() {
     setProductName(v.name)
     setProductDescription(v.description)
     setProductSourceUrl(v.sourceUrl)
+  }
+
+  async function handleWriteScript() {
+    const effectiveDescription = productDescription.trim() || productName.trim()
+    if (!effectiveDescription) {
+      setScriptAIError('Add a product description first so Claude has something to work with.')
+      return
+    }
+    setScriptAIError('')
+    setScriptLoading(true)
+    try {
+      const creatorArg = creatorValue.mode === 'uploaded_seed'
+        ? { source: 'uploaded' as const }
+        : creatorValue.mode === 'generated' && creatorValue.attributes.gender
+          ? {
+              source: 'generated' as const,
+              gender: creatorValue.attributes.gender,
+              ageRange: creatorValue.attributes.ageRange,
+              ethnicity: creatorValue.attributes.ethnicity,
+            }
+          : undefined
+      const { script: generated } = await writeAdScript({
+        productName: productName || undefined,
+        description: effectiveDescription,
+        style,
+        niche: scriptNiche.trim() || undefined,
+        goal: scriptGoal || undefined,
+        tone: scriptTone || undefined,
+        creator: creatorArg,
+      })
+      setScript(generated)
+      setShowScriptAI(false)
+    } catch (err) {
+      setScriptAIError(err instanceof Error ? err.message : 'Script generation failed.')
+    } finally {
+      setScriptLoading(false)
+    }
   }
 
   async function handleGenerate() {
@@ -328,20 +373,109 @@ export default function ReviewAndAdjust() {
 
           {/* Script / hook */}
           <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Script / hook
-              {isFromClone && script && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
+                Script / hook
+                {isFromClone && script && (
+                  <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
+                )}
+              </label>
+              <button
+                type="button"
+                disabled={isBusy || scriptLoading}
+                onClick={() => { setShowScriptAI(v => !v); setScriptAIError('') }}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all disabled:opacity-40 ${
+                  showScriptAI
+                    ? 'border-fire-start/50 bg-fire-start/[0.12] text-fire-start'
+                    : 'border-white/[0.10] bg-void-700/60 text-ink-muted hover:border-fire-start/30 hover:text-fire-start'
+                }`}
+              >
+                <Spark className="h-3 w-3" />
+                Write with AI
+              </button>
+            </div>
+
+            {/* AI Magic context panel */}
+            {showScriptAI && (
+              <div className="rounded-xl border border-fire-start/20 bg-fire-start/[0.04] p-4 space-y-3">
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Claude uses your product, image, creator, and ad style automatically.
+                  Add more context below for the sharpest script.
+                </p>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">Niche / audience</label>
+                    <input
+                      type="text"
+                      value={scriptNiche}
+                      onChange={e => setScriptNiche(e.target.value)}
+                      placeholder="e.g. busy moms, gym bros 25–35"
+                      className="w-full rounded-lg border border-white/[0.08] bg-void-800 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">Goal</label>
+                    <select
+                      value={scriptGoal}
+                      onChange={e => setScriptGoal(e.target.value)}
+                      className="w-full rounded-lg border border-white/[0.08] bg-void-800 px-3 py-2 text-sm text-ink focus:border-fire-start/40 focus:outline-none"
+                    >
+                      <option value="">Pick a goal…</option>
+                      <option value="Drive link clicks">Drive link clicks</option>
+                      <option value="Boost brand awareness">Boost brand awareness</option>
+                      <option value="Increase conversions">Increase conversions</option>
+                      <option value="Get saves and shares">Get saves and shares</option>
+                      <option value="Go viral">Go viral</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">Tone</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Conversational', 'Energetic', 'Luxury', 'Educational', 'Funny', 'Emotional'].map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setScriptTone(prev => prev === t ? '' : t)}
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all ${
+                            scriptTone === t
+                              ? 'border-fire-start/50 bg-fire-start/[0.10] text-ink'
+                              : 'border-white/[0.08] bg-void-800/60 text-ink-muted hover:border-white/20'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {scriptAIError && (
+                  <p className="text-xs text-rose-400">{scriptAIError}</p>
+                )}
+                <button
+                  type="button"
+                  disabled={scriptLoading}
+                  onClick={handleWriteScript}
+                  className="btn-fire w-full justify-center gap-2 py-2 text-sm disabled:opacity-50"
+                >
+                  {scriptLoading
+                    ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Claude is writing…</>
+                    : <><Spark className="h-3.5 w-3.5" /> Generate script</>
+                  }
+                </button>
+              </div>
+            )}
+
             <textarea
               value={script}
               onChange={e => setScript(e.target.value)}
               disabled={isBusy}
-              rows={4}
-              placeholder="The spoken line Claude will write verbatim into the Veo 3 prompt. Leave blank to let Claude improvise."
+              rows={3}
+              placeholder={showScriptAI ? 'Generated script will appear here — you can edit it.' : 'Type your own script, or use "Write with AI" above to let Claude write it.'}
               className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
             />
+            {script && (
+              <p className="text-[10px] text-ink-faint">This line will be spoken verbatim in your video. Edit freely.</p>
+            )}
           </div>
 
           {/* Creator */}
