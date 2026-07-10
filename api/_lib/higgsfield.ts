@@ -422,13 +422,15 @@ export async function getDopMotions(): Promise<DopMotion[]> {
 
 /** `POST /v1/image2video/dop` — submit a DoP image-to-video job. */
 export function submitDopVideo(args: DopArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldSubmitResponse> {
+  const { motions, ...rest } = args
   const params: Record<string, unknown> = {
     model: 'dop-lite',
-    motions: [],
     check_nsfw: true,
     enhance_prompt: true,
-    ...args,
+    ...rest,
   }
+  // DoP rejects motions:[] (422) — only include the field when at least one id is provided.
+  if (motions && motions.length > 0) params.motions = motions
   return submitParamsJob('/v1/image2video/dop', params, 'DoP', opts)
 }
 

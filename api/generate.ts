@@ -68,7 +68,6 @@ async function submitHiggsfieldVideo(
   const args: DopArgs = {
     prompt,
     model,
-    motions: [],
     enhance_prompt: true,
     input_images: [{ type: 'image_url', image_url: startImage }],
   }
