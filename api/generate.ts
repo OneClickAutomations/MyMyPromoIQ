@@ -71,8 +71,11 @@ async function submitHiggsfieldVideo(
     enhance_prompt: true,
     input_images: [{ type: 'image_url', image_url: startImage }],
   }
-  const { request_id, status } = await submitDopVideo(args)
-  return { requestId: `hf:${request_id}`, status: status || 'queued', provider: `higgsfield-${model}` }
+  const result = await submitDopVideo(args)
+  // Use status_url from the submit response so /api/status polls the exact URL
+  // the API provided — DoP's status path differs from the generic queue pattern.
+  const pollId = result.status_url || result.request_id
+  return { requestId: `hf:${pollId}`, status: result.status || 'queued', provider: `higgsfield-${model}` }
 }
 type StyleId = 'testimonial' | 'unboxing' | 'day-in-life' | 'fast-cut'
 

@@ -170,9 +170,15 @@ export async function submitJob(
   return (await resp.json()) as HiggsfieldSubmitResponse
 }
 
-/** Fetch the current status/result of a request. */
-export async function getJobStatus(requestId: string): Promise<HiggsfieldResult> {
-  const resp = await fetchWithTimeout(`${BASE_URL}/requests/${requestId}/status`, {
+/** Fetch the current status/result of a request.
+ *  Accepts either a bare request_id (constructs the generic status URL) or a
+ *  full status_url returned by the submit response — DoP and other params-wrapped
+ *  endpoints may return a different path than the generic queue pattern. */
+export async function getJobStatus(requestIdOrUrl: string): Promise<HiggsfieldResult> {
+  const url = requestIdOrUrl.startsWith('http')
+    ? requestIdOrUrl
+    : `${BASE_URL}/requests/${requestIdOrUrl}/status`
+  const resp = await fetchWithTimeout(url, {
     method: 'GET',
     headers: headers(),
   }, 15_000)
