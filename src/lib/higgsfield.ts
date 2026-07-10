@@ -360,23 +360,76 @@ export async function getSoulStyles(): Promise<SoulStyle[]> {
 }
 
 /**
- * `POST /v1/text2image/soul` — unlike the flat-body queue models, this endpoint
- * wraps the args in a `params` object alongside a sibling `webhook` key.
+ * Submit to one of the `params`-wrapped endpoints (Soul, DoP). Unlike the flat
+ * queue models (`submitJob`), these take `{ params: {...}, webhook }`. Both the
+ * Soul image API and the DoP video API (verified docs) use this exact shape.
  */
-export async function submitSoulImage(
-  args: SoulImageArgs,
+async function submitParamsJob(
+  path: string,
+  params: Record<string, unknown>,
+  label: string,
   opts?: { webhookUrl?: string },
 ): Promise<HiggsfieldSubmitResponse> {
-  const resp = await fetchWithTimeout(`${BASE_URL}/v1/text2image/soul`, {
+  const resp = await fetchWithTimeout(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ params: args, webhook: opts?.webhookUrl ?? null }),
+    body: JSON.stringify({ params, webhook: opts?.webhookUrl ?? null }),
   }, 20_000)
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
-    throw new HiggsfieldError(`Higgsfield Soul submit failed (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
+    throw new HiggsfieldError(`Higgsfield ${label} submit failed (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
   }
   return (await resp.json()) as HiggsfieldSubmitResponse
+}
+
+/** `POST /v1/text2image/soul` — stylized image generation. */
+export function submitSoulImage(args: SoulImageArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldSubmitResponse> {
+  return submitParamsJob('/v1/text2image/soul', args as unknown as Record<string, unknown>, 'Soul', opts)
+}
+
+// ── DoP — image-to-video, verified against the DoP API Reference (user PDF).
+//    `POST /v1/image2video/dop` with a params-wrapped body. `model` selects the
+//    tier (dop-lite / dop-standard / dop-turbo — the three on this account).
+//    `input_images` is the first frame; `input_images_end` (optional) the last
+//    frame for the first-last-frame variants. Same submit→poll→status contract.
+
+export type DopModel = 'dop-lite' | 'dop-standard' | 'dop-turbo'
+export interface DopImageRef { type: 'image_url'; image_url: string }
+export interface DopArgs {
+  prompt: string
+  model?: DopModel
+  seed?: number
+  /** Motion ids from getDopMotions(); [] = no forced motion. */
+  motions?: string[]
+  check_nsfw?: boolean
+  enhance_prompt?: boolean
+  /** First frame (image-to-video conditioning). */
+  input_images?: DopImageRef[]
+  /** Last frame — only for the first-last-frame variants. */
+  input_images_end?: DopImageRef[]
+}
+export interface DopMotion { id: string; name?: string; [k: string]: unknown }
+
+/** `GET /v1/motions` — the DoP motion catalog (ids for DopArgs.motions). */
+export async function getDopMotions(): Promise<DopMotion[]> {
+  const resp = await fetchWithTimeout(`${BASE_URL}/v1/motions`, { method: 'GET', headers: headers() }, 15_000)
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '')
+    throw new HiggsfieldError(`Could not load DoP motions (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
+  }
+  return (await resp.json()) as DopMotion[]
+}
+
+/** `POST /v1/image2video/dop` — submit a DoP image-to-video job. */
+export function submitDopVideo(args: DopArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldSubmitResponse> {
+  const params: Record<string, unknown> = {
+    model: 'dop-lite',
+    motions: [],
+    check_nsfw: true,
+    enhance_prompt: true,
+    ...args,
+  }
+  return submitParamsJob('/v1/image2video/dop', params, 'DoP', opts)
 }
 
 export interface MarketingStudioArgs {

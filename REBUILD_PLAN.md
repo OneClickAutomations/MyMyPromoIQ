@@ -52,11 +52,17 @@ wire after confirming from the dashboard, not before.
   nano_banana_pro when HF creds present (turnaround/edit/generate),
   Supabase-hosts data-URL refs, downloads output back to a data URL. Gemini kept
   as fallback until cleanup. NEEDS a live smoke test on the branch preview.
-- [x] **4. Swap video gen** — `api/generate.ts` submits Seedance 2.0 (`hf:`-
-  prefixed id) when HF creds present, hosting data-URL refs to Supabase; Veo
-  kept as fallback. `api/status.ts` polls Higgsfield on `hf:` ids and downloads
-  the (7-day) output URL to Supabase before returning it. Silent video — the
-  ElevenLabs mux stays downstream. NEEDS a live smoke test on the branch preview.
+- [x] **4. Swap video gen — CORRECTED to DoP.** The original Seedance
+  (`seedance_2_0`) slug was an unverified guess and is NOT on this account; it
+  hung the function. Rewired to the account's verified video model **DoP**
+  (`POST /v1/image2video/dop`, from the user-provided DoP API Reference PDF):
+  params-wrapped body, `model` = dop-lite/standard/turbo (default dop-lite via
+  `DOP_MODEL` env), `input_images` = the conditioning frame, same
+  submit→poll→`GET /requests/{id}/status` contract returning `video.url`.
+  `api/generate.ts` prefers DoP when HF creds present (Veo fallback only when
+  Higgsfield-less). `api/status.ts` already extracts `video.url` for `hf:` ids.
+  Added `fetchWithTimeout` to the client so a hung request can't crash the
+  function. NEEDS a live smoke test on the branch preview.
 - [x] **5. Soul** — implemented against the verified `Higgsfield Soul API
   Reference` (user-provided PDF of the expanded docs). **Correction to the
   original plan**: Soul is NOT an identity-training system — there is no

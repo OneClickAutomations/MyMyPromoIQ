@@ -34,7 +34,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import {
-  submitJob, pollJob, firstImageUrl, MODELS, HiggsfieldError, type NanoBananaArgs,
+  pollJob, firstImageUrl, HiggsfieldError,
   getSoulStyles, submitSoulImage, type SoulImageArgs,
 } from '../src/lib/higgsfield'
 
@@ -97,21 +97,35 @@ async function rehostToSupabase(sourceUrl: string): Promise<string> {
   return hosted || sourceUrl
 }
 
-/** Generate an image via Higgsfield Nano Banana Pro and return it as a data URL. */
+/** Map our aspect hint to Soul's supported width_and_height enum. */
+function soulSize(aspect?: string): SoulImageArgs['width_and_height'] {
+  if (aspect === '16:9') return '2048x1152'
+  if (aspect === '1:1') return '1536x1536'
+  return '1152x2048' // 9:16 default
+}
+
+/**
+ * Generate an image via Higgsfield Soul and return a hosted URL.
+ *
+ * IMPORTANT: this account's Higgsfield image model is Soul (verified), NOT
+ * `nano_banana_pro` (the previous slug here — it isn't on this account and its
+ * requests hung the function). Soul is a text-to-image generator; a reference
+ * image, when supplied, is passed as `image_reference` (style/subject
+ * conditioning). Soul is not a pixel-precise instruction editor, so pure edits
+ * like "remove the background exactly" are approximate on this path — those are
+ * best handled by the Gemini fallback when a GEMINI_API_KEY is present.
+ */
 async function generateImageHiggsfield(
   prompt: string,
   refUrl: string | undefined,
-  opts: { aspectRatio?: NanoBananaArgs['aspect_ratio']; resolution?: NanoBananaArgs['resolution'] } = {},
+  opts: { aspectRatio?: string; styleId?: string } = {},
 ): Promise<string> {
-  const args: NanoBananaArgs = { prompt, resolution: opts.resolution ?? '2k' }
-  if (refUrl) args.image = refUrl
-  if (opts.aspectRatio) args.aspect_ratio = opts.aspectRatio
-  const { request_id } = await submitJob(MODELS.nanoBananaPro, args as unknown as Record<string, unknown>)
-  // Kept well under Vercel's 60s hard ceiling: this poll runs inside a request
-  // that also uploads the reference image beforehand (hostRefUrl) and downloads
-  // + re-hosts the result afterward (rehostToSupabase). A 50s poll left too
-  // little headroom for those — the whole function got SIGKILLed mid-flight
-  // (FUNCTION_INVOCATION_FAILED) instead of hitting our own handled timeout path.
+  const args: SoulImageArgs = { prompt, width_and_height: soulSize(opts.aspectRatio) }
+  if (opts.styleId) args.style_id = opts.styleId
+  if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
+  const { request_id } = await submitSoulImage(args)
+  // Kept well under Vercel's 60s ceiling — the request also hosts the reference
+  // beforehand and re-hosts the result afterward.
   const result = await pollJob(request_id, { intervalMs: 3_000, timeoutMs: 35_000 })
   if (result.status === 'nsfw') throw new Error('The image was flagged by content moderation. Try a different photo or prompt.')
   if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
@@ -287,16 +301,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Turnarounds/products read best square; character stills default to vertical.
   const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 
-  // Provider selection for the instruction-following image work (generate/edit/
-  // sheet): PREFER GEMINI. These tasks (background removal, edits, turnarounds,
-  // reference-conditioned generation) need an instruction/edit image model.
-  // Higgsfield's Nano Banana Pro slug (`nano_banana_pro`) is NOT confirmed
-  // present on this account — the dashboard shows Soul-family + Popcorn + DoP
-  // only — and routing to it hung/crashed the function. So use Gemini whenever
-  // its key is present, and only fall to Higgsfield when there is no Gemini key
-  // (a Higgsfield-only deployment). The verified Soul path (mode 'soul') is
-  // unaffected — it always uses Higgsfield.
-  const useHFForImages = useHiggsfield && !geminiKey
+  // Provider selection for image work (generate/edit/sheet): PREFER HIGGSFIELD
+  // SOUL when credentials are present — this is the intended architecture
+  // (Higgsfield + Claude, no Gemini). Soul is the account's verified image
+  // model. Gemini is used only as a fallback when no Higgsfield credentials are
+  // set. (Note: Soul is a generator, not a pixel-precise editor, so exact
+  // background removal is approximate on the Soul path — see
+  // generateImageHiggsfield.)
+  const useHFForImages = useHiggsfield
 
   try {
     // ── soul-styles: list the preset style catalog (Higgsfield-only) ─────────

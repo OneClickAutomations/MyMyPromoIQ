@@ -13,7 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { submitJob, MODELS, type SeedanceArgs } from '../src/lib/higgsfield'
+import { submitDopVideo, type DopArgs, type DopModel } from '../src/lib/higgsfield'
 
 type Quality = 'lite' | 'turbo' | 'standard'
 
@@ -50,27 +50,30 @@ async function hostRefUrl(imageUrl?: string): Promise<string | undefined> {
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
 }
 
-/** Submit a Seedance 2.0 image-to-video job. Returns an "hf:"-prefixed request
- *  id for /api/status. Generates SILENT video — the app layers the ElevenLabs
- *  voiceover downstream (api/mux.ts), so native audio is intentionally off. */
+/** Submit a Higgsfield DoP image-to-video job. Returns an "hf:"-prefixed
+ *  request id for /api/status. DoP is this account's verified video model
+ *  (dashboard: DoP Lite/Standard/Turbo) — NOT Seedance, which was an unverified
+ *  slug that hung the function. The tier is set by DOP_MODEL (default dop-lite,
+ *  the lightest/cheapest). DoP needs a conditioning image (image-to-video), so
+ *  a start image is required. The app layers the ElevenLabs voiceover downstream
+ *  (api/mux.ts). */
 async function submitHiggsfieldVideo(
   prompt: string,
   imageUrl?: string,
-  opts?: { durationSeconds?: number },
+  _opts?: { durationSeconds?: number },
 ): Promise<{ requestId: string; status: string; provider: string }> {
   const startImage = await hostRefUrl(imageUrl)
-  const d = opts?.durationSeconds
-  const duration: SeedanceArgs['duration'] = d && d <= 4 ? 4 : d === 5 ? 5 : 8
-  const args: SeedanceArgs = {
+  if (!startImage) throw new Error('Higgsfield DoP needs a product or creator image to animate. Upload or generate one first.')
+  const model = (process.env.DOP_MODEL as DopModel) || 'dop-lite'
+  const args: DopArgs = {
     prompt,
-    aspect_ratio: (process.env.VEO_ASPECT_RATIO as SeedanceArgs['aspect_ratio']) || '9:16',
-    resolution: '1080p',
-    duration,
-    generate_audio: false,
+    model,
+    motions: [],
+    enhance_prompt: true,
+    input_images: [{ type: 'image_url', image_url: startImage }],
   }
-  if (startImage) args.start_image = startImage
-  const { request_id, status } = await submitJob(MODELS.seedance, args as unknown as Record<string, unknown>)
-  return { requestId: `hf:${request_id}`, status: status || 'queued', provider: 'higgsfield-seedance' }
+  const { request_id, status } = await submitDopVideo(args)
+  return { requestId: `hf:${request_id}`, status: status || 'queued', provider: `higgsfield-${model}` }
 }
 type StyleId = 'testimonial' | 'unboxing' | 'day-in-life' | 'fast-cut'
 
@@ -532,15 +535,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // product's appearance/scale is already carried in the text prompt.
     const referenceImage = creatorImageUrl || productImageUrl
 
-    // Video provider: PREFER VEO whenever a Gemini key is present. The
-    // Higgsfield video slug this submits to (`seedance_2_0`) is NOT confirmed
-    // on this account — the dashboard's video family is DoP (Lite/Standard/
-    // Turbo), which has no verified API reference yet. Routing to the unverified
-    // Seedance slug hung the function. Veo (via the Gemini key) is the only
-    // confirmed-working video path, so use it whenever GEMINI_API_KEY is set;
-    // fall to Higgsfield only for a Gemini-less deployment.
-    const useHiggsfieldVideo = higgsfieldEnabled() && !process.env.GEMINI_API_KEY
-    if (useHiggsfieldVideo) {
+    // Video provider: PREFER HIGGSFIELD DoP when credentials are present — this
+    // is the intended architecture (Higgsfield + Claude, no Gemini). DoP is the
+    // account's verified video model. Veo (via GEMINI_API_KEY) is only a
+    // fallback for a Higgsfield-less deployment.
+    if (higgsfieldEnabled()) {
       const out = await submitHiggsfieldVideo(directorPrompt, referenceImage || undefined, {
         durationSeconds: Number((req.body as Record<string, unknown>)?.durationSeconds) || undefined,
       })
