@@ -9,10 +9,9 @@ import DurationSlider from '../components/ui/DurationSlider'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import type { CreatorAttributes } from '../lib/studio/types'
 import { estimateClipCount } from '../lib/studio/storyboard'
-import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
 import {
   startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt,
-  planStoryboard, generateVoiceover, muxVideoAudio, stitchVideos, listVoices,
+  planStoryboard, generateVoiceover, muxVideoAudio, stitchVideos, listVoices, extractLastFrame,
   type ElevenVoice,
 } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
@@ -101,8 +100,13 @@ export default function ReviewAndAdjust() {
   const [previewingVoiceId, setPreviewingVoiceId] = useState('')
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
-  // Multi-clip render queue — up to 3 scenes render in parallel.
-  const videoQueue = useGenerationQueue(3, 1)
+  // Scene rendering is sequential (not parallel) by necessity: each scene's
+  // conditioning image is the PREVIOUS scene's last frame (true image-to-video
+  // chaining), so scene N+1 literally cannot start until scene N's video
+  // exists and its last frame has been extracted. Slower than parallel, but
+  // it's what makes the stitched result read as one continuous take instead
+  // of the same opening shot repeating every time a new scene begins.
+  const [sceneProgress, setSceneProgress] = useState({ done: 0, total: 0 })
 
   // AI Magic script writer
   const [showScriptAI, setShowScriptAI] = useState(false)
@@ -296,29 +300,61 @@ export default function ReviewAndAdjust() {
       setDirectorPrompt(plan.reasoning)
       setPlanClipCount(plan.clips.length)
 
-      // ── STEP 1: SCENES — render every clip's video in parallel (up to 3 at once).
+      // ── STEP 1: SCENES — render sequentially, chaining each scene's video
+      // conditioning image from the PREVIOUS scene's last frame. This is what
+      // makes the assembled ad read as one continuous take: scene 2 starts
+      // from wherever scene 1's camera ended, instead of every scene
+      // restarting from the same static product photo (which is what made
+      // the old parallel-render version look like the same opening shot
+      // repeating on every cut).
       setStepIndex(1)
-      await videoQueue.run(plan.clips, async (clip) => {
-        const { requestId } = await startGeneration({
-          productImageUrl: productImageUrl.trim(),
-          productDescription: effectiveDescription,
-          style,
-          quality: 'turbo',
-          script: clip.dialogue,
-          sceneLabel: clip.beat,
-          sceneIndex: clip.order,
-          sceneCount: plan.clips.length,
-          creatorImageUrl,
-          creatorConsentAt,
-        })
-        const result = await pollUntilDone(requestId, () => {}, { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 })
-        if (result.status !== 'completed' || !result.videoUrl) {
-          throw new Error(result.raw === 'timeout' ? 'Render timed out.' : 'Render failed.')
+      setSceneProgress({ done: 0, total: plan.clips.length })
+      const rendered: Array<{ videoUrl: string; dialogue: string }> = []
+      let chainImageUrl: string | undefined
+      let firstRequestId = ''
+      for (const clip of plan.clips) {
+        if (cancelledRef.current) return
+        try {
+          const { requestId } = await startGeneration({
+            productImageUrl: productImageUrl.trim(),
+            productDescription: effectiveDescription,
+            style,
+            quality: 'turbo',
+            script: clip.dialogue,
+            sceneLabel: clip.beat,
+            sceneIndex: clip.order,
+            sceneCount: plan.clips.length,
+            creatorImageUrl,
+            creatorConsentAt,
+            conditioningImageUrl: chainImageUrl,
+          })
+          if (!firstRequestId) firstRequestId = requestId
+          const result = await pollUntilDone(requestId, () => {}, { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 })
+          if (result.status !== 'completed' || !result.videoUrl) {
+            throw new Error(result.raw === 'timeout' ? 'Render timed out.' : 'Render failed.')
+          }
+          rendered.push({ videoUrl: result.videoUrl, dialogue: clip.dialogue })
+          setSceneProgress(p => ({ ...p, done: p.done + 1 }))
+
+          // Chain: the NEXT scene continues from THIS scene's last frame,
+          // not from the original product photo. A failed extraction just
+          // means the next scene falls back to the original conditioning —
+          // never fails the whole ad over a continuity nice-to-have.
+          if (clip.order < plan.clips.length) {
+            try {
+              const { imageDataUrl } = await extractLastFrame(result.videoUrl)
+              chainImageUrl = imageDataUrl
+            } catch {
+              chainImageUrl = undefined
+            }
+          }
+        } catch {
+          // One scene failing doesn't sink the ad — continue the chain from
+          // whatever the last successful frame was (or the original photo).
+          setSceneProgress(p => ({ ...p, done: p.done + 1 }))
         }
-        return result.videoUrl
-      })
+      }
       if (cancelledRef.current) return
-      const rendered = videoQueue.tiles.filter(t => t.status === 'complete' && t.videoUrl)
       if (rendered.length === 0) {
         setErrorMsg('All scenes failed to render. Try again.')
         setPhase('error')
@@ -334,16 +370,16 @@ export default function ReviewAndAdjust() {
           if (cancelledRef.current) return
           try {
             const { audioDataUrl } = await generateVoiceover({ text: tile.dialogue, voiceId: selectedVoiceId })
-            const { videoDataUrl } = await muxVideoAudio({ videoUrl: tile.videoUrl!, audioBase64: audioDataUrl })
+            const { videoDataUrl } = await muxVideoAudio({ videoUrl: tile.videoUrl, audioBase64: audioDataUrl })
             withVoice.push(videoDataUrl)
           } catch {
             // Voiceover/mux is a nice-to-have — never fail the whole ad over it.
-            withVoice.push(tile.videoUrl!)
+            withVoice.push(tile.videoUrl)
           }
         }
         finalUrls = withVoice
       } else {
-        finalUrls = rendered.map(t => t.videoUrl!)
+        finalUrls = rendered.map(t => t.videoUrl)
       }
       if (cancelledRef.current) return
 
@@ -372,7 +408,7 @@ export default function ReviewAndAdjust() {
             style,
             order_index: 0,
             phase: 'done',
-            request_id: videoQueue.tiles[0]?.clipId ?? '',
+            request_id: firstRequestId,
             director_prompt: plan.reasoning,
             video_url: finalUrl,
           })
@@ -393,9 +429,9 @@ export default function ReviewAndAdjust() {
 
   function handleCancel() {
     cancelledRef.current = true
-    videoQueue.cancel()
     setPhase('idle')
     setStepIndex(0)
+    setSceneProgress({ done: 0, total: 0 })
   }
 
   function handleReset() {
@@ -409,7 +445,7 @@ export default function ReviewAndAdjust() {
     setShowRegenPanel(false)
     setRegenKeywords('')
     setRegenError('')
-    videoQueue.reset()
+    setSceneProgress({ done: 0, total: 0 })
   }
 
   async function handleEnhanceKeywords() {
@@ -717,15 +753,27 @@ export default function ReviewAndAdjust() {
         )}
 
         {/* Generation overlay — fixed/centered so it's always in view, no scrolling required.
-            Per-step time estimates scale with the planned scene count (3 render
-            concurrently) so the ring's pace roughly matches this specific ad. */}
+            Per-step time estimates scale with the planned scene count — scenes
+            render SEQUENTIALLY (each chains off the previous one's last frame
+            for continuity), so the estimate is per-scene time × scene count,
+            not divided down for parallelism. */}
         {phase === 'working' && (
           <GenerationOverlay
-            steps={STEP_LABELS}
+            steps={[
+              STEP_LABELS[0],
+              {
+                ...STEP_LABELS[1],
+                detail: sceneProgress.total
+                  ? `Scene ${Math.min(sceneProgress.done + 1, sceneProgress.total)} of ${sceneProgress.total} — each one continues from the last for a seamless cut.`
+                  : STEP_LABELS[1].detail,
+              },
+              STEP_LABELS[2],
+              STEP_LABELS[3],
+            ]}
             activeIndex={stepIndex}
             estimateSecondsForStep={[
               12,
-              Math.ceil(planClipCount / 3) * 70,
+              planClipCount * 70,
               selectedVoiceId ? planClipCount * 8 : 3,
               15 + planClipCount * 3,
             ][stepIndex]}

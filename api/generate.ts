@@ -470,6 +470,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Free-text keywords/notes from the "Regenerate" panel — incorporated
       // into the director prompt with priority over the generic style brief.
       regenerationNotes,
+      // Multi-scene chaining: the PREVIOUS scene's last frame, used as THIS
+      // scene's DoP conditioning image instead of the static product photo —
+      // continues the same take (same environment/pose) instead of every
+      // scene snapping back to the same opening shot when stitched together.
+      // The Claude vision reference (productReferenceImageUrl) is deliberately
+      // NOT overridden by this — it stays pinned to the real product photo so
+      // the written description never drifts across a chain of re-derived frames.
+      conditioningImageUrl,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -542,11 +550,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       regenerationNotes,
     )
 
-    // Exactly one conditioning image per job. When a creator photo is present it
-    // wins — identity drift on a face is far more noticeable (and more
-    // consequential, since it's a real person) than on a product, and the
-    // product's appearance/scale is already carried in the text prompt.
-    const referenceImage = creatorImageUrl || productImageUrl
+    // Exactly one conditioning image per job. A chaining override (this
+    // scene continuing the previous scene's last frame) wins over everything
+    // else — that's what keeps a multi-scene ad visually continuous instead
+    // of every scene restarting from the same static photo. Absent that, a
+    // creator photo wins over the product photo — identity drift on a face is
+    // far more noticeable (and more consequential, since it's a real person)
+    // than on a product, and the product's appearance/scale is already
+    // carried in the text prompt.
+    const referenceImage = conditioningImageUrl || creatorImageUrl || productImageUrl
 
     // Video provider: PREFER HIGGSFIELD DoP when credentials are present — this
     // is the intended architecture (Higgsfield + Claude, no Gemini). DoP is the

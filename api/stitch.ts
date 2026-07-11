@@ -34,9 +34,53 @@ function run(bin: string, args: string[]): Promise<void> {
   })
 }
 
+/**
+ * Extract the LAST FRAME of a rendered clip as a JPEG data URL. Used to chain
+ * multi-scene generation: scene N+1's image-to-video conditioning frame is
+ * scene N's last frame (not the original product photo), so the creator/
+ * environment/pose carries forward continuously instead of every scene
+ * snapping back to the same static product shot when stitched together.
+ */
+async function extractLastFrame(videoUrl: string, res: VercelResponse) {
+  if (!ffmpegPath) return res.status(503).json({ error: 'ffmpeg binary unavailable.' })
+  const id = randomUUID()
+  const inPath = join(tmpdir(), `${id}-in.mp4`)
+  const outPath = join(tmpdir(), `${id}-frame.jpg`)
+  const cleanup = () => Promise.all([unlink(inPath).catch(() => {}), unlink(outPath).catch(() => {})])
+  try {
+    let vbuf: Buffer
+    if (/^data:/i.test(videoUrl)) {
+      const b64 = videoUrl.includes(',') ? videoUrl.split(',')[1] : ''
+      vbuf = Buffer.from(b64, 'base64')
+    } else {
+      const resp = await fetch(videoUrl)
+      if (!resp.ok) throw new Error(`Could not fetch the video (${resp.status}).`)
+      vbuf = Buffer.from(await resp.arrayBuffer())
+    }
+    await writeFile(inPath, vbuf)
+    // -sseof -0.2: seek to 0.2s before end (a hair earlier than the exact
+    // last frame — the very last frame of some codecs is a black/blank
+    // flush frame). -update 1 -frames:v 1 grabs a single still.
+    await run(ffmpegPath, ['-y', '-sseof', '-0.2', '-i', inPath, '-update', '1', '-frames:v', '1', '-q:v', '2', outPath])
+    const frame = await readFile(outPath)
+    await cleanup()
+    return res.status(200).json({ imageDataUrl: `data:image/jpeg;base64,${frame.toString('base64')}` })
+  } catch (err) {
+    await cleanup()
+    console.error('[/api/stitch extractLastFrame]', err)
+    return res.status(502).json({ error: err instanceof Error ? err.message : 'Frame extraction failed.' })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
   if (!ffmpegPath) return res.status(503).json({ error: 'ffmpeg binary unavailable.' })
+
+  const body = (req.body ?? {}) as Record<string, unknown>
+  if (body.action === 'extractLastFrame') {
+    if (typeof body.videoUrl !== 'string') return res.status(400).json({ error: 'videoUrl is required.' })
+    return extractLastFrame(body.videoUrl, res)
+  }
 
   const { videoUrls } = (req.body ?? {}) as { videoUrls?: unknown }
   if (!Array.isArray(videoUrls) || videoUrls.length < 2 || videoUrls.length > MAX_CLIPS) {

@@ -50,6 +50,12 @@ export type GenerateInput = {
   /** Free-text keywords/notes from the "Regenerate" panel — incorporated into
    *  the director prompt with priority over the generic style brief. */
   regenerationNotes?: string
+  /** Multi-scene chaining: the previous scene's last frame, used as THIS
+   *  scene's video conditioning image instead of the static product photo —
+   *  keeps a multi-scene ad visually continuous. Wins over creatorImageUrl/
+   *  productImageUrl for conditioning only; the Claude vision reference stays
+   *  pinned to the real product regardless. */
+  conditioningImageUrl?: string
 }
 
 export type GenerateResponse = {
@@ -297,6 +303,19 @@ export async function stitchVideos(videoUrls: string[]): Promise<{ videoDataUrl:
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ videoUrls }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** Extract a clip's last frame as an image — used to chain multi-scene
+ *  generation so scene N+1 visually continues from scene N instead of every
+ *  scene restarting from the same static product photo. */
+export async function extractLastFrame(videoUrl: string): Promise<{ imageDataUrl: string }> {
+  const res = await fetch('/api/stitch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'extractLastFrame', videoUrl }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
