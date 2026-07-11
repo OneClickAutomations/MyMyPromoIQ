@@ -187,9 +187,9 @@ export async function getJobStatus(requestIdOrUrl: string): Promise<HiggsfieldRe
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
     throw new HiggsfieldError(
-      `Higgsfield status fetch failed (${resp.status}): ${detail.slice(0, 300)}`,
+      `Higgsfield status fetch failed (${resp.status}) for ${url.replace(BASE_URL, '')}: ${detail.slice(0, 300)}`,
       resp.status,
-      requestId,
+      requestIdOrUrl,
     )
   }
   return (await resp.json()) as HiggsfieldResult

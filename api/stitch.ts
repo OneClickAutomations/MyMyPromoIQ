@@ -13,7 +13,10 @@ import { writeFile, readFile, unlink, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import ffmpegPath from 'ffmpeg-static'
+// CJS default export types as a module namespace under Node16 resolution; at
+// runtime it's the ffmpeg binary path string (or null), so narrow it here.
+import ffmpegStatic from 'ffmpeg-static'
+const ffmpegPath = ffmpegStatic as unknown as string | null
 
 const MAX_CLIPS = 6
 const MAX_VIDEO_BYTES = 80 * 1024 * 1024

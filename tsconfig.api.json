@@ -1,0 +1,17 @@
+{
+  // Type-checks the Vercel serverless functions. Neither the browser tsconfig
+  // nor vite build covers api/ — that blind spot shipped two runtime crashes
+  // (ERR_MODULE_NOT_FOUND, and a ReferenceError in the status poller). This
+  // config runs as part of `npm run build`, so Vercel fails the build instead
+  // of deploying a function that crashes at runtime.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "include": ["api/**/*.ts"]
+}

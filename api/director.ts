@@ -122,7 +122,7 @@ Plan the ${desired} clips.`,
     }],
   })
 
-  const rawText = message.content.find((b: any) => b.type === 'text')?.text?.trim() ?? '{}'
+  const rawText = message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text?.trim() ?? '{}'
   const jsonMatch = rawText.match(/\{[\s\S]*\}/)
   const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
   const rawClips: any[] = Array.isArray(parsed.clips) ? parsed.clips : []
@@ -206,7 +206,7 @@ Write the spoken hook line.`,
     }],
   })
 
-  const script = (message.content.find((b: any) => b.type === 'text')?.text ?? '').trim()
+  const script = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
     .replace(/^["'`]+|["'`]+$/g, '') // strip any wrapper quotes
     .trim()
 
