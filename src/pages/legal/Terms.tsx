@@ -25,7 +25,7 @@ export default function TermsOfService() {
 
       <h2>3. The Service</h2>
       <p>
-        PromoIQ provides an AI-powered pipeline that generates UGC-style video advertisements from product images and text descriptions. The pipeline uses third-party AI models including Anthropic Claude (for script writing) and Google Veo 3 / Gemini (for video rendering and image generation). We act as an orchestration layer between these services and you.
+        PromoIQ provides an AI-powered pipeline that generates UGC-style video advertisements from product images and text descriptions. The pipeline uses third-party AI models including Anthropic Claude (for script writing) and Higgsfield (for video rendering and image generation). We act as an orchestration layer between these services and you.
       </p>
       <p>
         We do not guarantee that any generated video will achieve any particular commercial outcome, engagement rate, or advertising result. AI outputs are probabilistic and may vary between runs.

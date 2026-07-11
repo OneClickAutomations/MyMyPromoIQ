@@ -39,7 +39,7 @@ type Phase = 'idle' | 'working' | 'done' | 'error'
 
 const STEPS = [
   'Claude writing direction',
-  'Submitting to Veo 3',
+  'Submitting to Higgsfield',
   'Rendering video (1-3 min)…',
 ]
 
@@ -213,7 +213,7 @@ export default function ReviewAndAdjust() {
         creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
       })
       setDirectorPrompt(dp)
-      setStepIndex(1) // "Submitting to Veo 3"
+      setStepIndex(1) // "Submitting to Higgsfield"
 
       setStepIndex(2) // "Rendering video"
       const result = await pollUntilDone(

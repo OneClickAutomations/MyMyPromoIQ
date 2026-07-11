@@ -7,7 +7,7 @@ const benefits = [
   'First 3 videos completely free — no card required',
   'AI director writes cinematic prompts for you',
   'Results in minutes, not weeks',
-  'Google Veo 3 video engine built in',
+  'Higgsfield video engine built in',
   'Cancel any time, keep everything you made',
 ]
 
@@ -108,7 +108,7 @@ export default function SignUpPage() {
         </div>
 
         <p className="relative text-xs text-ink-faint">
-          © {new Date().getFullYear()} {brand.name}. Powered by Google Veo 3.
+          © {new Date().getFullYear()} {brand.name}. Powered by Higgsfield + Claude.
         </p>
       </div>
 

@@ -72,6 +72,9 @@ async function submitHiggsfieldVideo(
     input_images: [{ type: 'image_url', image_url: startImage }],
   }
   const result = await submitDopVideo(args)
+  // Log the raw submit response so the Vercel Runtime Log shows the exact
+  // status_url shape — diagnosis from evidence, not inference.
+  console.info('[generate] DoP submit response:', JSON.stringify(result).slice(0, 500))
   // Use status_url from the submit response so /api/status polls the exact URL
   // the API provided — DoP's status path differs from the generic queue pattern.
   const pollId = result.status_url || result.request_id
