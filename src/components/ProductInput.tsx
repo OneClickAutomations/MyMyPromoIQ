@@ -19,8 +19,9 @@ import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
 import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid } from './icons'
-import { extractProductFromUrl, generateImage, getProductSpec } from '../lib/api'
+import { extractProductFromUrl, getProductSpec } from '../lib/api'
 import { composeSpecSheet } from '../lib/turnaroundSheet'
+import { removeBackgroundClientSide, enhancePhotoClientSide } from '../lib/imageTools'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -218,20 +219,21 @@ export default function ProductInput({ value, onChange, className = '' }: {
     patch({ images, primaryImage: value.primaryImage === src ? (images[0] ?? '') : value.primaryImage })
   }
 
+  // Client-side, deterministic — not routed through Higgsfield Soul. Soul is a
+  // stylized generator, not an instruction-following pixel editor, so asking
+  // it to "remove the background exactly" or "sharpen without altering
+  // proportions" produced unreliable results. These run instantly in the
+  // browser and always produce a real, predictable result on an uploaded photo.
   async function runAi(kind: 'bg' | 'enhance') {
     if (!value.primaryImage) return
     const parts = dataUrlParts(value.primaryImage)
     if (!parts) { setError('Enhance and background removal work on uploaded/captured images.'); return }
     setAiBusy(kind); setError('')
     setPreview({ before: value.primaryImage, after: null })
-    const editPrompt = kind === 'bg'
-      ? 'Remove the background completely, leaving ONLY the product on a pure white background. Keep the product pixel-accurate with crisp clean edges, no drop shadow, no reflection, no added elements.'
-      : 'Upscale and sharpen this product photo: improve lighting, clarity and detail, and remove noise and JPEG compression artifacts. Do NOT alter the product\'s shape, color, label text, or proportions.'
     try {
-      const { imageDataUrl } = await generateImage({
-        mode: 'edit', subjectType: 'product', editPrompt,
-        imageBase64: parts.base64, mimeType: parts.mimeType,
-      })
+      const imageDataUrl = kind === 'bg'
+        ? await removeBackgroundClientSide(value.primaryImage)
+        : await enhancePhotoClientSide(value.primaryImage)
       setPreview({ before: value.primaryImage, after: imageDataUrl })
     } catch (e) {
       setPreview(null)

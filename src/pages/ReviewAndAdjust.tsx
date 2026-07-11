@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
-import GenerationOverlay from '../components/ui/GenerationOverlay'
+import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import type { CreatorAttributes } from '../lib/studio/types'
 import { startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt, type StatusResponse } from '../lib/api'
@@ -38,11 +38,12 @@ function resolveStyleId(raw: string): string {
 
 type Phase = 'idle' | 'working' | 'done' | 'error'
 
-const STEPS = [
-  'Claude writing direction',
-  'Submitting to Higgsfield',
-  'Rendering video (1-3 min)…',
+const STEPS: GenerationStep[] = [
+  { label: 'Script', headline: 'Claude is writing your direction…', detail: 'Turning your product and style into a shot-by-shot prompt.' },
+  { label: 'Submit', headline: 'Submitting to Higgsfield…', detail: 'Handing the direction to the render engine.' },
+  { label: 'Render', headline: 'Rendering your video…', detail: 'This usually takes 1-3 minutes.' },
 ]
+const STEP_ESTIMATES = [15, 10, 150]
 
 /** Force-download a cross-origin video URL via a blob fetch. */
 async function downloadVideo(url: string) {
@@ -75,6 +76,10 @@ export default function ReviewAndAdjust() {
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
   const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
+  // Flips true when the user hits Cancel mid-generation — checked after every
+  // await in handleGenerate so a late-arriving result can't reopen the
+  // overlay or show a video the user already dismissed.
+  const cancelledRef = useRef(false)
 
   // AI Magic script writer
   const [showScriptAI, setShowScriptAI] = useState(false)
@@ -203,6 +208,7 @@ export default function ReviewAndAdjust() {
     setPhase('working')
     setStepIndex(0)
     setVideoUrl(null)
+    cancelledRef.current = false
 
     // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
     // Veo's identity reference, taking priority over the product photo.
@@ -220,6 +226,7 @@ export default function ReviewAndAdjust() {
         creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
         regenerationNotes: regenerationNotes?.trim() || undefined,
       })
+      if (cancelledRef.current) return
       setDirectorPrompt(dp)
       setStepIndex(1) // "Submitting to Higgsfield"
 
@@ -227,10 +234,12 @@ export default function ReviewAndAdjust() {
       const result = await pollUntilDone(
         requestId,
         (s: StatusResponse) => {
+          if (cancelledRef.current) return
           if (s.status === 'pending') setStepIndex(2)
         },
         { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 },
       )
+      if (cancelledRef.current) return
 
       if (result.status === 'completed' && result.videoUrl) {
         setVideoUrl(result.videoUrl)
@@ -270,9 +279,16 @@ export default function ReviewAndAdjust() {
         setPhase('error')
       }
     } catch (err) {
+      if (cancelledRef.current) return
       setErrorMsg(err instanceof Error ? err.message : 'Generation failed.')
       setPhase('error')
     }
+  }
+
+  function handleCancel() {
+    cancelledRef.current = true
+    setPhase('idle')
+    setStepIndex(0)
   }
 
   function handleReset() {
@@ -536,7 +552,7 @@ export default function ReviewAndAdjust() {
 
         {/* Generation overlay — fixed/centered so it's always in view, no scrolling required */}
         {phase === 'working' && (
-          <GenerationOverlay steps={STEPS} activeIndex={stepIndex} estimateSeconds={150} subtitle="This usually takes 1-3 minutes." />
+          <GenerationOverlay steps={STEPS} activeIndex={stepIndex} estimateSecondsForStep={STEP_ESTIMATES[stepIndex]} onCancel={handleCancel} />
         )}
 
         {/* Video result */}

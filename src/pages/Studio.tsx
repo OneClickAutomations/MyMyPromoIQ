@@ -1310,10 +1310,13 @@ export default function Studio() {
             included. Hidden the instant workflowStep advances to 4 (done). */}
         {workflowStep === 3 && (
           <GenerationOverlay
-            steps={['Writing script & blocking the scene', 'Submitting to the render engine', 'Rendering your video']}
+            steps={[
+              { label: 'Script', headline: 'Claude is writing & blocking the scene…', detail: 'Directing this scene from your brief.' },
+              { label: 'Submit', headline: 'Submitting to the render engine…', detail: 'Handing the direction to Higgsfield.' },
+              { label: 'Render', headline: 'Rendering your video…', detail: 'This usually takes 1-3 minutes.' },
+            ]}
             activeIndex={genStepIdx}
-            estimateSeconds={150}
-            subtitle="This usually takes 1-3 minutes."
+            estimateSecondsForStep={[15, 10, 150][genStepIdx]}
           />
         )}
       </div>

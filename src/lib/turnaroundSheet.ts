@@ -22,14 +22,38 @@ const COLS = 3
 const PAD = 24
 const LEGEND_H = 220
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+function loadImageEl(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.crossOrigin = 'anonymous'
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error('Could not load an image for the spec sheet.'))
     img.src = src
   })
+}
+
+/**
+ * Load an image for canvas drawing WITHOUT tainting the canvas.
+ *
+ * data: URLs load directly — same-origin by definition, never tainted.
+ * https URLs are fetched and converted to a data: URL first: setting
+ * `img.crossOrigin = 'anonymous'` on the <img> tag directly is the more
+ * common approach, but it makes the load FAIL outright (onerror, no image at
+ * all) on any host that doesn't send an Access-Control-Allow-Origin header —
+ * which silently killed the whole spec sheet with no visible feedback. The
+ * fetch+blob route degrades to a clear, catchable error instead of a dead end.
+ */
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  if (src.startsWith('data:')) return loadImageEl(src)
+  const resp = await fetch(src)
+  if (!resp.ok) throw new Error(`Could not fetch a reference photo (${resp.status}).`)
+  const blob = await resp.blob()
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('Could not read a reference photo.'))
+    reader.readAsDataURL(blob)
+  })
+  return loadImageEl(dataUrl)
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -98,10 +122,10 @@ export async function composeSpecSheet(
     ctx.drawImage(img, x + (CELL - dw) / 2, y + (CELL - dh) / 2, dw, dh)
 
     const label = i === 0 ? 'HERO' : `ANGLE ${i + 1}`
+    ctx.font = 'bold 14px Inter, system-ui, sans-serif' // set BEFORE measureText, or the badge is measured with the wrong font
     ctx.fillStyle = '#00000099'
     ctx.fillRect(x + 8, y + 8, ctx.measureText(label).width + 24, 28)
     ctx.fillStyle = '#FFFFFF'
-    ctx.font = 'bold 14px Inter, system-ui, sans-serif'
     ctx.fillText(label, x + 18, y + 27)
   })
 
