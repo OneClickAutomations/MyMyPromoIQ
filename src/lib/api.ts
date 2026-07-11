@@ -456,6 +456,34 @@ export async function generateSoulImage(input: SoulImageInput): Promise<{ imageD
   return res.json()
 }
 
+/** The angle views a turnaround fills in, in priority order (most useful for
+ *  video generation first — the sides and back are what a single front photo
+ *  leaves the model to guess). */
+export const TURNAROUND_ANGLES = [
+  { key: 'left',  label: 'AI · LEFT',  phrase: 'photographed from its exact left side (90-degree profile view)' },
+  { key: 'right', label: 'AI · RIGHT', phrase: 'photographed from its exact right side (90-degree profile view)' },
+  { key: 'back',  label: 'AI · BACK',  phrase: 'photographed from directly behind (rear view)' },
+  { key: 'top',   label: 'AI · TOP',   phrase: 'photographed from directly above (top-down view)' },
+] as const
+
+/**
+ * Generate ONE AI-estimated angle of a product via Soul, conditioned on the
+ * real hero photo. These are the model's best guess of faces it can't see in
+ * the single source photo — useful to give the video model a sense of the
+ * product's 3D form, but approximate (a real uploaded angle is always better).
+ * Returns a hosted image URL.
+ */
+export async function generateProductAngle(
+  reference: { imageUrl?: string; imageBase64?: string; mimeType?: string },
+  anglePhrase: string,
+  productHint?: string,
+): Promise<{ imageDataUrl: string }> {
+  const subject = productHint ? `the ${productHint}` : 'the exact product in the reference image'
+  const editPrompt = `A clean studio product photograph of ${subject}, ${anglePhrase}. Keep the product's color, materials, proportions, and design IDENTICAL to the reference — same object, just rotated. Pure white seamless background, soft even studio lighting, single centered subject, no text, no people, no hands, photorealistic.`
+  const { imageDataUrl } = await generateSoulImage({ subjectType: 'product', editPrompt, ...reference })
+  return { imageDataUrl }
+}
+
 // ── Dashboard studio art (fresh Higgsfield imagery for the home cards) ──────────
 
 /** The curated dashboard art keys, in the order the seeder generates them. */

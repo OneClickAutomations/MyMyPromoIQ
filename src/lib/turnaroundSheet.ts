@@ -82,6 +82,9 @@ export async function composeSpecSheet(
   images: string[],
   spec: ProductSpec | null,
   productName?: string,
+  /** Optional per-image cell labels. Defaults to HERO / ANGLE 2… when omitted.
+   *  Used to mark AI-estimated angles distinctly from real uploaded photos. */
+  labels?: string[],
 ): Promise<string> {
   const photos = images.slice(0, 6)
   if (photos.length === 0) throw new Error('No photos to compose a spec sheet from.')
@@ -121,9 +124,12 @@ export async function composeSpecSheet(
     const dh = img.height * scale
     ctx.drawImage(img, x + (CELL - dw) / 2, y + (CELL - dh) / 2, dw, dh)
 
-    const label = i === 0 ? 'HERO' : `ANGLE ${i + 1}`
+    const label = labels?.[i] ?? (i === 0 ? 'HERO' : `ANGLE ${i + 1}`)
+    const isAi = label.startsWith('AI')
     ctx.font = 'bold 14px Inter, system-ui, sans-serif' // set BEFORE measureText, or the badge is measured with the wrong font
-    ctx.fillStyle = '#00000099'
+    // AI-estimated angles get a fire-orange badge so they read as clearly
+    // distinct from the real, ground-truth photos (which stay neutral black).
+    ctx.fillStyle = isAi ? '#E8341Ccc' : '#00000099'
     ctx.fillRect(x + 8, y + 8, ctx.measureText(label).width + 24, 28)
     ctx.fillStyle = '#FFFFFF'
     ctx.fillText(label, x + 18, y + 27)
