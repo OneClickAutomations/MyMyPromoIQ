@@ -23,6 +23,7 @@ import {
   LIGHTING_OPTIONS,
   ENVIRONMENT_OPTIONS,
   PRODUCT_ACTION_OPTIONS,
+  KEEP_ORIGINAL_ENVIRONMENT,
   phraseFor,
 } from './presets'
 
@@ -116,7 +117,14 @@ function describeCreator(attrs?: CreatorAttributes): string {
 export function assembleScenePrompt(brief: CreativeBrief, scene?: StoryboardScene): string {
   const product = brief.product.productName || 'the product'
   const action = phraseFor(PRODUCT_ACTION_OPTIONS, scene?.shotType || brief.scene.productAction || 'holding')
-  const environment = phraseFor(ENVIRONMENT_OPTIONS, brief.scene.environment || 'cozy_home_interior')
+  // KEEP_ORIGINAL_ENVIRONMENT: omit any environment description entirely so
+  // the video model just continues whatever's actually visible in the
+  // uploaded photo, instead of the text prompt describing a DIFFERENT preset
+  // setting than the real conditioning image shows — that mismatch is what
+  // forced an unwanted background change even when the user's own photo
+  // already had a real, usable setting.
+  const keepOriginalEnvironment = brief.scene.environment === KEEP_ORIGINAL_ENVIRONMENT
+  const environment = keepOriginalEnvironment ? '' : phraseFor(ENVIRONMENT_OPTIONS, brief.scene.environment || 'cozy_home_interior')
   const lighting = phraseFor(LIGHTING_OPTIONS, brief.scene.lighting || 'soft_natural_window')
   const cameraIds = scene?.cameraDirection ? [scene.cameraDirection] : brief.style.cameraDirection
   const camera = (cameraIds.length ? cameraIds : ['slow_push'])
@@ -144,7 +152,11 @@ export function assembleScenePrompt(brief: CreativeBrief, scene?: StoryboardScen
   }
   // Scale discipline — products routinely render oversized; pin them to reality.
   beats.push(`the product rendered at correct real-world scale and proportion relative to the hands and body, held naturally and comfortably, not oversized`)
-  beats.push(`set in ${environment}`)
+  if (keepOriginalEnvironment) {
+    beats.push('keep the exact background and setting visible in the reference photo unchanged — do not replace, redecorate, or relocate it')
+  } else {
+    beats.push(`set in ${environment}`)
+  }
   beats.push(lighting)
   beats.push(`camera: ${camera}`)
   beats.push('anatomically correct hands with five fingers, stable consistent face, no morphing or warping')

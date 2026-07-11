@@ -297,12 +297,27 @@ export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioD
   return res.json()
 }
 
+/**
+ * Upload any data: URL clips to Supabase Storage first so /api/stitch only
+ * ever receives plain https:// URLs. Clips that already have a voiceover
+ * muxed in are large base64 data: URLs (often several MB each) — sending
+ * 2+ of those inline in one JSON POST body blows past Vercel's request size
+ * limit and fails before the function even runs, surfacing to the user as a
+ * bare "Failed to fetch" with no real error message. https:// URLs (silent
+ * DoP renders with no voiceover) pass through untouched — only a few bytes
+ * each in the JSON body either way.
+ */
+async function hostForStitch(urls: string[]): Promise<string[]> {
+  return Promise.all(urls.map(u => (u.startsWith('data:') ? uploadAsset(u) : u)))
+}
+
 /** Stitch 2–6 silent video URLs into one concatenated MP4. */
 export async function stitchVideos(videoUrls: string[]): Promise<{ videoDataUrl: string; bytes: number; clips: number }> {
+  const hosted = await hostForStitch(videoUrls)
   const res = await fetch('/api/stitch', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ videoUrls }),
+    body: JSON.stringify({ videoUrls: hosted }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
