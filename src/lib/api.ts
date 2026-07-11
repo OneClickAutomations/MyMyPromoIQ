@@ -47,6 +47,9 @@ export type GenerateInput = {
    *  so clips 2..N continue the take instead of re-opening on the product. */
   sceneIndex?: number
   sceneCount?: number
+  /** Free-text keywords/notes from the "Regenerate" panel — incorporated into
+   *  the director prompt with priority over the generic style brief. */
+  regenerationNotes?: string
 }
 
 export type GenerateResponse = {
@@ -326,6 +329,26 @@ export async function generateModelSheet(input: ModelSheetInput): Promise<{ shee
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export type ProductSpec = {
+  dimensions: string
+  material: string
+  scaleComparison: string
+  notes: string
+}
+
+/** Claude-vision analysis of a product photo (dimensions, material, scale
+ *  comparison, notes) — text-only, no image generation. Feeds the client-
+ *  composed spec/turnaround sheet in ProductInput / SeedImageStudio. */
+export async function getProductSpec(input: { imageUrl?: string; imageBase64?: string; mimeType?: string; subjectHint?: string }): Promise<ProductSpec> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'spec', subjectType: 'product', ...input }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -658,6 +681,18 @@ export async function writeAdScript(input: {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ mode: 'write-script', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** "AI Magic" — expand a few rough keywords into a concrete regeneration
+ *  directive. Powers the enhance button next to any Regenerate keyword field. */
+export async function enhancePrompt(input: { text: string; productDescription?: string; style?: string }): Promise<{ enhanced: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'enhance-prompt', ...input }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()

@@ -327,7 +327,7 @@ export default function Dashboard() {
           <HeroCard to="/studio/new" title="Build From Scratch" subtitle="Full creative control" cta="Start Building" tone="gold">
             <FannedCluster art={art} generating={generating} />
           </HeroCard>
-          <HeroCard to="/forge" title="Quick Generate" subtitle="Product in. Commercial out." cta="Upload Product" tone="emerald">
+          <HeroCard to="/forge/review" title="Quick Generate" subtitle="Product in. Commercial out." cta="Upload Product" tone="emerald">
             <ProductHero art={art} generating={generating} />
           </HeroCard>
         </div>

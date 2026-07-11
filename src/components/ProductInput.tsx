@@ -19,7 +19,8 @@ import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
 import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid } from './icons'
-import { extractProductFromUrl, generateImage, generateModelSheet } from '../lib/api'
+import { extractProductFromUrl, generateImage, getProductSpec } from '../lib/api'
+import { composeSpecSheet } from '../lib/turnaroundSheet'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -248,24 +249,30 @@ export default function ProductInput({ value, onChange, className = '' }: {
     setPreview(null)
   }
 
-  // Generate a 2×3 multi-angle turnaround of the hero shot. This gives the
-  // video generator six consistent views to interpret the product from,
-  // instead of a single angle — the key to keeping the product faithful when
-  // the creator handles or demonstrates it. Stored on the value so generation
-  // can pass it as a vision reference.
+  // Compose a reference spec sheet from the REAL uploaded photos (all angles
+  // the user added) plus Claude-estimated dimensions/material/scale/notes.
+  // Deliberately NOT an AI-regenerated image: Soul (the account's image
+  // model) is a single-subject stylized generator, not an instruction-
+  // following compositor, so asking it to hallucinate a "2x3 six-angle grid"
+  // produced unreliable, sometimes silently-wrong output. Compositing the
+  // user's own photos client-side is 100% reliable and gives the video model
+  // sharper real scale context than a hallucinated grid ever could.
   async function generateTurnaround() {
     if (!value.primaryImage || turnaroundBusy) return
     setTurnaroundBusy(true); setTurnaroundErr('')
     try {
       const parts = dataUrlParts(value.primaryImage)
-      const { sheetDataUrl } = await generateModelSheet(
+      const spec = await getProductSpec(
         parts
-          ? { imageBase64: parts.base64, mimeType: parts.mimeType, subjectType: 'product', subjectHint: value.name || undefined }
-          : { imageUrl: value.primaryImage, subjectType: 'product', subjectHint: value.name || undefined },
-      )
+          ? { imageBase64: parts.base64, mimeType: parts.mimeType, subjectHint: value.name || undefined }
+          : { imageUrl: value.primaryImage, subjectHint: value.name || undefined },
+      ).catch(() => null) // legend is a nice-to-have — never block the sheet on it
+      // Hero shot first, then every other captured angle.
+      const ordered = [value.primaryImage, ...value.images.filter(i => i !== value.primaryImage)]
+      const sheetDataUrl = await composeSpecSheet(ordered, spec, value.name || undefined)
       patch({ turnaroundImage: sheetDataUrl })
     } catch (e) {
-      setTurnaroundErr(e instanceof Error ? e.message : 'Could not generate the turnaround — try a clearer photo.')
+      setTurnaroundErr(e instanceof Error ? e.message : 'Could not build the spec sheet — try a clearer photo.')
     } finally {
       setTurnaroundBusy(false)
     }
@@ -410,30 +417,31 @@ export default function ProductInput({ value, onChange, className = '' }: {
             </button>
             <button onClick={generateTurnaround} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
               {turnaroundBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Grid className="h-3.5 w-3.5" />}
-              {value.turnaroundImage ? 'Regenerate turnaround' : 'Generate turnaround'}
+              {value.turnaroundImage ? 'Regenerate spec sheet' : 'Generate spec sheet'}
             </button>
           </div>
 
-          {/* Turnaround / model sheet — six consistent angles the video
-              generator uses to keep the product faithful when it's handled. */}
+          {/* Spec sheet — your real uploaded angles plus Claude-estimated
+              dimensions/material/scale/notes, composed client-side. Gives the
+              video generator concrete scale context instead of guessing. */}
           {(turnaroundBusy || value.turnaroundImage || turnaroundErr) && (
             <div className="mt-4 rounded-xl border border-white/[0.08] bg-void-900 p-3">
               <div className="mb-2 flex items-center gap-2">
                 <Grid className="h-3.5 w-3.5 text-fire-start" />
-                <p className="text-xs font-semibold text-ink">360° turnaround reference</p>
+                <p className="text-xs font-semibold text-ink">Product spec sheet</p>
                 {value.turnaroundImage && !turnaroundBusy && (
                   <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300"><Check className="h-3 w-3" /> Saved as reference</span>
                 )}
               </div>
               {turnaroundBusy ? (
                 <div className="flex aspect-[3/2] items-center justify-center rounded-lg bg-void-800/60 text-sm text-ink-muted">
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin text-fire-start" /> Rendering six angles…
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin text-fire-start" /> Building spec sheet…
                 </div>
               ) : value.turnaroundImage ? (
-                <img src={value.turnaroundImage} alt="Product turnaround sheet" className="w-full rounded-lg" />
+                <img src={value.turnaroundImage} alt="Product spec sheet" className="w-full rounded-lg" />
               ) : null}
               {turnaroundErr && <p className="mt-2 text-xs text-amber-300">{turnaroundErr}</p>}
-              <p className="mt-2 text-[11px] text-ink-faint">Six angles help the AI keep your product accurate when the creator holds or demonstrates it.</p>
+              <p className="mt-2 text-[11px] text-ink-faint">Your real photos plus estimated dimensions and scale — this gives the AI concrete size context instead of guessing. Add more angles above for a fuller sheet.</p>
             </div>
           )}
 

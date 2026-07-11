@@ -15,7 +15,8 @@
  * uses mode 'sheet'.
  */
 import { useRef, useState } from 'react'
-import { generateImage, generateModelSheet, uploadAsset, getSoulStyles, generateSoulImage, type SoulStyle } from '../lib/api'
+import { generateImage, generateModelSheet, getProductSpec, uploadAsset, getSoulStyles, generateSoulImage, type SoulStyle } from '../lib/api'
+import { composeSpecSheet } from '../lib/turnaroundSheet'
 import { Upload, Wand, RefreshCw, Check, Trash, Spark, Grid, ImageIcon } from './icons'
 
 export type SeedImage = { url: string; label?: string }
@@ -154,14 +155,26 @@ export default function SeedImageStudio({
     }
   }
 
-  /** Generate a turnaround sheet from a given image (uploaded ref or existing seed). */
+  /** Generate a turnaround/spec sheet from a given image (uploaded ref or existing seed).
+   *  Products use the deterministic canvas compositor (the real photo + a Claude-
+   *  estimated dimensions/material/scale legend) — reliable, and gives sharper
+   *  scale context than an AI-hallucinated multi-angle grid. Characters keep the
+   *  AI-regenerated multi-angle sheet (a dimensions legend doesn't apply to a person). */
   async function handleTurnaround(args: { imageBase64?: string; imageUrl?: string }) {
     setTurnaroundBusy(true); setTurnaroundError(''); setTurnaroundResult(null)
     try {
-      const { sheetDataUrl } = await generateModelSheet({ subjectType, subjectHint, ...args })
-      setTurnaroundResult(sheetDataUrl)
+      if (subjectType === 'product') {
+        const src = args.imageBase64 || args.imageUrl
+        if (!src) throw new Error('No reference photo to build a spec sheet from.')
+        const spec = await getProductSpec({ ...args, subjectHint }).catch(() => null)
+        const sheetDataUrl = await composeSpecSheet([src], spec, subjectHint)
+        setTurnaroundResult(sheetDataUrl)
+      } else {
+        const { sheetDataUrl } = await generateModelSheet({ subjectType, subjectHint, ...args })
+        setTurnaroundResult(sheetDataUrl)
+      }
     } catch (e) {
-      setTurnaroundError(e instanceof Error ? e.message : 'Turnaround generation failed. Try a clearer reference photo.')
+      setTurnaroundError(e instanceof Error ? e.message : 'Spec sheet generation failed. Try a clearer reference photo.')
     } finally {
       setTurnaroundBusy(false)
     }
@@ -191,12 +204,14 @@ export default function SeedImageStudio({
 
       if (makeTurnaround) {
         try {
-          const { sheetDataUrl } = await generateModelSheet({ subjectType, imageBase64: result, subjectHint })
+          const sheetDataUrl = subjectType === 'product'
+            ? await composeSpecSheet([result], await getProductSpec({ imageBase64: result, subjectHint }).catch(() => null), subjectHint)
+            : (await generateModelSheet({ subjectType, imageBase64: result, subjectHint })).sheetDataUrl
           const sheetHosted = await uploadAsset(sheetDataUrl)
-          additions.push({ url: sheetHosted, label: 'Turnaround sheet' })
+          additions.push({ url: sheetHosted, label: subjectType === 'product' ? 'Spec sheet' : 'Turnaround sheet' })
         } catch (e) {
           // Show the turnaround error but still save the main image.
-          setError(`Image saved, but turnaround failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+          setError(`Image saved, but the ${subjectType === 'product' ? 'spec sheet' : 'turnaround'} failed: ${e instanceof Error ? e.message : 'unknown error'}`)
         }
       }
 

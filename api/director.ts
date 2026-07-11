@@ -213,6 +213,40 @@ Write the spoken hook line.`,
   return res.status(200).json({ script })
 }
 
+/** "AI Magic" — expand a few user keywords into a concrete, specific
+ *  regeneration directive: physically observable actions/camera/detail, not
+ *  vague mood words. Powers the enhance button next to the Regenerate
+ *  keyword field (any generation module). */
+async function enhancePrompt(body: Record<string, any>, res: VercelResponse) {
+  const { text, productDescription, style } = body
+  if (!text?.trim()) return res.status(400).json({ error: 'Enter a few keywords first.' })
+
+  const styleBlurb = STYLE_BLURBS[style] ?? style ?? ''
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 200,
+    system: `You expand a short, rough keyword note into ONE concrete, physically specific creative direction for regenerating a UGC ad video clip.
+
+Rules:
+- Turn vague ideas into observable actions, camera moves, or concrete visual details a camera could literally capture.
+- 1-2 sentences maximum.
+- No mood adjectives (cinematic, professional, stunning, amazing, perfect).
+- Preserve every specific noun/detail the user already gave — only ADD specificity, never remove their intent.
+- Output ONLY the expanded direction. No preamble, no quotes.`,
+    messages: [{
+      role: 'user',
+      content: `Product: ${productDescription || 'the product'}${styleBlurb ? `\nAd style: ${styleBlurb}` : ''}\nUser's rough note: "${text.trim()}"\n\nExpand this into a concrete direction.`,
+    }],
+  })
+
+  const enhanced = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim()
+
+  return res.status(200).json({ enhanced: enhanced || text.trim() })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -235,6 +269,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director write-script]', err)
       const message = err instanceof Error ? err.message : 'Script generation failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'enhance-prompt') {
+    try {
+      return await enhancePrompt(body, res)
+    } catch (err) {
+      console.error('[/api/director enhance-prompt]', err)
+      const message = err instanceof Error ? err.message : 'Enhancement failed.'
       return res.status(502).json({ error: message })
     }
   }

@@ -4,6 +4,7 @@ import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
+import GenerationOverlay from '../components/ui/GenerationOverlay'
 import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
   PlayIcon, RefreshCw, Share2, Spark, Upload, Users, Wand,
@@ -1302,6 +1303,19 @@ export default function Studio() {
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {/* Always-in-view generation overlay — the inline progress card inside
+            renderStep3() stays for desktop context, but this guarantees the
+            countdown is visible without scrolling on any viewport, mobile
+            included. Hidden the instant workflowStep advances to 4 (done). */}
+        {workflowStep === 3 && (
+          <GenerationOverlay
+            steps={['Writing script & blocking the scene', 'Submitting to the render engine', 'Rendering your video']}
+            activeIndex={genStepIdx}
+            estimateSeconds={150}
+            subtitle="This usually takes 1-3 minutes."
+          />
+        )}
       </div>
     </AppShell>
   )

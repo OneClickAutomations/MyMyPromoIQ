@@ -4,9 +4,10 @@ import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import GenerationOverlay from '../components/ui/GenerationOverlay'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import type { CreatorAttributes } from '../lib/studio/types'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, type StatusResponse } from '../lib/api'
+import { startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt, type StatusResponse } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -82,6 +83,12 @@ export default function ReviewAndAdjust() {
   const [scriptTone, setScriptTone] = useState('')
   const [scriptLoading, setScriptLoading] = useState(false)
   const [scriptAIError, setScriptAIError] = useState('')
+
+  // Regenerate panel — keyword suggestions + AI Magic enhancement
+  const [showRegenPanel, setShowRegenPanel] = useState(false)
+  const [regenKeywords, setRegenKeywords] = useState('')
+  const [regenEnhancing, setRegenEnhancing] = useState(false)
+  const [regenError, setRegenError] = useState('')
 
   const [phase, setPhase] = useState<Phase>('idle')
   const [stepIndex, setStepIndex] = useState(0)
@@ -180,7 +187,7 @@ export default function ReviewAndAdjust() {
     }
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(regenerationNotes?: string) {
     const effectiveDescription = (productDescription.trim() || productName.trim())
     if (!effectiveDescription) {
       setErrorMsg('Describe the product you are selling.')
@@ -211,6 +218,7 @@ export default function ReviewAndAdjust() {
         script: script.trim() || undefined,
         creatorImageUrl,
         creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
+        regenerationNotes: regenerationNotes?.trim() || undefined,
       })
       setDirectorPrompt(dp)
       setStepIndex(1) // "Submitting to Higgsfield"
@@ -275,6 +283,35 @@ export default function ReviewAndAdjust() {
     setHistorySaved(false)
     setHistoryError('')
     setStepIndex(0)
+    setShowRegenPanel(false)
+    setRegenKeywords('')
+    setRegenError('')
+  }
+
+  async function handleEnhanceKeywords() {
+    if (!regenKeywords.trim()) {
+      setRegenError('Type a few keywords first.')
+      return
+    }
+    setRegenError('')
+    setRegenEnhancing(true)
+    try {
+      const { enhanced } = await enhancePrompt({
+        text: regenKeywords.trim(),
+        productDescription: productDescription.trim() || productName.trim() || undefined,
+        style,
+      })
+      setRegenKeywords(enhanced)
+    } catch (err) {
+      setRegenError(err instanceof Error ? err.message : 'Enhancement failed.')
+    } finally {
+      setRegenEnhancing(false)
+    }
+  }
+
+  function handleRegenerate() {
+    setShowRegenPanel(false)
+    handleGenerate(regenKeywords)
   }
 
   /** Continue to the 11-step Studio wizard to generate all 6 scenes. */
@@ -497,33 +534,9 @@ export default function ReviewAndAdjust() {
           </p>
         )}
 
-        {/* Progress panel */}
+        {/* Generation overlay — fixed/centered so it's always in view, no scrolling required */}
         {phase === 'working' && (
-          <div className="rounded-2xl border border-white/[0.07] bg-void-800/60 p-6 space-y-4">
-            <div className="flex items-center gap-2">
-              <Spark className="h-4 w-4 text-fire-start animate-pulse" />
-              <p className="text-sm font-semibold text-ink">Generating your video…</p>
-            </div>
-            <div className="space-y-2">
-              {STEPS.map((label, i) => (
-                <div key={label} className="flex items-center gap-3">
-                  <div className={`grid h-5 w-5 flex-shrink-0 place-items-center rounded-full border transition-all ${
-                    i < stepIndex
-                      ? 'border-fire-start bg-fire-start/20'
-                      : i === stepIndex
-                      ? 'border-fire-start/60 bg-fire-start/10 animate-pulse'
-                      : 'border-white/10 bg-void-700'
-                  }`}>
-                    {i < stepIndex && <Check className="h-3 w-3 text-fire-start" />}
-                    {i === stepIndex && <div className="h-1.5 w-1.5 rounded-full bg-fire-start" />}
-                  </div>
-                  <p className={`text-sm transition-all ${
-                    i <= stepIndex ? 'text-ink' : 'text-ink-faint'
-                  }`}>{label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <GenerationOverlay steps={STEPS} activeIndex={stepIndex} estimateSeconds={150} subtitle="This usually takes 1-3 minutes." />
         )}
 
         {/* Video result */}
@@ -575,13 +588,57 @@ export default function ReviewAndAdjust() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleReset}
-                  className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-void-800 px-4 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-white/20 hover:text-ink"
+                  onClick={() => setShowRegenPanel(v => !v)}
+                  className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all ${
+                    showRegenPanel
+                      ? 'border-fire-start/50 bg-fire-start/[0.10] text-fire-start'
+                      : 'border-white/[0.08] bg-void-800 text-ink-muted hover:border-white/20 hover:text-ink'
+                  }`}
                 >
                   <RefreshCw className="h-4 w-4" />
-                  Generate again
+                  Regenerate
                 </button>
               </div>
+
+              {/* Regenerate panel — keyword suggestions + AI Magic enhancement */}
+              {showRegenPanel && (
+                <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.04] p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">Regenerate with new direction</p>
+                    <p className="mt-0.5 text-xs text-ink-muted">Tell Claude what to change — a keyword, a fix, a new angle. Everything else (product, creator, script) stays the same.</p>
+                  </div>
+                  <textarea
+                    value={regenKeywords}
+                    onChange={e => setRegenKeywords(e.target.value)}
+                    disabled={regenEnhancing}
+                    rows={2}
+                    placeholder="e.g. show the earbuds much smaller than the case, hold at arm's length, more natural lighting"
+                    className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
+                  />
+                  {regenError && <p className="text-xs text-rose-400">{regenError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleEnhanceKeywords}
+                      disabled={regenEnhancing || !regenKeywords.trim()}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/[0.10] bg-void-700/60 px-3 py-2.5 text-sm font-semibold text-ink-muted transition-all hover:border-fire-start/30 hover:text-fire-start disabled:opacity-40"
+                    >
+                      {regenEnhancing
+                        ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Enhancing…</>
+                        : <><Spark className="h-3.5 w-3.5" /> AI Magic — enhance</>
+                      }
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRegenerate}
+                      disabled={regenEnhancing}
+                      className="btn-fire flex-1 justify-center gap-1.5 text-sm disabled:opacity-50"
+                    >
+                      <Wand className="h-3.5 w-3.5" /> Regenerate video
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Continue to Studio — only shown when arriving from a clone */}
               {isFromClone && (
@@ -621,7 +678,7 @@ export default function ReviewAndAdjust() {
         {(phase === 'idle') && (
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={!isCreatorReady(creatorValue)}
             className="btn-fire w-full justify-center gap-2 disabled:opacity-40"
           >

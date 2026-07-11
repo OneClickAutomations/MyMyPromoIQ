@@ -218,6 +218,51 @@ async function resolveImage(imageUrl?: string, imageBase64?: string, mimeType?: 
   throw new Error('Provide an image URL or upload.')
 }
 
+export interface ProductSpec {
+  dimensions: string
+  material: string
+  scaleComparison: string
+  notes: string
+}
+
+/**
+ * Analyze a product photo with Claude vision and return structured notes a
+ * spec sheet can display: estimated real-world dimensions, material, a
+ * plain-language scale comparison ("about the size of a golf ball"), and any
+ * notable features (parts, textures, hardware). This is a TEXT-only Claude
+ * call — no image generation — so it can't silently fail the way an
+ * AI-regenerated multi-angle grid can (Soul isn't an instruction-following
+ * compositor and was producing unreliable/blank turnarounds). The turnaround
+ * sheet composes this analysis with the user's OWN real photos client-side.
+ */
+async function analyzeProductSpec(img: { data: string; mime: string }, subjectHint?: string): Promise<ProductSpec> {
+  const anthropic = new Anthropic()
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: img.mime as any, data: img.data } },
+        {
+          type: 'text',
+          text: `Look at this product photo${subjectHint ? ` (product: ${subjectHint})` : ''} and estimate its real-world scale for someone briefing an AI video generator. Respond with STRICT JSON only, no markdown:
+{"dimensions":"approx. WxHxD in inches/cm, your best estimate","material":"primary material(s) and finish","scaleComparison":"one plain-language comparison a viewer instantly understands, e.g. 'about the size of a golf ball' or 'roughly a deck of cards'","notes":"one sentence on parts that matter for video (e.g. a case that opens vs. the smaller item inside it, cap/lid, moving parts) — empty string if not applicable"}`,
+        },
+      ],
+    }],
+  })
+  const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').trim()
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+  return {
+    dimensions: String(parsed.dimensions ?? 'Not estimated'),
+    material: String(parsed.material ?? 'Not estimated'),
+    scaleComparison: String(parsed.scaleComparison ?? ''),
+    notes: String(parsed.notes ?? ''),
+  }
+}
+
 async function describeSubject(img: { data: string; mime: string }, subjectType: string): Promise<string> {
   if (!process.env.ANTHROPIC_API_KEY) return ''
   try {
@@ -328,6 +373,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt, styleId } =
     (req.body ?? {}) as Record<string, string>
   const type = subjectType === 'character' ? 'character' : 'product'
+
+  // mode 'spec' — text-only Claude vision analysis (dimensions, material,
+  // scale comparison, notes) for the client-composed spec/turnaround sheet.
+  // No image generation, so it can't silently fail the way an AI-regenerated
+  // multi-angle grid did — see analyzeProductSpec() docblock.
+  if (mode === 'spec') {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set.' })
+    try {
+      const img = await resolveImage(imageUrl, imageBase64, mimeType)
+      const spec = await analyzeProductSpec(img, subjectHint)
+      return res.status(200).json(spec)
+    } catch (err) {
+      console.error('[/api/modelsheet spec]', err)
+      return res.status(502).json({ error: err instanceof Error ? err.message : 'Spec analysis failed.' })
+    }
+  }
+
   // Turnarounds/products read best square; character stills default to vertical.
   const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 

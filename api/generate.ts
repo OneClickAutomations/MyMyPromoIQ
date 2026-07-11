@@ -206,6 +206,7 @@ async function writeDirectorPrompt(
   creatorReference?: { data: string; mime: string },
   sceneIndex?: number,
   sceneCount?: number,
+  regenerationNotes?: string,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -256,7 +257,7 @@ async function writeDirectorPrompt(
     }
   }
 
-  const system = `You are an expert UGC video director. Your job is to write image-to-video prompts for Google Veo 3 that produce scroll-stopping, authentic-feeling content. Veo 3 responds to physically specific, observable descriptions — not mood words or adjectives.
+  const system = `You are an expert UGC video director. Your job is to write image-to-video prompts that produce scroll-stopping, authentic-feeling content for a physics-aware video model. The model responds to physically specific, observable descriptions — not mood words or adjectives.
 
 RULES (violating any one produces unusable output):
 
@@ -266,16 +267,20 @@ RULES (violating any one produces unusable output):
    Every beat must be something a camera can literally capture.
 
 2. ANCHOR the product in every sentence.
-   State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
+   State its exact visual appearance (color, material, shape, label text if known). Never assume the model remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
+
+2a. SCALE — state the product's real-world size relative to the body EVERY time, using a concrete comparison object a viewer already knows (e.g. "about the size of a golf ball", "roughly a deck of cards", "small enough to close a fist around", "the length of a thumb"). Never leave size to the model's imagination — undersized text-only description is the single most common failure mode (products rendering comically oversized, dwarfing the hand or face).
+
+2b. PARTS — if the product is a CONTAINER with a smaller item that comes OUT of it (an earbud case with earbuds, a pill bottle with pills, a lipstick tube with the bullet, a jar with cream on a fingertip), you MUST name both the container and the smaller part explicitly, and be precise about which one performs the described action. Concretely: "She opens the charging case, lifts ONE earbud out between two fingers, and places just the earbud in her ear — the case stays closed in her other hand at waist height, never touching her face." NEVER describe the outer container itself being pressed to an ear, eye, mouth, or skin — only the small inner part that is physically sized for that contact ever touches the body.
 ${creatorReference ? `
-2b. ANCHOR the creator's appearance to their reference photo.
+2c. ANCHOR the creator's appearance to their reference photo.
    A reference image of the creator is also attached. Describe their hair style/color, facial features, skin tone, clothing, and hands EXACTLY as observed in that photo — never invent or vary these across scenes. The only appearance details that may change are ones the scene direction below explicitly calls for (e.g. a different action, pose, or setting); absent an explicit instruction, hair, face, clothing, hands, and skin tone must stay identical to the photo.` : ''}
 
 3. PRECISE camera language only.
    Good: "locked tripod, slow push-in starting at chest level", "handheld with slight natural drift", "overhead tight on hands, product fills 70% of frame", "fast zoom-in to face then snap to product"
    Banned words: cinematic, professional, high-quality, aesthetic, stunning, beautiful, seamless, vibrant, amazing, incredible, perfect.
 
-4. AUDIO is first-class — Veo 3 generates sound with the image.
+4. AUDIO is first-class — the model generates sound with the image.
    If a script line is provided, embed it verbatim with delivery notes:
    Example: She looks directly into the lens and says "I used to spend $80 on this — now I spend $12," voice calm and matter-of-fact, slight upward smile at the end.
    If no script, describe ambient sound: the click of a lid, the rustle of packaging, a quiet exhale.
@@ -286,7 +291,8 @@ ${creatorReference ? `
 
 7. BE CREATIVE AND SPECIFIC. Imagine a real creator in a real environment — morning light through a bathroom window, kitchen counter with a plant just visible at frame edge, a bedroom nightstand. Concrete environmental detail makes the output feel genuine, not studio-fake.
 
-Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}`
+Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep hands anatomically correct and the face stable (no morphing).' : ''}
+Keep the product at realistic real-world scale and anatomically/functionally correct part usage (rules 2a-2b) in EVERY case, composed scene or not.`
 
   const userLines: string[] = []
   userLines.push(`Product: ${productDescription}`)
@@ -299,6 +305,9 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
   if (continuitySection.trim()) userLines.push(continuitySection.trim())
   if (sceneFocusSection.trim()) userLines.push(sceneFocusSection.trim())
   if (identitySection.trim()) userLines.push(identitySection.trim())
+  if (regenerationNotes?.trim()) {
+    userLines.push(`\nREGENERATION NOTES from the user — incorporate these specific changes/keywords into the scene (they take priority over the generic style direction where they conflict): ${regenerationNotes.trim()}`)
+  }
   userLines.push(`\nWrite the ${style.label} motion prompt.`)
 
   const imageBlocks = [productReference, creatorReference]
@@ -458,6 +467,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // on a product establishing shot.
       sceneIndex,
       sceneCount,
+      // Free-text keywords/notes from the "Regenerate" panel — incorporated
+      // into the director prompt with priority over the generic style brief.
+      regenerationNotes,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -527,6 +539,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       creatorReference,
       Number(sceneIndex) || undefined,
       Number(sceneCount) || undefined,
+      regenerationNotes,
     )
 
     // Exactly one conditioning image per job. When a creator photo is present it
