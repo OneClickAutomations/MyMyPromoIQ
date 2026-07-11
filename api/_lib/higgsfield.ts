@@ -170,16 +170,24 @@ export async function submitJob(
   return (await resp.json()) as HiggsfieldSubmitResponse
 }
 
-/** Fetch the current status/result of a request.
- *  Accepts either a bare request_id (constructs the generic status URL) or a
- *  full status_url returned by the submit response — DoP and other params-wrapped
- *  endpoints may return a different path than the generic queue pattern. */
-export async function getJobStatus(requestIdOrUrl: string): Promise<HiggsfieldResult> {
-  const url = requestIdOrUrl.startsWith('http')
-    ? requestIdOrUrl                                   // absolute status_url from submit
-    : requestIdOrUrl.startsWith('/')
-      ? `${BASE_URL}${requestIdOrUrl}`                 // relative status_url from submit
-      : `${BASE_URL}/requests/${requestIdOrUrl}/status` // bare request_id (generic route)
+/** Aggregate a JobSet into a single status (mirrors the SDK's semantics:
+ *  any completed job counts as completed; nsfw/failed/canceled likewise). */
+function jobSetStatus(jobs: Array<{ status: string }>): HiggsfieldStatus {
+  const has = (s: string) => jobs.some(j => j.status === s)
+  if (has('completed')) return 'completed'
+  if (has('nsfw')) return 'nsfw'
+  if (has('failed')) return 'failed'
+  if (has('canceled') || has('cancelled')) return 'cancelled'
+  if (has('in_progress')) return 'in_progress'
+  return 'queued'
+}
+
+/** Fetch the current status/result of a job set (`GET /v1/job-sets/{id}` —
+ *  the route the official SDK polls; there is no /requests/{id}/status for
+ *  these jobs). Normalizes the JobSet into the HiggsfieldResult shape the
+ *  rest of the app consumes ({status, images?, video?}). */
+export async function getJobStatus(jobSetId: string): Promise<HiggsfieldResult> {
+  const url = jobSetId.startsWith('http') ? jobSetId : `${BASE_URL}/v1/job-sets/${jobSetId}`
   const resp = await fetchWithTimeout(url, {
     method: 'GET',
     headers: headers(),
@@ -189,10 +197,27 @@ export async function getJobStatus(requestIdOrUrl: string): Promise<HiggsfieldRe
     throw new HiggsfieldError(
       `Higgsfield status fetch failed (${resp.status}) for ${url.replace(BASE_URL, '')}: ${detail.slice(0, 300)}`,
       resp.status,
-      requestIdOrUrl,
+      jobSetId,
     )
   }
-  return (await resp.json()) as HiggsfieldResult
+  const jobSet = (await resp.json()) as HiggsfieldJobSet
+  const jobs = jobSet.jobs ?? []
+  const status = jobSetStatus(jobs)
+
+  // Collect outputs. results.raw.type distinguishes image/video; fall back to
+  // the URL extension when type is absent.
+  const isVideo = (r: { url: string; type?: string }) => r.type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(r.url)
+  const outputs = jobs.map(j => j.results?.raw).filter((r): r is { url: string; type?: string } => !!r?.url)
+  const video = outputs.find(isVideo)
+  const images = outputs.filter(r => !isVideo(r)).map(r => ({ url: r.url }))
+
+  return {
+    status,
+    request_id: jobSet.id ?? jobSetId,
+    ...(images.length ? { images } : {}),
+    ...(video ? { video: { url: video.url } } : {}),
+    ...(status === 'failed' ? { error: 'Higgsfield reported the job as failed.' } : {}),
+  }
 }
 
 /** Cancel a request — only succeeds while it is still `queued` (202 Accepted). */
@@ -368,30 +393,55 @@ export async function getSoulStyles(): Promise<SoulStyle[]> {
 }
 
 /**
- * Submit to one of the `params`-wrapped endpoints (Soul, DoP). Unlike the flat
- * queue models (`submitJob`), these take `{ params: {...}, webhook }`. Both the
- * Soul image API and the DoP video API (verified docs) use this exact shape.
+ * JobSet — the ACTUAL response shape of the params-wrapped endpoints (Soul,
+ * DoP), verified against the official @higgsfield/client SDK source (v0.2.1):
+ *   submit  POST {endpoint} body {params, webhook?}  → { id, jobs: [{id, status, results?}] }
+ *   poll    GET  /v1/job-sets/{id}                   → same JobSet shape
+ *   results jobs[].results.raw = { url, type: 'image'|'video' }
+ * There is NO request_id and NO status_url in this response — coding against
+ * the /requests/{id}/status contract is what produced the 404s.
+ */
+export interface HiggsfieldJob {
+  id: string
+  status: string
+  results?: { raw?: { url: string; type?: string }; min?: { url: string; type?: string } } | null
+}
+export interface HiggsfieldJobSet {
+  id: string
+  jobs: HiggsfieldJob[]
+}
+
+/**
+ * Submit to one of the `params`-wrapped endpoints (Soul, DoP). Takes
+ * `{ params: {...} }` (webhook only when provided, matching the SDK) and
+ * returns the JobSet to poll via getJobStatus(jobSet.id).
  */
 async function submitParamsJob(
   path: string,
   params: Record<string, unknown>,
   label: string,
   opts?: { webhookUrl?: string },
-): Promise<HiggsfieldSubmitResponse> {
+): Promise<HiggsfieldJobSet> {
+  const body: Record<string, unknown> = { params }
+  if (opts?.webhookUrl) body.webhook = { url: opts.webhookUrl }
   const resp = await fetchWithTimeout(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ params, webhook: opts?.webhookUrl ?? null }),
+    body: JSON.stringify(body),
   }, 20_000)
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '')
     throw new HiggsfieldError(`Higgsfield ${label} submit failed (${resp.status}): ${detail.slice(0, 300)}`, resp.status)
   }
-  return (await resp.json()) as HiggsfieldSubmitResponse
+  const jobSet = (await resp.json()) as HiggsfieldJobSet
+  if (!jobSet?.id) {
+    throw new HiggsfieldError(`Higgsfield ${label} submit returned no job-set id. Raw: ${JSON.stringify(jobSet).slice(0, 300)}`, 502)
+  }
+  return jobSet
 }
 
 /** `POST /v1/text2image/soul` — stylized image generation. */
-export function submitSoulImage(args: SoulImageArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldSubmitResponse> {
+export function submitSoulImage(args: SoulImageArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldJobSet> {
   return submitParamsJob('/v1/text2image/soul', args as unknown as Record<string, unknown>, 'Soul', opts)
 }
 
@@ -429,7 +479,7 @@ export async function getDopMotions(): Promise<DopMotion[]> {
 }
 
 /** `POST /v1/image2video/dop` — submit a DoP image-to-video job. */
-export function submitDopVideo(args: DopArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldSubmitResponse> {
+export function submitDopVideo(args: DopArgs, opts?: { webhookUrl?: string }): Promise<HiggsfieldJobSet> {
   const { motions, ...rest } = args
   const params: Record<string, unknown> = {
     model: 'dop-lite',

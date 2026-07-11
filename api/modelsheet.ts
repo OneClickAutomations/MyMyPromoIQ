@@ -123,11 +123,10 @@ async function generateImageHiggsfield(
   const args: SoulImageArgs = { prompt, width_and_height: soulSize(opts.aspectRatio) }
   if (opts.styleId) args.style_id = opts.styleId
   if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
-  const soulResp = await submitSoulImage(args)
-  const pollId = soulResp.status_url || soulResp.request_id
+  const jobSet = await submitSoulImage(args)
   // Kept well under Vercel's 60s ceiling — the request also hosts the reference
   // beforehand and re-hosts the result afterward.
-  const result = await pollJob(pollId, { intervalMs: 3_000, timeoutMs: 35_000 })
+  const result = await pollJob(jobSet.id, { intervalMs: 3_000, timeoutMs: 35_000 })
   if (result.status === 'nsfw') throw new Error('The image was flagged by content moderation. Try a different photo or prompt.')
   if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
   const outUrl = firstImageUrl(result)
@@ -357,8 +356,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (styleId) args.style_id = styleId
       const refUrl = await hostRefUrl(imageUrl, imageBase64, mimeType).catch(() => undefined)
       if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
-      const soulResp = await submitSoulImage(args)
-      const result = await pollJob(soulResp.status_url || soulResp.request_id, { intervalMs: 3_000, timeoutMs: 35_000 })
+      const jobSet = await submitSoulImage(args)
+      const result = await pollJob(jobSet.id, { intervalMs: 3_000, timeoutMs: 35_000 })
       if (result.status === 'nsfw') return res.status(502).json({ error: 'The image was flagged by content moderation. Try a different photo or prompt.' })
       if (result.status !== 'completed') return res.status(502).json({ error: result.error || `Image generation did not finish (status: ${result.status}).` })
       const outUrl = firstImageUrl(result)
