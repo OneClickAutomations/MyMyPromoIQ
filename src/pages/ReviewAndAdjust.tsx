@@ -2,12 +2,19 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
-import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
+import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
+import DurationSlider from '../components/ui/DurationSlider'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
 import type { CreatorAttributes } from '../lib/studio/types'
-import { startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt, type StatusResponse } from '../lib/api'
+import { estimateClipCount } from '../lib/studio/storyboard'
+import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
+import {
+  startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt,
+  planStoryboard, generateVoiceover, muxVideoAudio, stitchVideos, listVoices,
+  type ElevenVoice,
+} from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
@@ -38,12 +45,12 @@ function resolveStyleId(raw: string): string {
 
 type Phase = 'idle' | 'working' | 'done' | 'error'
 
-const STEPS: GenerationStep[] = [
-  { label: 'Script', headline: 'Claude is writing your direction…', detail: 'Turning your product and style into a shot-by-shot prompt.' },
-  { label: 'Submit', headline: 'Submitting to Higgsfield…', detail: 'Handing the direction to the render engine.' },
-  { label: 'Render', headline: 'Rendering your video…', detail: 'This usually takes 1-3 minutes.' },
+const STEP_LABELS: GenerationStep[] = [
+  { label: 'Script', headline: 'Claude is planning your storyboard…', detail: 'Breaking your ad into scenes that fit the length you chose.' },
+  { label: 'Scenes', headline: 'Rendering your scenes…', detail: 'Higgsfield is animating each clip — this is the slow part.' },
+  { label: 'Voiceover', headline: 'Recording the voiceover…', detail: 'ElevenLabs is voicing your script.' },
+  { label: 'Rendering', headline: 'Stitching it all together…', detail: 'Assembling one seamless video.' },
 ]
-const STEP_ESTIMATES = [15, 10, 150]
 
 /** Force-download a cross-origin video URL via a blob fetch. */
 async function downloadVideo(url: string) {
@@ -81,6 +88,22 @@ export default function ReviewAndAdjust() {
   // overlay or show a video the user already dismissed.
   const cancelledRef = useRef(false)
 
+  // Video length — replaces the old "how many videos" mental model. The
+  // storyboard planner (server-side) translates seconds into however many
+  // clips of whatever per-clip length the video model supports.
+  const [durationSeconds, setDurationSeconds] = useState(30)
+
+  // Voiceover (ElevenLabs) — loaded lazily, empty selection = silent/native audio.
+  const [voices, setVoices] = useState<ElevenVoice[]>([])
+  const [voicesLoading, setVoicesLoading] = useState(false)
+  const [voicesError, setVoicesError] = useState('')
+  const [selectedVoiceId, setSelectedVoiceId] = useState('')
+  const [previewingVoiceId, setPreviewingVoiceId] = useState('')
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Multi-clip render queue — up to 3 scenes render in parallel.
+  const videoQueue = useGenerationQueue(3, 1)
+
   // AI Magic script writer
   const [showScriptAI, setShowScriptAI] = useState(false)
   const [scriptNiche, setScriptNiche] = useState('')
@@ -97,12 +120,36 @@ export default function ReviewAndAdjust() {
 
   const [phase, setPhase] = useState<Phase>('idle')
   const [stepIndex, setStepIndex] = useState(0)
+  // Updated once the storyboard plan resolves — drives the overlay's per-step
+  // time estimate so the ring's pace roughly matches however many scenes
+  // this particular ad actually needs.
+  const [planClipCount, setPlanClipCount] = useState(() => estimateClipCount(30))
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [directorPrompt, setDirectorPrompt] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [historySaved, setHistorySaved] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [downloading, setDownloading] = useState(false)
+
+  // Load ElevenLabs voices once, lazily — silent if no key is configured
+  // server-side (the voiceover step is opt-in, never blocks generation).
+  useEffect(() => {
+    setVoicesLoading(true)
+    listVoices()
+      .then(({ voices: v }) => setVoices(v))
+      .catch(e => setVoicesError(e instanceof Error ? e.message : 'Could not load voices.'))
+      .finally(() => setVoicesLoading(false))
+  }, [])
+
+  function previewVoice(v: ElevenVoice) {
+    if (!v.previewUrl) return
+    previewAudioRef.current?.pause()
+    const audio = new Audio(v.previewUrl)
+    previewAudioRef.current = audio
+    setPreviewingVoiceId(v.voiceId)
+    audio.play().catch(() => {})
+    audio.onended = () => setPreviewingVoiceId('')
+  }
 
   // Read prefill on mount, then clear it
   useEffect(() => {
@@ -192,6 +239,14 @@ export default function ReviewAndAdjust() {
     }
   }
 
+  /**
+   * Full Quick Generate pipeline: plan a storyboard sized to the chosen
+   * duration, render every scene (parallel queue), layer an ElevenLabs
+   * voiceover onto each rendered clip when a voice is selected, then stitch
+   * everything into one video. Mirrors the proven pipeline CommercialStudio's
+   * wizard already uses (planStoryboard → per-clip render+voice+mux → stitch),
+   * just driven by a single duration slider instead of an 11-step wizard.
+   */
   async function handleGenerate(regenerationNotes?: string) {
     const effectiveDescription = (productDescription.trim() || productName.trim())
     if (!effectiveDescription) {
@@ -211,72 +266,123 @@ export default function ReviewAndAdjust() {
     cancelledRef.current = false
 
     // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
-    // Veo's identity reference, taking priority over the product photo.
+    // the video model's identity reference, taking priority over the product photo.
     const creatorImageUrl = creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
+    const creatorConsentAt = creatorImageUrl ? creatorValue.consentAt : undefined
+    const creatorArg = creatorValue.mode === 'uploaded_seed'
+      ? { source: 'uploaded' as const }
+      : creatorValue.mode === 'generated' && creatorValue.attributes.gender
+        ? {
+            source: 'generated' as const,
+            gender: creatorValue.attributes.gender,
+            ageRange: creatorValue.attributes.ageRange,
+            ethnicity: creatorValue.attributes.ethnicity,
+          }
+        : undefined
 
     try {
-      setStepIndex(0) // "Claude writing direction"
-      const { requestId, directorPrompt: dp } = await startGeneration({
-        productImageUrl: productImageUrl.trim(),
-        productDescription: effectiveDescription,
+      // ── STEP 0: SCRIPT — plan a storyboard sized to the chosen duration.
+      setStepIndex(0)
+      const { plan } = await planStoryboard({
+        productName: productName.trim() || effectiveDescription.slice(0, 60),
+        description: effectiveDescription,
         style,
-        quality: 'turbo',
-        script: script.trim() || undefined,
-        creatorImageUrl,
-        creatorConsentAt: creatorImageUrl ? creatorValue.consentAt : undefined,
+        referenceDurationSeconds: durationSeconds,
+        creator: creatorArg,
+        hookLine: script.trim() || undefined,
         regenerationNotes: regenerationNotes?.trim() || undefined,
       })
       if (cancelledRef.current) return
-      setDirectorPrompt(dp)
-      setStepIndex(1) // "Submitting to Higgsfield"
+      setDirectorPrompt(plan.reasoning)
+      setPlanClipCount(plan.clips.length)
 
-      setStepIndex(2) // "Rendering video"
-      const result = await pollUntilDone(
-        requestId,
-        (s: StatusResponse) => {
+      // ── STEP 1: SCENES — render every clip's video in parallel (up to 3 at once).
+      setStepIndex(1)
+      await videoQueue.run(plan.clips, async (clip) => {
+        const { requestId } = await startGeneration({
+          productImageUrl: productImageUrl.trim(),
+          productDescription: effectiveDescription,
+          style,
+          quality: 'turbo',
+          script: clip.dialogue,
+          sceneLabel: clip.beat,
+          sceneIndex: clip.order,
+          sceneCount: plan.clips.length,
+          creatorImageUrl,
+          creatorConsentAt,
+        })
+        const result = await pollUntilDone(requestId, () => {}, { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 })
+        if (result.status !== 'completed' || !result.videoUrl) {
+          throw new Error(result.raw === 'timeout' ? 'Render timed out.' : 'Render failed.')
+        }
+        return result.videoUrl
+      })
+      if (cancelledRef.current) return
+      const rendered = videoQueue.tiles.filter(t => t.status === 'complete' && t.videoUrl)
+      if (rendered.length === 0) {
+        setErrorMsg('All scenes failed to render. Try again.')
+        setPhase('error')
+        return
+      }
+
+      // ── STEP 2: VOICEOVER — layer ElevenLabs onto each clip (skipped entirely if no voice picked).
+      setStepIndex(2)
+      let finalUrls: string[]
+      if (selectedVoiceId) {
+        const withVoice: string[] = []
+        for (const tile of rendered) {
           if (cancelledRef.current) return
-          if (s.status === 'pending') setStepIndex(2)
-        },
-        { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 },
-      )
+          try {
+            const { audioDataUrl } = await generateVoiceover({ text: tile.dialogue, voiceId: selectedVoiceId })
+            const { videoDataUrl } = await muxVideoAudio({ videoUrl: tile.videoUrl!, audioBase64: audioDataUrl })
+            withVoice.push(videoDataUrl)
+          } catch {
+            // Voiceover/mux is a nice-to-have — never fail the whole ad over it.
+            withVoice.push(tile.videoUrl!)
+          }
+        }
+        finalUrls = withVoice
+      } else {
+        finalUrls = rendered.map(t => t.videoUrl!)
+      }
       if (cancelledRef.current) return
 
-      if (result.status === 'completed' && result.videoUrl) {
-        setVideoUrl(result.videoUrl)
-        setPhase('done')
+      // ── STEP 3: RENDERING — assemble into one seamless video.
+      setStepIndex(3)
+      const finalUrl = finalUrls.length === 1 ? finalUrls[0] : (await stitchVideos(finalUrls)).videoDataUrl
+      if (cancelledRef.current) return
 
-        // Save to history
-        if (user?.id) {
-          try {
-            const { id: campaignId } = await saveCampaign(user.id, {
-              name: productDescription.trim().slice(0, 80),
-              product_image_url: productImageUrl.trim() || null,
-              product_description: productDescription.trim(),
-              style,
-              quality: 'turbo',
-              status: 'ready',
-            })
-            await saveScene(user.id, {
-              campaign_id: campaignId,
-              label: 'Main',
-              style,
-              order_index: 0,
-              phase: 'done',
-              request_id: requestId,
-              director_prompt: dp,
-              video_url: result.videoUrl,
-            })
-            setHistorySaved(true)
-          } catch (e) {
-            console.error('[ReviewAndAdjust] history save failed:', e)
-            setHistoryError(e instanceof Error ? e.message : 'History save failed.')
-          }
-        } else {
-          console.warn('[ReviewAndAdjust] user not loaded — skipping history save')
+      setVideoUrl(finalUrl)
+      setPhase('done')
+
+      // Save to history
+      if (user?.id) {
+        try {
+          const { id: campaignId } = await saveCampaign(user.id, {
+            name: productDescription.trim().slice(0, 80),
+            product_image_url: productImageUrl.trim() || null,
+            product_description: productDescription.trim(),
+            style,
+            quality: 'turbo',
+            status: 'ready',
+          })
+          await saveScene(user.id, {
+            campaign_id: campaignId,
+            label: 'Main',
+            style,
+            order_index: 0,
+            phase: 'done',
+            request_id: videoQueue.tiles[0]?.clipId ?? '',
+            director_prompt: plan.reasoning,
+            video_url: finalUrl,
+          })
+          setHistorySaved(true)
+        } catch (e) {
+          console.error('[ReviewAndAdjust] history save failed:', e)
+          setHistoryError(e instanceof Error ? e.message : 'History save failed.')
         }
       } else {
-        setErrorMsg(result.raw || 'Video generation failed.')
-        setPhase('error')
+        console.warn('[ReviewAndAdjust] user not loaded — skipping history save')
       }
     } catch (err) {
       if (cancelledRef.current) return
@@ -287,6 +393,7 @@ export default function ReviewAndAdjust() {
 
   function handleCancel() {
     cancelledRef.current = true
+    videoQueue.cancel()
     setPhase('idle')
     setStepIndex(0)
   }
@@ -302,6 +409,7 @@ export default function ReviewAndAdjust() {
     setShowRegenPanel(false)
     setRegenKeywords('')
     setRegenError('')
+    videoQueue.reset()
   }
 
   async function handleEnhanceKeywords() {
@@ -395,6 +503,10 @@ export default function ReviewAndAdjust() {
         <div className="space-y-5">
           {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
           <ProductInput value={productValue} onChange={onProductChange} />
+
+          {/* Video length — replaces "how many videos": the user thinks in
+              seconds, Claude figures out how many scenes of what length fit. */}
+          <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
 
           {/* Style picker */}
           <div className="space-y-2">
@@ -523,12 +635,66 @@ export default function ReviewAndAdjust() {
               onChange={e => setScript(e.target.value)}
               disabled={isBusy}
               rows={3}
-              placeholder={showScriptAI ? 'Generated script will appear here — you can edit it.' : 'Type your own script, or use "Write with AI" above to let Claude write it.'}
+              placeholder={showScriptAI ? 'Generated script will appear here — you can edit it.' : 'Type an opening line, or use "Write with AI" above to let Claude write it. Optional — leave blank to let Claude write the whole thing.'}
               className="w-full resize-none rounded-xl border border-white/[0.08] bg-void-800 px-4 py-3 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
             />
             {script && (
-              <p className="text-[10px] text-ink-faint">This line will be spoken verbatim in your video. Edit freely.</p>
+              <p className="text-[10px] text-ink-faint">The opening scene will speak this line, then Claude continues the story to fill your chosen video length.</p>
             )}
+          </div>
+
+          {/* Voiceover — ElevenLabs, opt-in. Empty selection = silent/native audio only. */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Voiceover</label>
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
+            </div>
+            {voicesLoading && <p className="text-sm text-ink-muted">Loading voices…</p>}
+            {voicesError && (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-xs text-ink-muted">{voicesError}</div>
+            )}
+            {!voicesLoading && !voicesError && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => setSelectedVoiceId('')}
+                  className={`flex-shrink-0 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-all disabled:opacity-50 ${
+                    !selectedVoiceId
+                      ? 'border-fire-start/50 bg-fire-start/[0.08] text-ink'
+                      : 'border-white/[0.08] bg-void-800 text-ink-muted hover:border-white/20'
+                  }`}
+                >
+                  No voiceover<br /><span className="font-normal text-ink-faint">Silent / native audio</span>
+                </button>
+                {voices.slice(0, 20).map(v => {
+                  const selected = selectedVoiceId === v.voiceId
+                  return (
+                    <div
+                      key={v.voiceId}
+                      className={`flex flex-shrink-0 items-center gap-2 rounded-xl border px-2.5 py-2 transition-all ${
+                        selected ? 'border-fire-start/50 bg-fire-start/[0.08]' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => previewVoice(v)}
+                        disabled={!v.previewUrl || isBusy}
+                        className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg bg-void-700 text-fire-start hover:bg-void-600 disabled:opacity-30"
+                        aria-label={`Preview ${v.name}`}
+                      >
+                        {previewingVoiceId === v.voiceId ? <span className="h-2 w-2 rounded-sm bg-fire-start" /> : <PlayIcon className="h-3 w-3" />}
+                      </button>
+                      <button type="button" disabled={isBusy} onClick={() => setSelectedVoiceId(v.voiceId)} className="min-w-0 text-left disabled:opacity-50">
+                        <p className="max-w-[110px] truncate text-xs font-semibold text-ink">{v.name}</p>
+                      </button>
+                      {selected && <Check className="h-3.5 w-3.5 flex-shrink-0 text-fire-start" />}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <p className="text-[10px] text-ink-faint">Adds a spoken voiceover of your script over the video. Leave on "No voiceover" to keep the render's native audio.</p>
           </div>
 
           {/* Creator */}
@@ -550,9 +716,21 @@ export default function ReviewAndAdjust() {
           </p>
         )}
 
-        {/* Generation overlay — fixed/centered so it's always in view, no scrolling required */}
+        {/* Generation overlay — fixed/centered so it's always in view, no scrolling required.
+            Per-step time estimates scale with the planned scene count (3 render
+            concurrently) so the ring's pace roughly matches this specific ad. */}
         {phase === 'working' && (
-          <GenerationOverlay steps={STEPS} activeIndex={stepIndex} estimateSecondsForStep={STEP_ESTIMATES[stepIndex]} onCancel={handleCancel} />
+          <GenerationOverlay
+            steps={STEP_LABELS}
+            activeIndex={stepIndex}
+            estimateSecondsForStep={[
+              12,
+              Math.ceil(planClipCount / 3) * 70,
+              selectedVoiceId ? planClipCount * 8 : 3,
+              15 + planClipCount * 3,
+            ][stepIndex]}
+            onCancel={handleCancel}
+          />
         )}
 
         {/* Video result */}
@@ -582,9 +760,11 @@ export default function ReviewAndAdjust() {
             {directorPrompt && (
               <details className="rounded-xl border border-white/[0.06] bg-void-800/40 px-4 py-3">
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-ink-faint">
-                  Director prompt
+                  Storyboard plan
                 </summary>
-                <p className="mt-2 text-xs leading-relaxed text-ink-muted">{directorPrompt}</p>
+                <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+                  {planClipCount} scene{planClipCount === 1 ? '' : 's'} · {durationSeconds}s target. {directorPrompt}
+                </p>
               </details>
             )}
 
@@ -621,7 +801,7 @@ export default function ReviewAndAdjust() {
                 <div className="rounded-2xl border border-fire-start/20 bg-fire-start/[0.04] p-4 space-y-3">
                   <div>
                     <p className="text-sm font-semibold text-ink">Regenerate with new direction</p>
-                    <p className="mt-0.5 text-xs text-ink-muted">Tell Claude what to change — a keyword, a fix, a new angle. Everything else (product, creator, script) stays the same.</p>
+                    <p className="mt-0.5 text-xs text-ink-muted">Tell Claude what to change — a keyword, a fix, a new angle. Re-plans and re-renders the whole {durationSeconds}s ad; product, creator, and length stay the same.</p>
                   </div>
                   <textarea
                     value={regenKeywords}

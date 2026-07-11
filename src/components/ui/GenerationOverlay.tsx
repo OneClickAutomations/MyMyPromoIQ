@@ -60,9 +60,13 @@ export interface GenerationOverlayProps {
   estimateSecondsForStep?: number
   /** Shown as a small "Cancel" action under the tracker. Omit to hide it. */
   onCancel?: () => void
+  /** Trailing greyed-out tracker dot after the real steps (default "Done") —
+   *  the overlay unmounts before it ever becomes active, it just shows the
+   *  user where the sequence ends. Pass false to omit it. */
+  doneLabel?: string | false
 }
 
-export default function GenerationOverlay({ steps, activeIndex, estimateSecondsForStep, onCancel }: GenerationOverlayProps) {
+export default function GenerationOverlay({ steps, activeIndex, estimateSecondsForStep, onCancel, doneLabel = 'Done' }: GenerationOverlayProps) {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
@@ -81,6 +85,7 @@ export default function GenerationOverlay({ steps, activeIndex, estimateSecondsF
   const pct = Math.min(99, ((activeIndex + withinStep) / total) * 100)
 
   const active = steps[activeIndex] ?? steps[steps.length - 1]
+  const tracker = doneLabel ? [...steps, { label: doneLabel, headline: '' }] : steps
 
   return (
     <AnimatePresence>
@@ -104,7 +109,7 @@ export default function GenerationOverlay({ steps, activeIndex, estimateSecondsF
 
           {/* Step tracker — dots connected by a line, labels underneath */}
           <div className="mt-7 flex items-start justify-between">
-            {steps.map((step, i) => {
+            {tracker.map((step, i) => {
               const complete = i < activeIndex
               const current = i === activeIndex
               return (
@@ -123,7 +128,7 @@ export default function GenerationOverlay({ steps, activeIndex, estimateSecondsF
                           ? <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" />
                           : <span className="h-1.5 w-1.5 rounded-full bg-white/25" />}
                     </span>
-                    {i < steps.length - 1 && (
+                    {i < tracker.length - 1 && (
                       <div className={`h-px flex-1 ${i < activeIndex ? 'bg-fire-start/50' : 'bg-white/10'}`} />
                     )}
                   </div>

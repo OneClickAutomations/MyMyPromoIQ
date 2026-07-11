@@ -666,6 +666,11 @@ export type StoryboardPlanInput = {
     ethnicity?: string
     description?: string
   }
+  /** Optional hook line — clip 1's dialogue opens with or echoes this verbatim. */
+  hookLine?: string
+  /** Free-text keywords/notes from the "Regenerate" panel — incorporated with
+   *  priority over the generic style brief. */
+  regenerationNotes?: string
 }
 
 export async function writeAdScript(input: {

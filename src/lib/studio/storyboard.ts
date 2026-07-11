@@ -18,6 +18,13 @@ export function maxWords(durationSeconds: number): number {
   return Math.floor(durationSeconds * WORDS_PER_SECOND)
 }
 
+/** Mirrors the server planner's clip-count inference (api/director.ts
+ *  planStoryboard) so any client-side estimate matches what will actually be
+ *  planned for a given target total duration. */
+export function estimateClipCount(totalSeconds: number): number {
+  return Math.max(2, Math.min(10, Math.round(totalSeconds / 5)))
+}
+
 export function countWords(text: string): number {
   const t = text.trim()
   return t ? t.split(/\s+/).length : 0

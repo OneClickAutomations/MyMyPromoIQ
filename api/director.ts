@@ -52,6 +52,12 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     productName, description, style,
     clipCount, referenceBeats, referenceDurationSeconds, brandVoice, cta,
     creator,
+    // Optional hook line (e.g. from the "Write with AI" / manual script field)
+    // — when set, clip 1's dialogue should open with or closely echo it.
+    hookLine,
+    // Free-text notes from the "Regenerate" panel — incorporated into the
+    // whole storyboard with priority over the generic style brief.
+    regenerationNotes,
   } = body
 
   // Who's on camera. Without this, the planner invents a person and defaults to
@@ -82,6 +88,8 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     ? `\nThis clones a winning ad with these beats: ${referenceBeats.join(' → ')}. Match its pacing and structure, but sell the product below.`
     : ''
   const brandSection = [brandVoice ? `Brand voice: ${brandVoice}.` : '', cta ? `End on this CTA: "${cta}".` : ''].filter(Boolean).join(' ')
+  const hookSection = hookLine?.trim() ? `\nHOOK LINE (given by the user) — clip 1's dialogue must open with or closely echo this line verbatim, then continue naturally: "${hookLine.trim()}"` : ''
+  const regenSection = regenerationNotes?.trim() ? `\nREGENERATION NOTES from the user — incorporate these specific changes into the storyboard (priority over the generic style direction where they conflict): ${regenerationNotes.trim()}` : ''
 
   const system = `You are an expert short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3.
 
@@ -115,7 +123,7 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
-Style: ${styleBlurb}${refSection}${creatorSection}
+Style: ${styleBlurb}${refSection}${creatorSection}${hookSection}${regenSection}
 ${brandSection}
 
 Plan the ${desired} clips.`,
