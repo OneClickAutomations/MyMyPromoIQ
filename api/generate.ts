@@ -560,10 +560,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // carried in the text prompt.
     const referenceImage = conditioningImageUrl || creatorImageUrl || productImageUrl
 
-    // Video provider: PREFER HIGGSFIELD DoP when credentials are present — this
-    // is the intended architecture (Higgsfield + Claude, no Gemini). DoP is the
-    // account's verified video model. Veo (via GEMINI_API_KEY) is only a
-    // fallback for a Higgsfield-less deployment.
+    // Video provider: PREFER GOOGLE VEO when a Gemini key is present — Veo 3 is
+    // the stronger general video model (native audio, better product/creator
+    // consistency) and its API is directly callable. Higgsfield DoP is the
+    // fallback (used only when there's no Gemini key). This ordering was
+    // reversed deliberately: DoP is a capable general animator but the app was
+    // assembling ads from general parts with no faithful editor in the stack.
+    if (process.env.GEMINI_API_KEY) {
+      const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt })
+      return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
+    }
+
     if (higgsfieldEnabled()) {
       const out = await submitHiggsfieldVideo(directorPrompt, referenceImage || undefined, {
         durationSeconds: Number((req.body as Record<string, unknown>)?.durationSeconds) || undefined,
@@ -571,8 +578,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ...out, directorPrompt })
     }
 
-    const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt })
-    return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
+    return res.status(503).json({ error: 'No video provider configured. Set GEMINI_API_KEY (for Veo) or Higgsfield credentials in Vercel.' })
   } catch (err) {
     console.error('[/api/generate]', err)
     const message = err instanceof Error ? err.message : 'Generation failed.'

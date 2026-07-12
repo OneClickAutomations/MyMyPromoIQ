@@ -393,14 +393,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Turnarounds/products read best square; character stills default to vertical.
   const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
 
-  // Provider selection for image work (generate/edit/sheet): PREFER HIGGSFIELD
-  // SOUL when credentials are present — this is the intended architecture
-  // (Higgsfield + Claude, no Gemini). Soul is the account's verified image
-  // model. Gemini is used only as a fallback when no Higgsfield credentials are
-  // set. (Note: Soul is a generator, not a pixel-precise editor, so exact
-  // background removal is approximate on the Soul path — see
-  // generateImageHiggsfield.)
-  const useHFForImages = useHiggsfield
+  // Provider selection for image work (generate/edit/sheet): PREFER GEMINI
+  // NANO-BANANA when a Gemini key is present. Nano-banana is a true
+  // instruction-following image EDITOR — it does faithful background removal,
+  // exact edits, and multi-angle work that keep the real product pixel-intact.
+  // Higgsfield Soul is only a fallback (no Gemini key): Soul is a stylized
+  // GENERATOR, not an editor, so it re-imagines the product rather than
+  // editing it — approximate at best for these tasks. This ordering was
+  // reversed deliberately: the Cloud API has no faithful image editor, so
+  // Soul-primary made every edit feature drift.
+  const useHFForImages = useHiggsfield && !geminiKey
 
   try {
     // ── soul-styles: list the preset style catalog (Higgsfield-only) ─────────
