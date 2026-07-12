@@ -355,6 +355,9 @@ export type ModelSheetInput = {
   mimeType?: string
   subjectType: 'product' | 'character'
   subjectHint?: string
+  /** Optional extra direction folded into the turnaround prompt (e.g. from a
+   *  "Regenerate" instruction, optionally AI-Magic-enhanced). */
+  extraInstruction?: string
 }
 
 /** Turn one reference photo into a 2x3 multi-angle turnaround model sheet. */

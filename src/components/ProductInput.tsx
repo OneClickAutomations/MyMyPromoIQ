@@ -18,10 +18,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
-import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid } from './icons'
-import { extractProductFromUrl, getProductSpec, generateProductAngle, TURNAROUND_ANGLES } from '../lib/api'
-import { composeSpecSheet } from '../lib/turnaroundSheet'
-import { removeBackgroundClientSide, enhancePhotoClientSide } from '../lib/imageTools'
+import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid, Download } from './icons'
+import { extractProductFromUrl, generateImage, generateModelSheet, enhancePrompt } from '../lib/api'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -150,14 +148,22 @@ export default function ProductInput({ value, onChange, className = '' }: {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // AI clean-up state (operates on the primary image)
+  // AI clean-up state (operates on the primary image, via Gemini nano-banana)
   const [aiBusy, setAiBusy] = useState<'bg' | 'enhance' | null>(null)
   const [preview, setPreview] = useState<{ before: string; after: string | null } | null>(null)
 
-  // Turnaround / model-sheet state (a multi-angle reference of the hero).
+  // Enhance-with-prompt state (user describes the edit; AI Magic polishes it)
+  const [enhanceOpen, setEnhanceOpen] = useState(false)
+  const [enhanceText, setEnhanceText] = useState('')
+  const [enhanceMagicBusy, setEnhanceMagicBusy] = useState(false)
+
+  // Turnaround / model-sheet state (a faithful multi-angle grid of the hero).
   const [turnaroundBusy, setTurnaroundBusy] = useState(false)
   const [turnaroundErr, setTurnaroundErr] = useState('')
-  const [turnaroundStatus, setTurnaroundStatus] = useState('')
+  // Regenerate-with-instruction (+ AI Magic) for the turnaround.
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenText, setRegenText] = useState('')
+  const [regenMagicBusy, setRegenMagicBusy] = useState(false)
 
   const patch = useCallback((u: Partial<ProductInputValue>) => onChange({ ...value, ...u }), [value, onChange])
 
@@ -220,27 +226,65 @@ export default function ProductInput({ value, onChange, className = '' }: {
     patch({ images, primaryImage: value.primaryImage === src ? (images[0] ?? '') : value.primaryImage })
   }
 
-  // Client-side, deterministic — not routed through Higgsfield Soul. Soul is a
-  // stylized generator, not an instruction-following pixel editor, so asking
-  // it to "remove the background exactly" or "sharpen without altering
-  // proportions" produced unreliable results. These run instantly in the
-  // browser and always produce a real, predictable result on an uploaded photo.
-  async function runAi(kind: 'bg' | 'enhance') {
-    if (!value.primaryImage) return
+  /** The hero photo as the API reference shape (data-URL → base64, else url). */
+  function heroRef(): { imageBase64: string; mimeType: string } | { imageUrl: string } | null {
+    if (!value.primaryImage) return null
     const parts = dataUrlParts(value.primaryImage)
-    if (!parts) { setError('Enhance and background removal work on uploaded/captured images.'); return }
-    setAiBusy(kind); setError('')
+    return parts ? { imageBase64: parts.base64, mimeType: parts.mimeType } : { imageUrl: value.primaryImage }
+  }
+
+  // Background removal & enhance now route through Gemini nano-banana (a true
+  // instruction-following image editor) via /api/modelsheet 'edit'. The old
+  // client-side flood-fill/levels versions "did nothing" on real product
+  // photos (complex backgrounds, imperceptible level shifts) — this edits the
+  // actual pixels faithfully.
+  const BG_PROMPT = 'Remove the background completely and replace it with a pure solid white (#FFFFFF) background. Keep the product EXACTLY as it is — identical shape, color, materials, label text, proportions, and position. Do not restyle, recolor, relight, crop, or move the product. Clean crisp edges, no drop shadow, no reflection, no added elements.'
+
+  async function runBackgroundRemoval() {
+    const ref = heroRef()
+    if (!ref) { setError('Background removal works on an uploaded/captured photo.'); return }
+    setAiBusy('bg'); setError('')
     setPreview({ before: value.primaryImage, after: null })
     try {
-      const imageDataUrl = kind === 'bg'
-        ? await removeBackgroundClientSide(value.primaryImage)
-        : await enhancePhotoClientSide(value.primaryImage)
+      const { imageDataUrl } = await generateImage({ mode: 'edit', subjectType: 'product', editPrompt: BG_PROMPT, ...ref })
       setPreview({ before: value.primaryImage, after: imageDataUrl })
     } catch (e) {
       setPreview(null)
-      setError(e instanceof Error ? e.message : 'That step failed — try again.')
+      setError(e instanceof Error ? e.message : 'Background removal failed — try again.')
     } finally {
       setAiBusy(null)
+    }
+  }
+
+  /** Enhance/modify the hero photo with the user's own instruction. */
+  async function runEnhance() {
+    const ref = heroRef()
+    if (!ref) { setError('Enhance works on an uploaded/captured photo.'); return }
+    if (!enhanceText.trim()) { setError('Describe how you want the photo enhanced.'); return }
+    setAiBusy('enhance'); setError('')
+    setPreview({ before: value.primaryImage, after: null })
+    try {
+      const editPrompt = `${enhanceText.trim()}. Keep the product itself faithful — do not change its shape, color, label, or proportions unless the instruction explicitly asks for it.`
+      const { imageDataUrl } = await generateImage({ mode: 'edit', subjectType: 'product', editPrompt, ...ref })
+      setPreview({ before: value.primaryImage, after: imageDataUrl })
+      setEnhanceOpen(false)
+    } catch (e) {
+      setPreview(null)
+      setError(e instanceof Error ? e.message : 'Enhance failed — try again.')
+    } finally {
+      setAiBusy(null)
+    }
+  }
+
+  /** "AI Magic" — expand the user's rough enhance keywords into a sharper instruction. */
+  async function magicEnhanceText() {
+    if (!enhanceText.trim()) return
+    setEnhanceMagicBusy(true)
+    try {
+      const { enhanced } = await enhancePrompt({ text: enhanceText.trim(), productDescription: value.name || value.description || undefined })
+      setEnhanceText(enhanced)
+    } catch { /* leave the text as-is */ } finally {
+      setEnhanceMagicBusy(false)
     }
   }
 
@@ -252,67 +296,48 @@ export default function ProductInput({ value, onChange, className = '' }: {
     setPreview(null)
   }
 
-  // Build a multi-angle turnaround reference for the video generator.
-  //
-  //   1. REAL uploaded photos are the primary, ground-truth angles (hero +
-  //      every extra angle the user added) — zero hallucination, always most
-  //      accurate.
-  //   2. AI-ESTIMATED angles fill the gaps the user didn't photograph (sides,
-  //      back), generated one at a time via the verified Soul endpoint,
-  //      conditioned on the hero photo, and labelled distinctly. These are the
-  //      model's best guess of faces it can't see in a single photo — useful
-  //      for giving the video model a sense of 3D form, but approximate.
-  //   3. Both are composited with a Claude-estimated dimensions/material/scale
-  //      legend so the sheet reads as one reference for downstream generation.
-  //
-  // (This replaces the earlier "generate a 2x3 grid in one Soul call" approach,
-  // which was unreliable — a stylized single-subject model can't compose a
-  // consistent six-cell grid. Generating each angle as its OWN single-subject
-  // image is the tractable version of the same idea.)
-  const TARGET_ANGLE_CELLS = 4
-  async function generateTurnaround() {
-    if (!value.primaryImage || turnaroundBusy) return
-    setTurnaroundBusy(true); setTurnaroundErr(''); setTurnaroundStatus('Reading product dimensions…')
-
-    const heroParts = dataUrlParts(value.primaryImage)
-    const heroRef = heroParts
-      ? { imageBase64: heroParts.base64, mimeType: heroParts.mimeType }
-      : { imageUrl: value.primaryImage }
-
+  // Turnaround: a faithful single-image 2x3 multi-angle grid of the product,
+  // generated by Gemini nano-banana from the hero photo (an instruction editor
+  // that keeps the real object identical across all six cells — unlike Soul,
+  // which re-imagined it). Optional Regenerate instruction (with AI Magic).
+  async function generateTurnaround(instruction?: string) {
+    const ref = heroRef()
+    if (!ref || turnaroundBusy) { if (!ref) setTurnaroundErr('Add a product photo first.'); return }
+    setTurnaroundBusy(true); setTurnaroundErr('')
     try {
-      const spec = await getProductSpec({ ...heroRef, subjectHint: value.name || undefined })
-        .catch(() => null) // legend is a nice-to-have — never block the sheet on it
-
-      // Real angles first (hero + any extra uploads), capped so there's still
-      // room for a couple of AI-filled angles within the sheet.
-      const realAngles = [value.primaryImage, ...value.images.filter(i => i !== value.primaryImage)]
-      const images: string[] = [...realAngles]
-      const labels: string[] = realAngles.map((_, i) => (i === 0 ? 'HERO' : `ANGLE ${i + 1}`))
-
-      // Fill remaining cells with AI-estimated angles. Each is a separate Soul
-      // call; a single failed angle is skipped, never fails the whole sheet.
-      const slotsToFill = Math.max(0, TARGET_ANGLE_CELLS - images.length)
-      for (let i = 0; i < slotsToFill && i < TURNAROUND_ANGLES.length; i++) {
-        const angle = TURNAROUND_ANGLES[i]
-        setTurnaroundStatus(`Generating ${angle.label.replace('AI · ', '').toLowerCase()} view (${i + 1} of ${slotsToFill})…`)
-        try {
-          const { imageDataUrl } = await generateProductAngle(heroRef, angle.phrase, value.name || undefined)
-          images.push(imageDataUrl)
-          labels.push(angle.label)
-        } catch {
-          // skip this angle — approximate views are a supplement, not required
-        }
-      }
-
-      setTurnaroundStatus('Composing the sheet…')
-      const sheetDataUrl = await composeSpecSheet(images, spec, value.name || undefined, labels)
+      const { sheetDataUrl } = await generateModelSheet({
+        subjectType: 'product',
+        subjectHint: value.name || undefined,
+        extraInstruction: instruction?.trim() || undefined,
+        ...ref,
+      })
       patch({ turnaroundImage: sheetDataUrl })
+      setRegenOpen(false)
     } catch (e) {
       setTurnaroundErr(e instanceof Error ? e.message : 'Could not build the turnaround — try a clearer photo.')
     } finally {
       setTurnaroundBusy(false)
-      setTurnaroundStatus('')
     }
+  }
+
+  async function magicRegenText() {
+    if (!regenText.trim()) return
+    setRegenMagicBusy(true)
+    try {
+      const { enhanced } = await enhancePrompt({ text: regenText.trim(), productDescription: value.name || value.description || undefined })
+      setRegenText(enhanced)
+    } catch { /* leave as-is */ } finally {
+      setRegenMagicBusy(false)
+    }
+  }
+
+  /** Download the turnaround image. */
+  function downloadTurnaround() {
+    if (!value.turnaroundImage) return
+    const a = document.createElement('a')
+    a.href = value.turnaroundImage
+    a.download = `${(value.name || 'product').replace(/\s+/g, '-').toLowerCase()}-turnaround.png`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
   const hasImages = value.images.length > 0
@@ -444,19 +469,46 @@ export default function ProductInput({ value, onChange, className = '' }: {
 
           {/* AI clean-up */}
           <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={() => runAi('bg')} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+            <button onClick={runBackgroundRemoval} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
               {aiBusy === 'bg' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Wand className="h-3.5 w-3.5" />}
               Remove background
             </button>
-            <button onClick={() => runAi('enhance')} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+            <button onClick={() => { setEnhanceOpen(v => !v); setError('') }} disabled={!!aiBusy || turnaroundBusy}
+              className={`gap-1.5 px-3 py-2 text-xs disabled:opacity-40 ${enhanceOpen ? 'btn-fire' : 'btn-ghost'}`}>
               {aiBusy === 'enhance' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Spark className="h-3.5 w-3.5" />}
               Enhance photo
             </button>
-            <button onClick={generateTurnaround} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
+            <button onClick={() => generateTurnaround()} disabled={!!aiBusy || turnaroundBusy} className="btn-ghost gap-1.5 px-3 py-2 text-xs disabled:opacity-40">
               {turnaroundBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Grid className="h-3.5 w-3.5" />}
               {value.turnaroundImage ? 'Regenerate turnaround' : 'Generate turnaround'}
             </button>
           </div>
+
+          {/* Enhance-with-prompt panel — you say how to change the photo, AI
+              Magic sharpens the wording, nano-banana applies it faithfully. */}
+          {enhanceOpen && (
+            <div className="mt-3 rounded-xl border border-fire-start/20 bg-fire-start/[0.04] p-3 space-y-2.5">
+              <p className="text-[11px] text-ink-muted">Describe how to enhance or modify the photo — lighting, background, angle, cleanup. The product stays faithful unless you ask otherwise.</p>
+              <textarea
+                value={enhanceText}
+                onChange={e => setEnhanceText(e.target.value)}
+                disabled={aiBusy === 'enhance'}
+                rows={2}
+                placeholder="e.g. brighten the lighting and put it on a clean marble countertop"
+                className="w-full resize-none rounded-lg border border-white/[0.08] bg-void-800 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none disabled:opacity-50"
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={magicEnhanceText} disabled={enhanceMagicBusy || !enhanceText.trim()}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.10] bg-void-700/60 px-3 py-2 text-xs font-semibold text-ink-muted transition-all hover:border-fire-start/30 hover:text-fire-start disabled:opacity-40">
+                  {enhanceMagicBusy ? <><RefreshCw className="h-3 w-3 animate-spin" /> Enhancing…</> : <><Spark className="h-3 w-3" /> AI Magic</>}
+                </button>
+                <button type="button" onClick={runEnhance} disabled={aiBusy === 'enhance' || !enhanceText.trim()}
+                  className="btn-fire flex-1 justify-center gap-1.5 py-2 text-xs disabled:opacity-50">
+                  {aiBusy === 'enhance' ? <><RefreshCw className="h-3 w-3 animate-spin" /> Applying…</> : <><Wand className="h-3 w-3" /> Apply</>}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Turnaround — your real uploaded angles (ground truth) plus
               AI-estimated fill angles for the sides/back, plus a Claude
@@ -474,14 +526,52 @@ export default function ProductInput({ value, onChange, className = '' }: {
               {turnaroundBusy ? (
                 <div className="flex aspect-[3/2] flex-col items-center justify-center gap-2 rounded-lg bg-void-800/60 text-sm text-ink-muted">
                   <RefreshCw className="h-4 w-4 animate-spin text-fire-start" />
-                  <span>{turnaroundStatus || 'Building turnaround…'}</span>
+                  <span>Rendering the 6-angle turnaround…</span>
                 </div>
               ) : value.turnaroundImage ? (
                 <img src={value.turnaroundImage} alt="Product turnaround sheet" className="w-full rounded-lg" />
               ) : null}
               {turnaroundErr && <p className="mt-2 text-xs text-amber-300">{turnaroundErr}</p>}
+
+              {value.turnaroundImage && !turnaroundBusy && (
+                <>
+                  <div className="mt-2.5 flex gap-2">
+                    <button type="button" onClick={downloadTurnaround} className="btn-ghost flex-1 justify-center gap-1.5 py-2 text-xs">
+                      <Download className="h-3.5 w-3.5" /> Download
+                    </button>
+                    <button type="button" onClick={() => { setRegenOpen(v => !v); setTurnaroundErr('') }}
+                      className={`flex-1 justify-center gap-1.5 py-2 text-xs ${regenOpen ? 'btn-fire' : 'btn-ghost'}`}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Regenerate
+                    </button>
+                  </div>
+
+                  {regenOpen && (
+                    <div className="mt-2.5 rounded-lg border border-fire-start/20 bg-fire-start/[0.04] p-2.5 space-y-2">
+                      <p className="text-[11px] text-ink-muted">Optional: tell it what to change (angles, lighting, background). Leave blank to just re-roll.</p>
+                      <textarea
+                        value={regenText}
+                        onChange={e => setRegenText(e.target.value)}
+                        rows={2}
+                        placeholder="e.g. show more of the back and top, brighter white background"
+                        className="w-full resize-none rounded-lg border border-white/[0.08] bg-void-800 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/40 focus:outline-none"
+                      />
+                      <div className="flex gap-2">
+                        <button type="button" onClick={magicRegenText} disabled={regenMagicBusy || !regenText.trim()}
+                          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.10] bg-void-700/60 px-3 py-2 text-xs font-semibold text-ink-muted transition-all hover:border-fire-start/30 hover:text-fire-start disabled:opacity-40">
+                          {regenMagicBusy ? <><RefreshCw className="h-3 w-3 animate-spin" /> Enhancing…</> : <><Spark className="h-3 w-3" /> AI Magic</>}
+                        </button>
+                        <button type="button" onClick={() => generateTurnaround(regenText)}
+                          className="btn-fire flex-1 justify-center gap-1.5 py-2 text-xs">
+                          <RefreshCw className="h-3 w-3" /> Regenerate
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
               <p className="mt-2 text-[11px] text-ink-faint">
-                Neutral badges are your real photos; <span className="text-fire-start font-semibold">orange badges</span> are AI-estimated angles — the model's best guess of sides/back it can't see. For the most accurate result, upload 2–3 real angles above before generating.
+                A faithful 6-angle turnaround generated from your photo — it helps the video model keep the product consistent when a creator turns or handles it.
               </p>
             </div>
           )}
