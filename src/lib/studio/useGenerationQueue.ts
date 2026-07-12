@@ -23,6 +23,9 @@ export interface QueuedClip {
   status: QueueStatus
   videoUrl?: string
   retryCount: number
+  /** Last failure reason, surfaced on the tile so the user (and support) can
+   *  see WHY a clip failed instead of a bare "Retry". */
+  error?: string
 }
 
 export type GenerateOne = (clip: StoryboardClip) => Promise<string>
@@ -37,16 +40,16 @@ export function useGenerationQueue(maxConcurrent = 1, maxRetries = 1) {
   }, [])
 
   const attempt = useCallback(async (clip: StoryboardClip, generateOne: GenerateOne, retries: number): Promise<void> => {
-    patch(clip.id, { status: 'generating', retryCount: retries })
+    patch(clip.id, { status: 'generating', retryCount: retries, error: undefined })
     try {
       const url = await generateOne(clip)
       if (!url) throw new Error('no url')
       patch(clip.id, { status: 'complete', videoUrl: url })
-    } catch {
+    } catch (err) {
       if (retries < maxRetries && !cancelRef.current) {
         await attempt(clip, generateOne, retries + 1)
       } else {
-        patch(clip.id, { status: 'failed' })
+        patch(clip.id, { status: 'failed', error: err instanceof Error ? err.message : 'Generation failed.' })
       }
     }
   }, [maxRetries, patch])
