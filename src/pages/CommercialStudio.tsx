@@ -557,6 +557,13 @@ export default function CommercialStudio() {
     })
   }
 
+  // Auto-advance after a single-choice selection — the "slide to the next
+  // section" behaviour. A short delay lets the chosen card show its selected
+  // state before the step slides, so it doesn't feel like a jump-cut.
+  function advanceSoon(delay = 420) {
+    setTimeout(() => goForward(), delay)
+  }
+
   // Skip optional step: apply preset defaults then advance
   function skipWithDefaults() {
     const updated = brief.style.commercialStyle
@@ -1320,6 +1327,7 @@ export default function CommercialStudio() {
               scheduleSave(next)
               return next
             })
+            advanceSoon() // slide to the next step on pick
           }}
         />
 
@@ -1393,7 +1401,7 @@ export default function CommercialStudio() {
         <div className="grid grid-cols-2 gap-3">
           {envOptions.map(opt => (
             <button key={opt.id} type="button"
-              onClick={() => patch({ scene: { ...brief.scene, environment: opt.id } })}
+              onClick={() => { patch({ scene: { ...brief.scene, environment: opt.id } }); advanceSoon() }}
               className={`rounded-2xl border p-4 text-left transition-all ${
                 brief.scene.environment === opt.id
                   ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30'
@@ -1427,7 +1435,7 @@ export default function CommercialStudio() {
         <div className="grid grid-cols-2 gap-3">
           {LIGHTING_OPTIONS.map(opt => (
             <button key={opt.id} type="button"
-              onClick={() => patch({ scene: { ...brief.scene, lighting: opt.id } })}
+              onClick={() => { patch({ scene: { ...brief.scene, lighting: opt.id } }); advanceSoon() }}
               className={`rounded-2xl border p-4 text-left transition-all ${
                 brief.scene.lighting === opt.id
                   ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30'
