@@ -317,6 +317,7 @@ export default function ReviewAndAdjust() {
       const rendered: Array<{ videoUrl: string; dialogue: string }> = []
       let chainImageUrl: string | undefined
       let firstRequestId = ''
+      let lastError = ''
       for (const clip of plan.clips) {
         if (cancelledRef.current) return
         try {
@@ -336,7 +337,13 @@ export default function ReviewAndAdjust() {
           if (!firstRequestId) firstRequestId = requestId
           const result = await pollUntilDone(requestId, () => {}, { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 })
           if (result.status !== 'completed' || !result.videoUrl) {
-            throw new Error(result.raw === 'timeout' ? 'Render timed out.' : 'Render failed.')
+            // Surface the actual Veo failure detail from the poll (result.raw)
+            // instead of a generic "Render failed" — that's what tells us WHY.
+            throw new Error(
+              result.raw === 'timeout'
+                ? 'Render timed out.'
+                : `Render failed: ${(result.raw && result.raw !== 'null' ? result.raw : 'no detail').slice(0, 240)}`,
+            )
           }
           rendered.push({ videoUrl: result.videoUrl, dialogue: clip.dialogue })
           setSceneProgress(p => ({ ...p, done: p.done + 1 }))
@@ -353,15 +360,17 @@ export default function ReviewAndAdjust() {
               chainImageUrl = undefined
             }
           }
-        } catch {
+        } catch (err) {
           // One scene failing doesn't sink the ad — continue the chain from
           // whatever the last successful frame was (or the original photo).
+          // Keep the reason so a total failure can show WHY, not just "try again".
+          lastError = err instanceof Error ? err.message : String(err)
           setSceneProgress(p => ({ ...p, done: p.done + 1 }))
         }
       }
       if (cancelledRef.current) return
       if (rendered.length === 0) {
-        setErrorMsg('All scenes failed to render. Try again.')
+        setErrorMsg(lastError ? `All scenes failed to render. ${lastError}` : 'All scenes failed to render. Try again.')
         setPhase('error')
         return
       }
