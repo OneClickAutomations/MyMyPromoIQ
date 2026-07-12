@@ -8,7 +8,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
-import { Download, Edit, Film, Plus, RefreshCw, Trash } from './icons'
+import { Download, Edit, Film, Plus, RefreshCw, Trash, Share2 } from './icons'
 import { listCampaigns, deleteCampaignRemote, listBriefs, type StoredCampaign, type StoredBriefSummary } from '../lib/api'
 
 type Campaign = StoredCampaign
@@ -59,6 +59,25 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
     load()
     return () => { cancelled = true }
   }, [user?.id, limit])
+
+  // Share / publish. On mobile the native share sheet surfaces Instagram,
+  // TikTok, Facebook, etc. directly; on desktop we copy the link. Direct
+  // API publishing (Meta/YouTube/Meta Ads) plugs in here once those keys exist.
+  async function shareCampaign(c: Campaign, videoUrl: string) {
+    const shareData = { title: c.name || 'My ad', text: `${c.name || 'My ad'} — made with MyMyPromoIQ`, url: videoUrl }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share(shareData)
+        return
+      }
+    } catch { /* user dismissed the share sheet — fall through to copy */ }
+    try {
+      await navigator.clipboard.writeText(videoUrl)
+      window.alert('Video link copied — paste it into Instagram, TikTok, YouTube, or your Meta Ads manager.')
+    } catch {
+      window.prompt('Copy your video link:', videoUrl)
+    }
+  }
 
   async function deleteCampaign(id: string) {
     if (!user?.id) return
@@ -211,6 +230,15 @@ export default function HistoryGrid({ limit = 60, emptyState }: Props) {
                   >
                     <Download className="h-3.5 w-3.5" />
                   </a>
+                )}
+                {videoUrl && (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); void shareCampaign(c, videoUrl) }}
+                    title="Share / publish"
+                    className="grid h-7 w-7 place-items-center rounded-lg bg-black/60 text-white backdrop-blur-sm ring-1 ring-white/15 hover:bg-black/80 transition-colors"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                  </span>
                 )}
                 <span
                   onClick={(e) => { e.stopPropagation(); deleteCampaign(c.id) }}

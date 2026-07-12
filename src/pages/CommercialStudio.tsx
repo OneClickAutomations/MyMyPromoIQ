@@ -32,6 +32,9 @@ import {
   presignUpload,
   uploadDirectToStorage,
   dataUrlToBlob,
+  uploadAsset,
+  saveCampaign,
+  saveScene,
   saveBrief,
   getBrief,
   listCreators,
@@ -914,6 +917,38 @@ export default function CommercialStudio() {
       const videoDataUrl = urls.length === 1 ? urls[0] : (await stitchVideos(urls)).videoDataUrl
       setWizardAssembledUrl(videoDataUrl)
       patch({ status: 'complete', render: { ...brief.render, outputUrl: videoDataUrl, statusLog: [] } })
+      // Persist the finished ad so it appears in Projects/History. Previously the
+      // brief was just marked 'complete' locally and never saved as a campaign,
+      // so the generated video vanished from both the campaigns grid AND drafts.
+      // Host the video (a data URL is too large for the DB) then save a campaign
+      // + a 'done' scene carrying the hosted URL. Best-effort — never surface a
+      // save failure over a video the user can still see/download right now.
+      if (user?.id) {
+        void (async () => {
+          try {
+            const hostedUrl = videoDataUrl.startsWith('data:') ? await uploadAsset(videoDataUrl) : videoDataUrl
+            const { id: campaignId } = await saveCampaign(user.id, {
+              id: brief.render.jobId || undefined,
+              name: brief.product.productName || 'Untitled ad',
+              product_image_url: productImageUrl || null,
+              product_description: brief.product.description ?? descInput ?? null,
+              style: brief.style.commercialStyle || 'testimonial',
+              status: 'ready',
+            })
+            await saveScene(user.id, {
+              campaign_id: campaignId,
+              label: 'Final ad',
+              style: brief.style.commercialStyle || 'testimonial',
+              order_index: 0,
+              phase: 'done',
+              video_url: hostedUrl,
+            })
+            patch({ render: { ...brief.render, jobId: campaignId, outputUrl: hostedUrl, statusLog: [] } })
+          } catch (err) {
+            console.warn('[studio] could not save finished ad to Projects:', err instanceof Error ? err.message : err)
+          }
+        })()
+      }
     } catch (e) {
       // Previously swallowed silently — the user just saw nothing happen,
       // which read as "the video was generated but isn't visible anywhere."
