@@ -56,12 +56,24 @@ export type GenerateInput = {
    *  productImageUrl for conditioning only; the Claude vision reference stays
    *  pinned to the real product regardless. */
   conditioningImageUrl?: string
+  // ── Prompt-engine path (opt-in) ─────────────────────────────────────────────
+  /** The engine-built timed-beat Veo prompt. Its presence (with a server-side
+   *  Gemini key) switches generation into the Nano Banana → Veo handoff path. */
+  veoPrompt?: string
+  /** The engine-built Nano Banana start-frame prompt. */
+  nanaBananaPrompt?: string
+  /** This clip's duration (4/6/8), used server-side to validate the prompt. */
+  clipDurationSeconds?: number
+  /** Creator selfie/reference for the start-frame composite (character lock). */
+  creatorReferenceImageUrl?: string
 }
 
 export type GenerateResponse = {
   requestId: string
   status: string
   directorPrompt: string
+  /** Engine path only: whether a Nano Banana start frame was rendered. */
+  startFrameGenerated?: boolean
 }
 
 export type StatusResponse = {

@@ -117,6 +117,19 @@ const STYLE_ALIASES: Record<string, StyleId> = {
   fast_cut_hook:     'fast-cut',
   unboxing:          'unboxing',
   explainer:         'unboxing',
+  // Prompt-engine ad-type ids — so the legacy/Higgsfield fallback path also
+  // accepts a type chosen via the new type-first selector (the engine path
+  // ignores `style`, but this keeps the fallback from 400-ing on an engine id).
+  testimonial:       'testimonial',
+  problem_solution:  'testimonial',
+  before_after:      'testimonial',
+  street_interview:  'testimonial',
+  day_in_the_life:   'day-in-life',
+  pov:               'day-in-life',
+  tutorial:          'unboxing',
+  product_reveal:    'day-in-life',
+  comparison:        'unboxing',
+  hook_only:         'fast-cut',
 }
 
 /** Resolve any incoming style id (canonical or wizard preset) to a StyleId. */
@@ -574,11 +587,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // The wizard pre-built the timed-beat prompt. Validate it (blocking gate,
     // never submit a known-bad prompt), render the Nano Banana start frame from
     // the matching image prompt + reference photos, then animate with Veo.
-    if (typeof veoPrompt === 'string' && veoPrompt.trim()) {
+    // Only when a Gemini key is present — otherwise fall through to the legacy
+    // path (which can still use Higgsfield DoP) rather than dead-ending.
+    if (typeof veoPrompt === 'string' && veoPrompt.trim() && process.env.GEMINI_API_KEY) {
       const apiKey = process.env.GEMINI_API_KEY
-      if (!apiKey) {
-        return res.status(503).json({ error: 'GEMINI_API_KEY is required for the prompt-engine path (Nano Banana start frame + Veo). Set it in Vercel → Settings → Environment Variables.' })
-      }
       const dur = Number(clipDurationSeconds) || 6
       const check = validateVeoPrompt(veoPrompt, dur)
       if (!check.valid) {

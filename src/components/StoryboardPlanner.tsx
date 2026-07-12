@@ -7,7 +7,7 @@
  *
  * Controlled: the parent owns the plan and handles generation (Part 4 queue).
  */
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   Check, RefreshCw, Trash, Plus, PlayIcon, X, ChevronRight, Bolt, Spark,
@@ -153,7 +153,7 @@ function ClipCard({
 
 export default function StoryboardPlanner({
   plan, onChange, onGenerate, onRegenClip, regeneratingOrder = null,
-  clipCountBusy = false, onClipCountChange, creditsPerClip = 1,
+  clipCountBusy = false, onClipCountChange, creditsPerClip = 1, renderClipExtra,
 }: {
   plan: StoryboardPlan
   onChange: (plan: StoryboardPlan) => void
@@ -163,6 +163,8 @@ export default function StoryboardPlanner({
   clipCountBusy?: boolean
   onClipCountChange?: (n: number) => void
   creditsPerClip?: number
+  /** Optional per-clip footer (e.g. the engine prompt preview). */
+  renderClipExtra?: (clip: StoryboardClip) => ReactNode
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewing, setPreviewing] = useState(false)
@@ -290,6 +292,7 @@ export default function StoryboardPlanner({
                 }}
                 regenerating={regeneratingOrder === clip.order}
               />
+              {renderClipExtra?.(clip)}
             </motion.div>
           ))}
         </AnimatePresence>
