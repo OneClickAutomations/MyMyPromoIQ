@@ -39,6 +39,8 @@ import {
   getBrand,
   listVoices,
   generateVoiceover,
+  generateVoiceoverTimed,
+  burnCaptionsOnClip,
   muxVideoAudio,
   stitchVideos,
   extractLastFrame,
@@ -67,6 +69,7 @@ import {
 } from '../lib/studio/presets'
 import { composeRenderPrompt } from '../lib/studio/compositionEngine'
 import { buildClipPromptPackage, resolveAdType, getTemplate, type AdTypeId } from '../lib/studio/promptEngineBridge'
+import { buildCuesFromText, buildCuesFromEleven, CAPTION_STYLES, type CaptionCue, type CaptionStyleId } from '../../api/_lib/captions'
 import PromptPreview from '../components/studio/PromptPreview'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
@@ -831,14 +834,48 @@ export default function CommercialStudio() {
       }
     }
 
-    if (!brief.voice.voiceId || !clip.dialogue.trim()) return final.videoUrl
+    const captionStyle = (brief.captionStyle as CaptionStyleId | undefined) || 'none'
+    const wantsCaptions = captionStyle !== 'none' && !!clip.dialogue.trim()
+    const aspectRatio = brief.aspectRatio || '9:16'
+
+    // Add captions (burned from the KNOWN script → always correctly spelled).
+    // Sync: precise from the ElevenLabs alignment when a voice is used;
+    // estimated (word distribution across the clip) for Veo-native/no-voice.
+    async function withCaptions(videoUrl: string, cues: CaptionCue[]): Promise<string> {
+      if (!wantsCaptions || !cues.length) return videoUrl
+      try {
+        const { videoDataUrl } = await burnCaptionsOnClip({ videoUrl, cues, style: captionStyle, aspectRatio })
+        return videoDataUrl
+      } catch { return videoUrl }
+    }
+
+    // No voice picked → Veo's native audio (or silent). Captions use estimated
+    // timing from the script + clip duration.
+    if (!brief.voice.voiceId || !clip.dialogue.trim()) {
+      const cues = wantsCaptions ? buildCuesFromText(clip.dialogue, clip.durationSeconds) : []
+      return withCaptions(final.videoUrl, cues)
+    }
+
+    // Voice picked → ElevenLabs. Pull per-character timestamps so captions sync
+    // exactly to the spoken words, mux the audio, then burn.
     try {
-      const { audioDataUrl } = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+      let audioDataUrl: string
+      let cues: CaptionCue[] = []
+      if (wantsCaptions && (captionStyle === 'karaoke' || captionStyle === 'highlight' || captionStyle === 'clean')) {
+        const timed = await generateVoiceoverTimed({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+        audioDataUrl = timed.audioDataUrl
+        cues = buildCuesFromEleven(timed.alignment.characters, timed.alignment.startTimes, timed.alignment.endTimes)
+      } else {
+        const v = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+        audioDataUrl = v.audioDataUrl
+      }
       const { videoDataUrl } = await muxVideoAudio({ videoUrl: final.videoUrl, audioBase64: audioDataUrl })
-      return videoDataUrl
+      return withCaptions(videoDataUrl, cues)
     } catch {
-      // Voiceover/mux is a nice-to-have — never fail the clip over it.
-      return final.videoUrl
+      // Voiceover/mux is a nice-to-have — never fail the clip over it. Still
+      // try captions with estimated timing on the silent clip.
+      const cues = wantsCaptions ? buildCuesFromText(clip.dialogue, clip.durationSeconds) : []
+      return withCaptions(final.videoUrl, cues)
     }
   }
 
@@ -1489,6 +1526,31 @@ export default function CommercialStudio() {
             </div>
           </div>
         )}
+
+        {/* Captions — burned from the script (always correct spelling), synced
+            to the audio: precisely for an ElevenLabs voice, estimated otherwise. */}
+        <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-5">
+          <p className="mb-1 text-sm font-semibold text-ink">Captions</p>
+          <p className="mb-3 text-xs text-ink-muted">Added on top of the video from your exact script — synced to the voice, always spelled right.</p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {CAPTION_STYLES.map(cs => {
+              const selected = (brief.captionStyle || 'none') === cs.id
+              return (
+                <button key={cs.id} type="button"
+                  onClick={() => patch({ captionStyle: cs.id })}
+                  className={`rounded-xl border p-3 text-left transition ${
+                    selected ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-900 hover:border-white/20'
+                  }`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-ink">{cs.label}</span>
+                    {selected && <Check className="h-4 w-4 text-fire-start" />}
+                  </div>
+                  <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">{cs.description}</p>
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <div className="flex flex-col gap-3">
           <button onClick={goForward} className="btn-fire w-full">
