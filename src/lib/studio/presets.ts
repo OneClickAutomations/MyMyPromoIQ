@@ -181,7 +181,14 @@ export const LIGHTING_OPTIONS: CatalogOption[] = [
   { id: 'seamless_studio',     label: 'Studio Softbox',    phrase: 'clean studio softbox lighting on a seamless backdrop' },
 ]
 
+/** Sentinel id: skip describing any environment in the prompt at all — the
+ *  video model then just continues whatever's actually visible in the
+ *  uploaded photo instead of being told to render a contradicting preset
+ *  setting. See assembleScenePrompt in compositionEngine.ts. */
+export const KEEP_ORIGINAL_ENVIRONMENT = 'keep_original'
+
 export const ENVIRONMENT_OPTIONS: CatalogOption[] = [
+  { id: KEEP_ORIGINAL_ENVIRONMENT, label: 'Keep My Setting', phrase: "Don't change the background — use whatever's in your photo" },
   { id: 'cozy_home_interior',  label: 'Cozy Home',       phrase: 'a cozy, lived-in home interior' },
   { id: 'workspace_or_studio', label: 'Workspace',       phrase: 'a modern workspace or creative studio' },
   { id: 'lifestyle_location',  label: 'Lifestyle Scene', phrase: 'an aspirational real-world lifestyle location' },

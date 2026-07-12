@@ -36,13 +36,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const mimeType = (req.body as Record<string, string>)?.mimeType || 'image/jpeg'
-    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg'
+    const ext = mimeType.includes('png') ? 'png'
+      : mimeType.includes('webp') ? 'webp'
+      : mimeType.includes('mp4') ? 'mp4'
+      : mimeType.includes('webm') ? 'webm'
+      : mimeType.includes('quicktime') || mimeType.includes('mov') ? 'mov'
+      : 'jpg'
     const path = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
 
     const supabase = createClient(supabaseUrl, serviceKey)
 
+    // 100MB — this bucket also hosts muxed video clips (voiceover + render)
+    // ahead of stitching, not just reference photos. createBucket no-ops
+    // (caught below) if the bucket already exists with a smaller limit from
+    // an earlier deploy — raise it from the Supabase dashboard if so.
     await supabase.storage
-      .createBucket(BUCKET, { public: true, fileSizeLimit: 20_971_520 })
+      .createBucket(BUCKET, { public: true, fileSizeLimit: 104_857_600 })
       .catch(() => {})
 
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path)

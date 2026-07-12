@@ -19,7 +19,9 @@ import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
 import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid } from './icons'
-import { extractProductFromUrl, generateImage, generateModelSheet } from '../lib/api'
+import { extractProductFromUrl, getProductSpec, generateProductAngle, TURNAROUND_ANGLES } from '../lib/api'
+import { composeSpecSheet } from '../lib/turnaroundSheet'
+import { removeBackgroundClientSide, enhancePhotoClientSide } from '../lib/imageTools'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -152,9 +154,10 @@ export default function ProductInput({ value, onChange, className = '' }: {
   const [aiBusy, setAiBusy] = useState<'bg' | 'enhance' | null>(null)
   const [preview, setPreview] = useState<{ before: string; after: string | null } | null>(null)
 
-  // Turnaround / model-sheet state (a 2×3 multi-angle reference of the hero).
+  // Turnaround / model-sheet state (a multi-angle reference of the hero).
   const [turnaroundBusy, setTurnaroundBusy] = useState(false)
   const [turnaroundErr, setTurnaroundErr] = useState('')
+  const [turnaroundStatus, setTurnaroundStatus] = useState('')
 
   const patch = useCallback((u: Partial<ProductInputValue>) => onChange({ ...value, ...u }), [value, onChange])
 
@@ -217,20 +220,21 @@ export default function ProductInput({ value, onChange, className = '' }: {
     patch({ images, primaryImage: value.primaryImage === src ? (images[0] ?? '') : value.primaryImage })
   }
 
+  // Client-side, deterministic — not routed through Higgsfield Soul. Soul is a
+  // stylized generator, not an instruction-following pixel editor, so asking
+  // it to "remove the background exactly" or "sharpen without altering
+  // proportions" produced unreliable results. These run instantly in the
+  // browser and always produce a real, predictable result on an uploaded photo.
   async function runAi(kind: 'bg' | 'enhance') {
     if (!value.primaryImage) return
     const parts = dataUrlParts(value.primaryImage)
     if (!parts) { setError('Enhance and background removal work on uploaded/captured images.'); return }
     setAiBusy(kind); setError('')
     setPreview({ before: value.primaryImage, after: null })
-    const editPrompt = kind === 'bg'
-      ? 'Remove the background completely, leaving ONLY the product on a pure white background. Keep the product pixel-accurate with crisp clean edges, no drop shadow, no reflection, no added elements.'
-      : 'Upscale and sharpen this product photo: improve lighting, clarity and detail, and remove noise and JPEG compression artifacts. Do NOT alter the product\'s shape, color, label text, or proportions.'
     try {
-      const { imageDataUrl } = await generateImage({
-        mode: 'edit', subjectType: 'product', editPrompt,
-        imageBase64: parts.base64, mimeType: parts.mimeType,
-      })
+      const imageDataUrl = kind === 'bg'
+        ? await removeBackgroundClientSide(value.primaryImage)
+        : await enhancePhotoClientSide(value.primaryImage)
       setPreview({ before: value.primaryImage, after: imageDataUrl })
     } catch (e) {
       setPreview(null)
@@ -248,26 +252,66 @@ export default function ProductInput({ value, onChange, className = '' }: {
     setPreview(null)
   }
 
-  // Generate a 2×3 multi-angle turnaround of the hero shot. This gives the
-  // video generator six consistent views to interpret the product from,
-  // instead of a single angle — the key to keeping the product faithful when
-  // the creator handles or demonstrates it. Stored on the value so generation
-  // can pass it as a vision reference.
+  // Build a multi-angle turnaround reference for the video generator.
+  //
+  //   1. REAL uploaded photos are the primary, ground-truth angles (hero +
+  //      every extra angle the user added) — zero hallucination, always most
+  //      accurate.
+  //   2. AI-ESTIMATED angles fill the gaps the user didn't photograph (sides,
+  //      back), generated one at a time via the verified Soul endpoint,
+  //      conditioned on the hero photo, and labelled distinctly. These are the
+  //      model's best guess of faces it can't see in a single photo — useful
+  //      for giving the video model a sense of 3D form, but approximate.
+  //   3. Both are composited with a Claude-estimated dimensions/material/scale
+  //      legend so the sheet reads as one reference for downstream generation.
+  //
+  // (This replaces the earlier "generate a 2x3 grid in one Soul call" approach,
+  // which was unreliable — a stylized single-subject model can't compose a
+  // consistent six-cell grid. Generating each angle as its OWN single-subject
+  // image is the tractable version of the same idea.)
+  const TARGET_ANGLE_CELLS = 4
   async function generateTurnaround() {
     if (!value.primaryImage || turnaroundBusy) return
-    setTurnaroundBusy(true); setTurnaroundErr('')
+    setTurnaroundBusy(true); setTurnaroundErr(''); setTurnaroundStatus('Reading product dimensions…')
+
+    const heroParts = dataUrlParts(value.primaryImage)
+    const heroRef = heroParts
+      ? { imageBase64: heroParts.base64, mimeType: heroParts.mimeType }
+      : { imageUrl: value.primaryImage }
+
     try {
-      const parts = dataUrlParts(value.primaryImage)
-      const { sheetDataUrl } = await generateModelSheet(
-        parts
-          ? { imageBase64: parts.base64, mimeType: parts.mimeType, subjectType: 'product', subjectHint: value.name || undefined }
-          : { imageUrl: value.primaryImage, subjectType: 'product', subjectHint: value.name || undefined },
-      )
+      const spec = await getProductSpec({ ...heroRef, subjectHint: value.name || undefined })
+        .catch(() => null) // legend is a nice-to-have — never block the sheet on it
+
+      // Real angles first (hero + any extra uploads), capped so there's still
+      // room for a couple of AI-filled angles within the sheet.
+      const realAngles = [value.primaryImage, ...value.images.filter(i => i !== value.primaryImage)]
+      const images: string[] = [...realAngles]
+      const labels: string[] = realAngles.map((_, i) => (i === 0 ? 'HERO' : `ANGLE ${i + 1}`))
+
+      // Fill remaining cells with AI-estimated angles. Each is a separate Soul
+      // call; a single failed angle is skipped, never fails the whole sheet.
+      const slotsToFill = Math.max(0, TARGET_ANGLE_CELLS - images.length)
+      for (let i = 0; i < slotsToFill && i < TURNAROUND_ANGLES.length; i++) {
+        const angle = TURNAROUND_ANGLES[i]
+        setTurnaroundStatus(`Generating ${angle.label.replace('AI · ', '').toLowerCase()} view (${i + 1} of ${slotsToFill})…`)
+        try {
+          const { imageDataUrl } = await generateProductAngle(heroRef, angle.phrase, value.name || undefined)
+          images.push(imageDataUrl)
+          labels.push(angle.label)
+        } catch {
+          // skip this angle — approximate views are a supplement, not required
+        }
+      }
+
+      setTurnaroundStatus('Composing the sheet…')
+      const sheetDataUrl = await composeSpecSheet(images, spec, value.name || undefined, labels)
       patch({ turnaroundImage: sheetDataUrl })
     } catch (e) {
-      setTurnaroundErr(e instanceof Error ? e.message : 'Could not generate the turnaround — try a clearer photo.')
+      setTurnaroundErr(e instanceof Error ? e.message : 'Could not build the turnaround — try a clearer photo.')
     } finally {
       setTurnaroundBusy(false)
+      setTurnaroundStatus('')
     }
   }
 
@@ -414,26 +458,31 @@ export default function ProductInput({ value, onChange, className = '' }: {
             </button>
           </div>
 
-          {/* Turnaround / model sheet — six consistent angles the video
-              generator uses to keep the product faithful when it's handled. */}
+          {/* Turnaround — your real uploaded angles (ground truth) plus
+              AI-estimated fill angles for the sides/back, plus a Claude
+              dimensions/material/scale legend. Gives the video generator a
+              multi-angle sense of the product's form and true scale. */}
           {(turnaroundBusy || value.turnaroundImage || turnaroundErr) && (
             <div className="mt-4 rounded-xl border border-white/[0.08] bg-void-900 p-3">
               <div className="mb-2 flex items-center gap-2">
                 <Grid className="h-3.5 w-3.5 text-fire-start" />
-                <p className="text-xs font-semibold text-ink">360° turnaround reference</p>
+                <p className="text-xs font-semibold text-ink">Product turnaround</p>
                 {value.turnaroundImage && !turnaroundBusy && (
                   <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300"><Check className="h-3 w-3" /> Saved as reference</span>
                 )}
               </div>
               {turnaroundBusy ? (
-                <div className="flex aspect-[3/2] items-center justify-center rounded-lg bg-void-800/60 text-sm text-ink-muted">
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin text-fire-start" /> Rendering six angles…
+                <div className="flex aspect-[3/2] flex-col items-center justify-center gap-2 rounded-lg bg-void-800/60 text-sm text-ink-muted">
+                  <RefreshCw className="h-4 w-4 animate-spin text-fire-start" />
+                  <span>{turnaroundStatus || 'Building turnaround…'}</span>
                 </div>
               ) : value.turnaroundImage ? (
                 <img src={value.turnaroundImage} alt="Product turnaround sheet" className="w-full rounded-lg" />
               ) : null}
               {turnaroundErr && <p className="mt-2 text-xs text-amber-300">{turnaroundErr}</p>}
-              <p className="mt-2 text-[11px] text-ink-faint">Six angles help the AI keep your product accurate when the creator holds or demonstrates it.</p>
+              <p className="mt-2 text-[11px] text-ink-faint">
+                Neutral badges are your real photos; <span className="text-fire-start font-semibold">orange badges</span> are AI-estimated angles — the model's best guess of sides/back it can't see. For the most accurate result, upload 2–3 real angles above before generating.
+              </p>
             </div>
           )}
 

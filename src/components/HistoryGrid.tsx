@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { Download, Edit, Film, Plus, RefreshCw, Trash } from './icons'
 import { listCampaigns, deleteCampaignRemote, listBriefs, type StoredCampaign, type StoredBriefSummary } from '../lib/api'
 

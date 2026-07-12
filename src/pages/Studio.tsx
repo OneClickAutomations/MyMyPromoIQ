@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useTransition } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
+import GenerationOverlay from '../components/ui/GenerationOverlay'
 import {
   ArrowRight, Bolt, Camera, Check, Download, ImageIcon, LinkIcon,
   PlayIcon, RefreshCw, Share2, Spark, Upload, Users, Wand,
@@ -502,8 +503,7 @@ export default function Studio() {
     setGenError('')
     setWorkflowStep(3)
 
-    // Persistence via server API (service key — bypasses RLS, so it works
-    // regardless of the Clerk↔Supabase JWT bridge).
+    // Persistence via server API (service key — bypasses RLS).
     let campaignId: string | null = null
     let sceneDbId = scenes[idx].dbId
     let canPersist = true
@@ -1303,6 +1303,22 @@ export default function Studio() {
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {/* Always-in-view generation overlay — the inline progress card inside
+            renderStep3() stays for desktop context, but this guarantees the
+            countdown is visible without scrolling on any viewport, mobile
+            included. Hidden the instant workflowStep advances to 4 (done). */}
+        {workflowStep === 3 && (
+          <GenerationOverlay
+            steps={[
+              { label: 'Script', headline: 'Claude is writing & blocking the scene…', detail: 'Directing this scene from your brief.' },
+              { label: 'Submit', headline: 'Submitting to the render engine…', detail: 'Handing the direction to Higgsfield.' },
+              { label: 'Render', headline: 'Rendering your video…', detail: 'This usually takes 1-3 minutes.' },
+            ]}
+            activeIndex={genStepIdx}
+            estimateSecondsForStep={[15, 10, 150][genStepIdx]}
+          />
+        )}
       </div>
     </AppShell>
   )

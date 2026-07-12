@@ -21,7 +21,7 @@
  * table, already scoped by userId — no schema change needed).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { Camera, Upload, Check, X, RefreshCw, Trash, Plus, Users, Wand, Star } from './icons'
 import { generateImage, listCreators, saveCreator, type StoredCreator } from '../lib/api'
 import type { CreatorAttributes } from '../lib/studio/types'

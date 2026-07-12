@@ -25,6 +25,18 @@ const STYLE_BLURBS: Record<string, string> = {
   'day-in-life':     'cinematic lifestyle — the product woven into a real moment',
 }
 
+// Each style implies a genuinely different NARRATIVE ARC, not just different
+// camera work — this is what makes the style picker actually change the
+// story shape instead of only the visual treatment.
+const STYLE_NARRATIVE: Record<string, string> = {
+  testimonial: 'Structure as a first-person account: open mid-story ("So this changed everything for me..."), agitate the before-state briefly, credit the product with a specific result, close on a genuine personal recommendation. The proof beat IS the testimonial — make it the emotional peak.',
+  ugc_testimonial: 'Structure as a first-person account: open mid-story, agitate the before-state briefly, credit the product with a specific result, close on a genuine personal recommendation. The proof beat IS the testimonial — make it the emotional peak.',
+  unboxing: 'Structure as anticipation → reveal → hands-on demo → satisfaction → cta. The hook is the anticipation of opening/receiving it; the proof beat is the satisfying tactile payoff and first-use reaction, not a separate spoken claim.',
+  'day-in-life': 'Weave the product into a real moment of someone\'s day rather than pitching it head-on — the hook is the relatable moment itself, the product enters naturally mid-scene, and proof is shown through the person\'s genuine reaction rather than stated as a claim.',
+  'fast-cut': 'Compress aggressively: the hook must land in the first 1-2 seconds with a jarring visual or line, every beat moves fast with minimal dwell time, and the proof beat is a rapid-fire specific stat or before/after flash rather than a lingering testimonial.',
+  founder_story: 'Structure as the founder speaking directly and personally about why they built this — the hook is a candid, specific admission (a problem they personally had), proof is their own credibility plus early customer results, cta is a personal invitation, not a corporate push.',
+}
+
 // ── Storyboard Intelligence ──────────────────────────────────────────────────
 // Veo 3 renders in fixed short durations, so a commercial is a sequence of short
 // clips, each carrying only the dialogue it can speak at ~2.5 words/second. This
@@ -52,6 +64,12 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     productName, description, style,
     clipCount, referenceBeats, referenceDurationSeconds, brandVoice, cta,
     creator,
+    // Optional hook line (e.g. from the "Write with AI" / manual script field)
+    // — when set, clip 1's dialogue should open with or closely echo it.
+    hookLine,
+    // Free-text notes from the "Regenerate" panel — incorporated into the
+    // whole storyboard with priority over the generic style brief.
+    regenerationNotes,
   } = body
 
   // Who's on camera. Without this, the planner invents a person and defaults to
@@ -78,21 +96,32 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
   desired = Math.max(1, Math.min(10, desired))
 
   const styleBlurb = STYLE_BLURBS[style] ?? style ?? 'commercial ad'
+  const narrativeSection = STYLE_NARRATIVE[style] ? `\nNARRATIVE ARC for this style: ${STYLE_NARRATIVE[style]}` : ''
   const refSection = Array.isArray(referenceBeats) && referenceBeats.length
     ? `\nThis clones a winning ad with these beats: ${referenceBeats.join(' → ')}. Match its pacing and structure, but sell the product below.`
     : ''
   const brandSection = [brandVoice ? `Brand voice: ${brandVoice}.` : '', cta ? `End on this CTA: "${cta}".` : ''].filter(Boolean).join(' ')
+  const hookSection = hookLine?.trim() ? `\nHOOK LINE (given by the user) — clip 1's dialogue must open with or closely echo this line verbatim, then continue naturally: "${hookLine.trim()}"` : ''
+  const regenSection = regenerationNotes?.trim() ? `\nREGENERATION NOTES from the user — incorporate these specific changes into the storyboard (priority over the generic style direction where they conflict): ${regenerationNotes.trim()}` : ''
 
-  const system = `You are an expert short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3.
+  const system = `You are an expert direct-response copywriter AND short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3. The dialogue you write is real sales copy, not filler — it must be good enough to actually move someone to buy, using the same craft a senior DR copywriter would bring to a script.
 
 THE #1 RULE — COMPLETENESS OVER COUNT:
-Regardless of how few clips you're given, the finished sequence must play as one complete, usable, standalone commercial — a full arc from hook to call-to-action, never a fragment that stops mid-pitch. A complete sales narrative has five elements: (1) hook/attention, (2) problem or desire, (3) solution/demonstration, (4) credibility or proof, (5) call-to-action. When ${desired} is smaller than 5, you do NOT get to drop elements — you COMPRESS multiple elements into the same clip's dialogue and visual direction instead. Concretely:
+Regardless of how few clips you're given, the finished sequence must play as one complete, usable, standalone commercial — a full arc from hook to call-to-action, never a fragment that stops mid-pitch and never feeling rushed. A complete sales narrative has five elements: (1) hook/attention, (2) problem or desire (agitate it — make the pain or want specific and relatable), (3) solution/demonstration, (4) credibility or proof (a testimonial beat: a specific, believable result — a number, a timeframe, a before/after, an "I was skeptical until..." moment — never a vague "it's amazing"), (5) call-to-action (a direct, specific action verb — "Tap the link", "Get yours today", "Try it risk-free" — plus a reason to act NOW, not generic "check it out"). When ${desired} is smaller than 5, you do NOT get to drop elements — you COMPRESS multiple elements into the same clip's dialogue and visual direction instead. Concretely:
 - 1 clip: hook + problem + solution + proof + CTA all land in that single clip's dialogue and action, in that order, still fitting the word budget below.
 - 2 clips: clip 1 = hook + problem + solution; clip 2 = proof + CTA.
 - 3 clips: clip 1 = hook + problem; clip 2 = solution + proof; clip 3 = CTA.
 - 4 clips: hook; problem + solution; proof; CTA.
-- 5+ clips: one element per clip (hook, problem, solution, proof, cta), with any extra clips elaborating the solution/proof.
-Never write a clip that only teases or sets up without also paying it off somewhere in the sequence — by the last clip, someone who has only ever seen this ad must understand what the product does, why they'd want it, and what to do next.
+- 5+ clips: one element per clip (hook, problem, solution, proof, cta), with any extra clips elaborating the solution/proof (more demo detail, a second proof point, an objection handled).
+Never write a clip that only teases or sets up without also paying it off somewhere in the sequence — by the last clip, someone who has only ever seen this ad must understand what the product does, why they'd want it, why they should believe it works, and exactly what to do next. Longer total runtime means MORE selling substance (a second proof point, an objection addressed, a richer demo) — never padding, repetition, or the same claim restated in different words.
+
+COPYWRITING CRAFT (this is what separates a script that sells from one that just describes):
+- Hook: a pattern interrupt or a sharp, specific claim/question — never "Hey guys, check this out."
+- Specificity beats generality everywhere: "saved me $340 a year" beats "saves money"; "in 11 days" beats "quickly"; a named, ordinary use-case beats an abstract benefit.
+- Sound like a real person talking, not an ad: contractions, natural rhythm, the way someone would actually tell a friend — never stiff marketing-speak ("revolutionary", "game-changing", "unlock").
+- The proof/testimonial beat is the credibility hinge of the whole ad — treat it as seriously as the hook. Give it a real, specific, checkable-feeling detail.
+- The CTA closes with urgency or a low-risk framing (a guarantee, a limited-time framing, "before it's gone") when it fits the product honestly — never a limp "learn more."
+- Vary sentence rhythm clip to clip — a script where every line is the same length and cadence reads as robotic even if the words are different.
 
 HARD RULES:
 - Exactly ${desired} clips, ordered 1..${desired}.
@@ -115,14 +144,14 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
-Style: ${styleBlurb}${refSection}${creatorSection}
+Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}
 ${brandSection}
 
 Plan the ${desired} clips.`,
     }],
   })
 
-  const rawText = message.content.find((b: any) => b.type === 'text')?.text?.trim() ?? '{}'
+  const rawText = message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text?.trim() ?? '{}'
   const jsonMatch = rawText.match(/\{[\s\S]*\}/)
   const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
   const rawClips: any[] = Array.isArray(parsed.clips) ? parsed.clips : []
@@ -157,6 +186,96 @@ Plan the ${desired} clips.`,
   return res.status(200).json({ plan })
 }
 
+async function writeScript(body: Record<string, any>, res: VercelResponse) {
+  const { productName, description, style, niche, goal, tone, creator } = body
+  if (!description && !productName) {
+    return res.status(400).json({ error: 'description or productName is required' })
+  }
+
+  const styleBlurb = STYLE_BLURBS[style] ?? style ?? 'UGC ad'
+
+  let creatorLine = ''
+  if (creator?.source === 'uploaded') {
+    creatorLine = 'Creator: real person (appearance fixed by uploaded photo — do not describe appearance).'
+  } else if (creator?.source === 'generated') {
+    const attrs = [creator.gender, creator.ageRange, creator.ethnicity].filter(Boolean).join(', ')
+    if (attrs) creatorLine = `Creator: ${attrs}.`
+  }
+
+  const context = [
+    niche ? `Audience / niche: ${niche}` : '',
+    goal ? `Goal: ${goal}` : '',
+    tone ? `Tone: ${tone}` : '',
+    creatorLine,
+  ].filter(Boolean).join('\n')
+
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 300,
+    system: `You are an expert UGC ad scriptwriter. Write a single, compelling spoken line (the hook/script) for a ${styleBlurb} ad.
+
+Rules:
+- 10–25 words maximum — it must fit in a 4–8 second video clip
+- Natural spoken cadence — sounds human, not corporate
+- Opens with a pattern-interrupt or relatable hook
+- Ends with emotion, curiosity, or urgency — not a corporate CTA
+- No hashtags, no emojis, no "link in bio"
+- No quotation marks in output — just the raw line
+
+Output ONLY the script line. Nothing else.`,
+    messages: [{
+      role: 'user',
+      content: `Product: ${productName || 'the product'}
+What it does: ${description}
+Ad style: ${styleBlurb}
+${context}
+
+Write the spoken hook line.`,
+    }],
+  })
+
+  const script = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '') // strip any wrapper quotes
+    .trim()
+
+  return res.status(200).json({ script })
+}
+
+/** "AI Magic" — expand a few user keywords into a concrete, specific
+ *  regeneration directive: physically observable actions/camera/detail, not
+ *  vague mood words. Powers the enhance button next to the Regenerate
+ *  keyword field (any generation module). */
+async function enhancePrompt(body: Record<string, any>, res: VercelResponse) {
+  const { text, productDescription, style } = body
+  if (!text?.trim()) return res.status(400).json({ error: 'Enter a few keywords first.' })
+
+  const styleBlurb = STYLE_BLURBS[style] ?? style ?? ''
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 200,
+    system: `You expand a short, rough keyword note into ONE concrete, physically specific creative direction for regenerating a UGC ad video clip.
+
+Rules:
+- Turn vague ideas into observable actions, camera moves, or concrete visual details a camera could literally capture.
+- 1-2 sentences maximum.
+- No mood adjectives (cinematic, professional, stunning, amazing, perfect).
+- Preserve every specific noun/detail the user already gave — only ADD specificity, never remove their intent.
+- Output ONLY the expanded direction. No preamble, no quotes.`,
+    messages: [{
+      role: 'user',
+      content: `Product: ${productDescription || 'the product'}${styleBlurb ? `\nAd style: ${styleBlurb}` : ''}\nUser's rough note: "${text.trim()}"\n\nExpand this into a concrete direction.`,
+    }],
+  })
+
+  const enhanced = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim()
+
+  return res.status(200).json({ enhanced: enhanced || text.trim() })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -169,6 +288,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director storyboard]', err)
       const message = err instanceof Error ? err.message : 'Storyboard planning failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'write-script') {
+    try {
+      return await writeScript(body, res)
+    } catch (err) {
+      console.error('[/api/director write-script]', err)
+      const message = err instanceof Error ? err.message : 'Script generation failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'enhance-prompt') {
+    try {
+      return await enhancePrompt(body, res)
+    } catch (err) {
+      console.error('[/api/director enhance-prompt]', err)
+      const message = err instanceof Error ? err.message : 'Enhancement failed.'
       return res.status(502).json({ error: message })
     }
   }

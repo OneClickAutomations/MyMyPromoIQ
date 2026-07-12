@@ -156,7 +156,7 @@ export const generator = {
   eyebrow: 'Live · Real Generation',
   title: 'Stop reading. Generate one.',
   subtitle:
-    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and Google Veo 3 renders a real UGC video — right here, right now.',
+    'Drop in a product image URL, describe it, pick a style. Claude directs the shot and our engine renders a real UGC video — right here, right now.',
   // Style ids must match the backend (netlify/lib/director.ts).
   styles: [
     { id: 'testimonial', label: 'Testimonial', hint: 'Person to camera, warm + handheld' },
@@ -326,13 +326,13 @@ export const adForge = {
   build: {
     title: 'Build From Scratch',
     subtitle: '12 guided steps. Full creative control.',
-    detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — Veo 3 animates it into a video with native audio.',
+    detail: 'Walk through product, creator, brand, scenes, voiceover and more. Upload your product image — our engine animates it into a video with native audio.',
     cta: 'Start building',
   },
   quick: {
     title: 'Quick Generate',
     subtitle: 'Fastest path from product to video.',
-    detail: 'Five fields, one click. Upload your product photo and Claude writes the director brief — Veo 3 renders the video in minutes.',
+    detail: 'Five fields, one click. Upload your product photo and Claude writes the director brief — our engine renders the video in minutes.',
     cta: 'Quick generate',
   },
   review: {
@@ -341,6 +341,36 @@ export const adForge = {
     fromBuild: 'Fill in your product details and creative direction.',
     generateCta: 'Generate Video',
     filledLabel: 'from analysis',
+  },
+}
+
+export const dashboard = {
+  greeting: 'Welcome back',
+  subgreeting: 'Pick up where you left off, or start something new.',
+  actions: {
+    start: 'Start',
+    clone: { title: 'Clone a Winning Ad', subtitle: 'Find what works. Make it yours.' },
+    build: { title: 'Build From Scratch', subtitle: 'Full creative control.' },
+    quick: { title: 'Quick Generate', subtitle: 'Product in. Video out.' },
+  },
+  inProgress: 'In Progress',
+  recent: 'Recent',
+  continue: 'Continue',
+  stats: {
+    videos: 'Videos generated',
+    analyzed: 'Ads analyzed',
+    sourced: 'Products sourced',
+    credits: 'Credits remaining',
+  },
+  emptyProjects: {
+    heading: 'Nothing in progress',
+    body: 'Start a new ad and it will show up here while it generates.',
+    action: 'Create your first ad',
+  },
+  emptyRecent: {
+    heading: 'No videos yet',
+    body: 'Your finished commercials will collect here, ready to download and remix.',
+    action: 'Create your first ad',
   },
 }
 

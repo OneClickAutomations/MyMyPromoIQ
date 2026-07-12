@@ -1,23 +1,36 @@
 /**
- * Supabase client factory.
+ * Supabase client — auth + database.
  *
- * We use Clerk for auth and Supabase for the database. Each request passes
- * the Clerk JWT as a Bearer token so Supabase RLS rules can verify the user.
- *
- * Usage (inside a component):
- *   const getClient = useSupabaseClient()
- *   const { data } = await (await getClient()).from('campaigns').select()
+ * Supabase Auth handles login/accounts; the same client runs DB queries with
+ * the signed-in user's session. The `supabase` singleton persists the session,
+ * auto-refreshes tokens, and detects the OAuth code in the URL on redirect back
+ * from Google.
  */
 import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
+/** True when the client-side Supabase env vars look real (build-time VITE_).
+ *  Rejects the obvious `.env.example` placeholders so a stale placeholder shows
+ *  the setup screen instead of failing later with a cryptic "Invalid API key". */
+export const supabaseConfigured =
+  !!SUPABASE_URL &&
+  /^https:\/\/[a-z0-9-]+\.supabase\.co/i.test(SUPABASE_URL) &&
+  !SUPABASE_URL.includes('your-project') &&
+  !!SUPABASE_ANON_KEY &&
+  SUPABASE_ANON_KEY.length > 30 &&
+  SUPABASE_ANON_KEY !== 'eyJ...'
+
+/** Singleton browser client — persists the session, used for both auth and DB. */
+export const supabase = createClient(SUPABASE_URL || 'http://placeholder.local', SUPABASE_ANON_KEY || 'placeholder', {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+})
+
+/** Back-compat factory (a few call sites still create per-token clients). */
 export function makeSupabaseClient(token: string | null) {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    },
+    global: { headers: token ? { Authorization: `Bearer ${token}` } : {} },
     auth: { persistSession: false },
   })
 }

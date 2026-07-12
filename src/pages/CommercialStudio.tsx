@@ -12,7 +12,7 @@
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
 import AppShell from '../components/AppShell'
 import CameraStudio from '../components/CameraStudio'
@@ -636,7 +636,13 @@ export default function CommercialStudio() {
     }
     setProductFile(null)
     setProductPreview(img)
-    if (v.description || v.name) setDescInput(v.description || v.name)
+    // Only ever sync from the actual description field. Falling back to
+    // v.name here was the bug: while description is still empty, typing the
+    // FIRST character into "Product name" fell through to v.name and got
+    // written into descInput — after that, descInput itself became a truthy
+    // "description" on the next keystroke, so it silently stuck at just that
+    // one leaked character instead of continuing to mirror the name.
+    if (v.description) setDescInput(v.description)
     // Persist the turnaround sheet (generated inside ProductInput) so it's used
     // as Claude's vision reference at generation time.
     patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description, turnaroundImageUrl: v.turnaroundImage ?? brief.product.turnaroundImageUrl } })
@@ -1120,9 +1126,22 @@ export default function CommercialStudio() {
 
   // Step 7: Environment
   function renderEnvironment() {
+    // A real uploaded photo (creator or product) already has a real, usable
+    // background — forcing a generic preset onto it fights the actual
+    // conditioning image the video model sees. Surface that clearly instead
+    // of only offering artificial settings that don't apply.
+    const hasRealPhoto = !!(brief.creator.transformedImageUrl || brief.creator.seedImages?.length || productPreview)
     return (
       <div className="space-y-6">
         <StepHeader title="Choose an environment" desc="Where does the scene take place?" onBack={goBack} />
+
+        {hasRealPhoto && (
+          <div className="rounded-xl border border-fire-start/20 bg-fire-start/[0.05] p-3">
+            <p className="text-xs text-ink-muted">
+              <span className="font-semibold text-ink">You've uploaded a real photo</span> — pick <span className="font-semibold text-fire-start">Keep My Setting</span> to use its actual background as-is, instead of forcing a different preset scene onto it.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           {ENVIRONMENT_OPTIONS.map(opt => (

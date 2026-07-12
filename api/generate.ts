@@ -12,8 +12,73 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@supabase/supabase-js'
+import { submitDopVideo, type DopArgs, type DopModel } from './_lib/higgsfield.js'
 
 type Quality = 'lite' | 'turbo' | 'standard'
+
+// ── Higgsfield video path (rebuild Stage 4) ──────────────────────────────────
+// When Higgsfield creds are present, video generation routes to Seedance 2.0;
+// otherwise it falls back to the existing Veo path so the branch works either
+// way until the Veo cleanup stage. Higgsfield references the conditioning image
+// by URL (start_image), so a data-URL reference is hosted to Supabase first.
+// The returned request id is prefixed "hf:" so /api/status polls Higgsfield.
+
+function higgsfieldEnabled(): boolean {
+  return !!((process.env.HIGGSFIELD_API_KEY && (process.env.HIGGSFIELD_SECRET || process.env.HIGGSFIELD_API_SECRET))
+    || (process.env.HIGGSFIELD_API_TOKEN || '').includes(':'))
+}
+
+/** https URLs pass through; data-URL/base64 refs are hosted to Supabase so
+ *  Higgsfield can fetch the conditioning image by URL. */
+async function hostRefUrl(imageUrl?: string): Promise<string | undefined> {
+  if (!imageUrl) return undefined
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl
+  if (!imageUrl.startsWith('data:')) return undefined
+  const b64 = imageUrl.includes(',') ? imageUrl.split(',')[1] : imageUrl
+  const mime = imageUrl.match(/^data:(.*?);base64/)?.[1] || 'image/jpeg'
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !serviceKey) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send the conditioning image to Higgsfield.')
+  const supabase = createClient(supabaseUrl, serviceKey)
+  const bucket = 'product-images'
+  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+  const path = `hf-refs/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(bucket).upload(path, Buffer.from(b64, 'base64'), { contentType: mime, upsert: true })
+  if (error) throw new Error(`Could not host the conditioning image: ${error.message}`)
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
+/** Submit a Higgsfield DoP image-to-video job. Returns an "hf:"-prefixed
+ *  request id for /api/status. DoP is this account's verified video model
+ *  (dashboard: DoP Lite/Standard/Turbo) — NOT Seedance, which was an unverified
+ *  slug that hung the function. The tier is set by DOP_MODEL (default dop-lite,
+ *  the lightest/cheapest). DoP needs a conditioning image (image-to-video), so
+ *  a start image is required. The app layers the ElevenLabs voiceover downstream
+ *  (api/mux.ts). */
+async function submitHiggsfieldVideo(
+  prompt: string,
+  imageUrl?: string,
+  _opts?: { durationSeconds?: number },
+): Promise<{ requestId: string; status: string; provider: string }> {
+  const startImage = await hostRefUrl(imageUrl)
+  if (!startImage) throw new Error('Higgsfield DoP needs a product or creator image to animate. Upload or generate one first.')
+  const model = (process.env.DOP_MODEL as DopModel) || 'dop-lite'
+  const args: DopArgs = {
+    prompt,
+    model,
+    enhance_prompt: true,
+    input_images: [{ type: 'image_url', image_url: startImage }],
+  }
+  const jobSet = await submitDopVideo(args)
+  // Log the raw submit response so the Vercel Runtime Log shows the exact shape.
+  console.info('[generate] DoP submit response:', JSON.stringify(jobSet).slice(0, 500))
+  // The submit response is a JobSet {id, jobs} (per the official SDK); polling
+  // is GET /v1/job-sets/{id} — done by /api/status via the hf:-prefixed id.
+  const status = jobSet.jobs?.[0]?.status || 'queued'
+  return { requestId: `hf:${jobSet.id}`, status, provider: `higgsfield-${model}` }
+}
 type StyleId = 'testimonial' | 'unboxing' | 'day-in-life' | 'fast-cut'
 
 const QUALITIES: Quality[] = ['lite', 'turbo', 'standard']
@@ -141,6 +206,7 @@ async function writeDirectorPrompt(
   creatorReference?: { data: string; mime: string },
   sceneIndex?: number,
   sceneCount?: number,
+  regenerationNotes?: string,
 ): Promise<string> {
   const style = STYLES[styleId]
   const anthropic = new Anthropic()
@@ -191,7 +257,7 @@ async function writeDirectorPrompt(
     }
   }
 
-  const system = `You are an expert UGC video director. Your job is to write image-to-video prompts for Google Veo 3 that produce scroll-stopping, authentic-feeling content. Veo 3 responds to physically specific, observable descriptions — not mood words or adjectives.
+  const system = `You are an expert UGC video director. Your job is to write image-to-video prompts that produce scroll-stopping, authentic-feeling content for a physics-aware video model. The model responds to physically specific, observable descriptions — not mood words or adjectives.
 
 RULES (violating any one produces unusable output):
 
@@ -201,16 +267,20 @@ RULES (violating any one produces unusable output):
    Every beat must be something a camera can literally capture.
 
 2. ANCHOR the product in every sentence.
-   State its exact visual appearance (color, material, shape, label text if known). Never assume Veo remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
+   State its exact visual appearance (color, material, shape, label text if known). Never assume the model remembers what was described in a prior sentence.${productReference ? ' A reference image of the product is attached — describe ONLY what you actually observe in it (exact color, material, shape, proportions, and any visible label/text). Do NOT invent details that contradict the photo; if the description text conflicts with the photo, the photo wins.' : ''}
+
+2a. SCALE — state the product's real-world size relative to the body EVERY time, using a concrete comparison object a viewer already knows (e.g. "about the size of a golf ball", "roughly a deck of cards", "small enough to close a fist around", "the length of a thumb"). Never leave size to the model's imagination — undersized text-only description is the single most common failure mode (products rendering comically oversized, dwarfing the hand or face).
+
+2b. PARTS — if the product is a CONTAINER with a smaller item that comes OUT of it (an earbud case with earbuds, a pill bottle with pills, a lipstick tube with the bullet, a jar with cream on a fingertip), you MUST name both the container and the smaller part explicitly, and be precise about which one performs the described action. Concretely: "She opens the charging case, lifts ONE earbud out between two fingers, and places just the earbud in her ear — the case stays closed in her other hand at waist height, never touching her face." NEVER describe the outer container itself being pressed to an ear, eye, mouth, or skin — only the small inner part that is physically sized for that contact ever touches the body.
 ${creatorReference ? `
-2b. ANCHOR the creator's appearance to their reference photo.
+2c. ANCHOR the creator's appearance to their reference photo.
    A reference image of the creator is also attached. Describe their hair style/color, facial features, skin tone, clothing, and hands EXACTLY as observed in that photo — never invent or vary these across scenes. The only appearance details that may change are ones the scene direction below explicitly calls for (e.g. a different action, pose, or setting); absent an explicit instruction, hair, face, clothing, hands, and skin tone must stay identical to the photo.` : ''}
 
 3. PRECISE camera language only.
    Good: "locked tripod, slow push-in starting at chest level", "handheld with slight natural drift", "overhead tight on hands, product fills 70% of frame", "fast zoom-in to face then snap to product"
    Banned words: cinematic, professional, high-quality, aesthetic, stunning, beautiful, seamless, vibrant, amazing, incredible, perfect.
 
-4. AUDIO is first-class — Veo 3 generates sound with the image.
+4. AUDIO is first-class — the model generates sound with the image.
    If a script line is provided, embed it verbatim with delivery notes:
    Example: She looks directly into the lens and says "I used to spend $80 on this — now I spend $12," voice calm and matter-of-fact, slight upward smile at the end.
    If no script, describe ambient sound: the click of a lid, the rustle of packaging, a quiet exhale.
@@ -221,7 +291,8 @@ ${creatorReference ? `
 
 7. BE CREATIVE AND SPECIFIC. Imagine a real creator in a real environment — morning light through a bathroom window, kitchen counter with a plant just visible at frame edge, a bedroom nightstand. Concrete environmental detail makes the output feel genuine, not studio-fake.
 
-Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep the product at realistic real-world scale. Keep hands anatomically correct and the face stable (no morphing).' : ''}`
+Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.${composedPrompt ? '\nPreserve the cast person\'s ethnicity and skin tone exactly as stated in the AUTHORITATIVE SCENE. Keep hands anatomically correct and the face stable (no morphing).' : ''}
+Keep the product at realistic real-world scale and anatomically/functionally correct part usage (rules 2a-2b) in EVERY case, composed scene or not.`
 
   const userLines: string[] = []
   userLines.push(`Product: ${productDescription}`)
@@ -234,6 +305,9 @@ Output ONLY the prompt text. No preamble, no quotes, no markdown. 4-6 sentences.
   if (continuitySection.trim()) userLines.push(continuitySection.trim())
   if (sceneFocusSection.trim()) userLines.push(sceneFocusSection.trim())
   if (identitySection.trim()) userLines.push(identitySection.trim())
+  if (regenerationNotes?.trim()) {
+    userLines.push(`\nREGENERATION NOTES from the user — incorporate these specific changes/keywords into the scene (they take priority over the generic style direction where they conflict): ${regenerationNotes.trim()}`)
+  }
   userLines.push(`\nWrite the ${style.label} motion prompt.`)
 
   const imageBlocks = [productReference, creatorReference]
@@ -367,10 +441,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set. Add it in Vercel → Settings → Environment Variables.' })
     }
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it in Vercel → Settings → Environment Variables to enable Veo video generation.' })
-    }
-
     const {
       productImageUrl,
       productDescription,
@@ -397,6 +467,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // on a product establishing shot.
       sceneIndex,
       sceneCount,
+      // Free-text keywords/notes from the "Regenerate" panel — incorporated
+      // into the director prompt with priority over the generic style brief.
+      regenerationNotes,
+      // Multi-scene chaining: the PREVIOUS scene's last frame, used as THIS
+      // scene's DoP conditioning image instead of the static product photo —
+      // continues the same take (same environment/pose) instead of every
+      // scene snapping back to the same opening shot when stitched together.
+      // The Claude vision reference (productReferenceImageUrl) is deliberately
+      // NOT overridden by this — it stays pinned to the real product photo so
+      // the written description never drifts across a chain of re-derived frames.
+      conditioningImageUrl,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -466,16 +547,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       creatorReference,
       Number(sceneIndex) || undefined,
       Number(sceneCount) || undefined,
+      regenerationNotes,
     )
 
-    // Veo takes exactly one conditioning image per job. When a creator photo is
-    // present, it wins — identity drift on a face is far more noticeable (and
-    // more consequential, since it's a real person) than on a product, and the
-    // product's appearance/scale is already carried in the text prompt.
-    const veoReferenceImage = creatorImageUrl || productImageUrl
-    const { requestId, status } = await submitVeoJob(directorPrompt, veoReferenceImage || undefined, { negativePrompt })
+    // Exactly one conditioning image per job. A chaining override (this
+    // scene continuing the previous scene's last frame) wins over everything
+    // else — that's what keeps a multi-scene ad visually continuous instead
+    // of every scene restarting from the same static photo. Absent that, a
+    // creator photo wins over the product photo — identity drift on a face is
+    // far more noticeable (and more consequential, since it's a real person)
+    // than on a product, and the product's appearance/scale is already
+    // carried in the text prompt.
+    const referenceImage = conditioningImageUrl || creatorImageUrl || productImageUrl
 
-    return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
+    // Video provider: PREFER GOOGLE VEO when a Gemini key is present — Veo 3 is
+    // the stronger general video model (native audio, better product/creator
+    // consistency) and its API is directly callable. Higgsfield DoP is the
+    // fallback (used only when there's no Gemini key). This ordering was
+    // reversed deliberately: DoP is a capable general animator but the app was
+    // assembling ads from general parts with no faithful editor in the stack.
+    if (process.env.GEMINI_API_KEY) {
+      const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt })
+      return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
+    }
+
+    if (higgsfieldEnabled()) {
+      const out = await submitHiggsfieldVideo(directorPrompt, referenceImage || undefined, {
+        durationSeconds: Number((req.body as Record<string, unknown>)?.durationSeconds) || undefined,
+      })
+      return res.status(200).json({ ...out, directorPrompt })
+    }
+
+    return res.status(503).json({ error: 'No video provider configured. Set GEMINI_API_KEY (for Veo) or Higgsfield credentials in Vercel.' })
   } catch (err) {
     console.error('[/api/generate]', err)
     const message = err instanceof Error ? err.message : 'Generation failed.'

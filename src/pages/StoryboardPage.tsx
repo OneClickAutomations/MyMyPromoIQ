@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import StoryboardPlanner from '../components/StoryboardPlanner'
 import GenerationPanel from '../components/GenerationPanel'

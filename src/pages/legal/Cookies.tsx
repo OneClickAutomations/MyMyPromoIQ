@@ -29,21 +29,15 @@ export default function CookiePolicy() {
         </thead>
         <tbody>
           <tr>
-            <td><code>__clerk_db_jwt</code></td>
-            <td>Clerk</td>
+            <td><code>sb-access-token</code></td>
+            <td>Supabase</td>
             <td>Stores your authentication session token</td>
             <td>Session</td>
           </tr>
           <tr>
-            <td><code>__session</code></td>
-            <td>Clerk</td>
+            <td><code>sb-refresh-token</code></td>
+            <td>Supabase</td>
             <td>Maintains your logged-in state across page loads</td>
-            <td>Session</td>
-          </tr>
-          <tr>
-            <td><code>__client_uat</code></td>
-            <td>Clerk</td>
-            <td>Detects active user sessions for security checks</td>
             <td>1 year</td>
           </tr>
         </tbody>

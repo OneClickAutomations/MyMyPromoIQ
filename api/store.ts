@@ -1,11 +1,9 @@
 /**
  * POST /api/store — server-side persistence for campaigns + scenes.
  *
- * Why this exists: the browser cannot write to Supabase directly because RLS
- * (auth.jwt()->>'sub' = user_id) requires the Clerk↔Supabase JWT bridge to be
- * configured. This endpoint uses the Supabase SERVICE KEY (server-only, already
- * configured for uploads) which bypasses RLS, so saving/reading history works
- * regardless of that bridge.
+ * Why this exists: this endpoint uses the Supabase SERVICE KEY (server-only,
+ * already configured for uploads) which bypasses RLS, so saving/reading history
+ * doesn't depend on RLS policies being wired up on every table.
  *
  * Body: { action, userId, ... }
  *   saveCampaign { userId, campaign }     → { id }
@@ -15,7 +13,8 @@
  *   delete       { userId, campaignId }    → { ok: true }
  *
  * Note: userId is currently trusted from the client. The service key never
- * leaves the server. Harden later by verifying the Clerk token server-side.
+ * leaves the server. Harden later by verifying the Supabase auth JWT
+ * server-side (supabase.auth.getUser(token)) instead of trusting the body.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'

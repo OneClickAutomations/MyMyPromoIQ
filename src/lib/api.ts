@@ -47,6 +47,15 @@ export type GenerateInput = {
    *  so clips 2..N continue the take instead of re-opening on the product. */
   sceneIndex?: number
   sceneCount?: number
+  /** Free-text keywords/notes from the "Regenerate" panel — incorporated into
+   *  the director prompt with priority over the generic style brief. */
+  regenerationNotes?: string
+  /** Multi-scene chaining: the previous scene's last frame, used as THIS
+   *  scene's video conditioning image instead of the static product photo —
+   *  keeps a multi-scene ad visually continuous. Wins over creatorImageUrl/
+   *  productImageUrl for conditioning only; the Claude vision reference stays
+   *  pinned to the real product regardless. */
+  conditioningImageUrl?: string
 }
 
 export type GenerateResponse = {
@@ -288,12 +297,40 @@ export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioD
   return res.json()
 }
 
+/**
+ * Upload any data: URL clips to Supabase Storage first so /api/stitch only
+ * ever receives plain https:// URLs. Clips that already have a voiceover
+ * muxed in are large base64 data: URLs (often several MB each) — sending
+ * 2+ of those inline in one JSON POST body blows past Vercel's request size
+ * limit and fails before the function even runs, surfacing to the user as a
+ * bare "Failed to fetch" with no real error message. https:// URLs (silent
+ * DoP renders with no voiceover) pass through untouched — only a few bytes
+ * each in the JSON body either way.
+ */
+async function hostForStitch(urls: string[]): Promise<string[]> {
+  return Promise.all(urls.map(u => (u.startsWith('data:') ? uploadAsset(u) : u)))
+}
+
 /** Stitch 2–6 silent video URLs into one concatenated MP4. */
 export async function stitchVideos(videoUrls: string[]): Promise<{ videoDataUrl: string; bytes: number; clips: number }> {
+  const hosted = await hostForStitch(videoUrls)
   const res = await fetch('/api/stitch', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ videoUrls }),
+    body: JSON.stringify({ videoUrls: hosted }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** Extract a clip's last frame as an image — used to chain multi-scene
+ *  generation so scene N+1 visually continues from scene N instead of every
+ *  scene restarting from the same static product photo. */
+export async function extractLastFrame(videoUrl: string): Promise<{ imageDataUrl: string }> {
+  const res = await fetch('/api/stitch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'extractLastFrame', videoUrl }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -331,6 +368,26 @@ export async function generateModelSheet(input: ModelSheetInput): Promise<{ shee
   return res.json()
 }
 
+export type ProductSpec = {
+  dimensions: string
+  material: string
+  scaleComparison: string
+  notes: string
+}
+
+/** Claude-vision analysis of a product photo (dimensions, material, scale
+ *  comparison, notes) — text-only, no image generation. Feeds the client-
+ *  composed spec/turnaround sheet in ProductInput / SeedImageStudio. */
+export async function getProductSpec(input: { imageUrl?: string; imageBase64?: string; mimeType?: string; subjectHint?: string }): Promise<ProductSpec> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'spec', subjectType: 'product', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export type ImageGenInput = {
   /** 'generate' = from text only; 'edit' = transform the supplied reference image. */
   mode: 'generate' | 'edit'
@@ -353,6 +410,92 @@ export async function generateImage(input: ImageGenInput): Promise<{ imageDataUr
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// ── Soul (Higgsfield stylized image generation) ─────────────────────────────────
+// A library of preset visual styles, not identity training — see the note on
+// SoulImageArgs in api/_lib/higgsfield.ts.
+
+export type SoulStyle = { id: string; name: string; description: string | null; preview_url: string }
+
+/** Fetch the Soul preset style catalog for a picker UI. Higgsfield-only (no Gemini fallback). */
+export async function getSoulStyles(): Promise<SoulStyle[]> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'soul-styles' }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const { styles } = (await res.json()) as { styles: SoulStyle[] }
+  return styles
+}
+
+export type SoulImageInput = {
+  subjectType: 'product' | 'character'
+  /** Description of the image to generate. */
+  editPrompt: string
+  /** A style id from getSoulStyles(). */
+  styleId?: string
+  /** Optional reference image to condition the look on. */
+  imageUrl?: string
+  imageBase64?: string
+  mimeType?: string
+}
+
+/** Generate a stylized image via Higgsfield Soul. Higgsfield-only (no Gemini fallback). */
+export async function generateSoulImage(input: SoulImageInput): Promise<{ imageDataUrl: string; prompt: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'soul', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** The angle views a turnaround fills in, in priority order (most useful for
+ *  video generation first — the sides and back are what a single front photo
+ *  leaves the model to guess). */
+export const TURNAROUND_ANGLES = [
+  { key: 'left',  label: 'AI · LEFT',  phrase: 'photographed from its exact left side (90-degree profile view)' },
+  { key: 'right', label: 'AI · RIGHT', phrase: 'photographed from its exact right side (90-degree profile view)' },
+  { key: 'back',  label: 'AI · BACK',  phrase: 'photographed from directly behind (rear view)' },
+  { key: 'top',   label: 'AI · TOP',   phrase: 'photographed from directly above (top-down view)' },
+] as const
+
+/**
+ * Generate ONE AI-estimated angle of a product via Soul, conditioned on the
+ * real hero photo. These are the model's best guess of faces it can't see in
+ * the single source photo — useful to give the video model a sense of the
+ * product's 3D form, but approximate (a real uploaded angle is always better).
+ * Returns a hosted image URL.
+ */
+export async function generateProductAngle(
+  reference: { imageUrl?: string; imageBase64?: string; mimeType?: string },
+  anglePhrase: string,
+  productHint?: string,
+): Promise<{ imageDataUrl: string }> {
+  const subject = productHint ? `the ${productHint}` : 'the exact product in the reference image'
+  const editPrompt = `A clean studio product photograph of ${subject}, ${anglePhrase}. Keep the product's color, materials, proportions, and design IDENTICAL to the reference — same object, just rotated. Pure white seamless background, soft even studio lighting, single centered subject, no text, no people, no hands, photorealistic.`
+  const { imageDataUrl } = await generateSoulImage({ subjectType: 'product', editPrompt, ...reference })
+  return { imageDataUrl }
+}
+
+// ── Dashboard studio art (fresh Higgsfield imagery for the home cards) ──────────
+
+/** The curated dashboard art keys, in the order the seeder generates them. */
+export const DASHBOARD_ART_KEYS = ['cloneCreator', 'buildA', 'buildB', 'buildC', 'productHero'] as const
+export type DashboardArtKey = (typeof DASHBOARD_ART_KEYS)[number]
+
+/** Generate ONE dashboard card image via Higgsfield Soul. Returns a hosted URL. */
+export async function generateDashboardArt(artKey: DashboardArtKey): Promise<{ artKey: string; url: string }> {
+  const res = await fetch('/api/modelsheet', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'dashboard-art', artKey }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -585,6 +728,41 @@ export type StoryboardPlanInput = {
     ethnicity?: string
     description?: string
   }
+  /** Optional hook line — clip 1's dialogue opens with or echoes this verbatim. */
+  hookLine?: string
+  /** Free-text keywords/notes from the "Regenerate" panel — incorporated with
+   *  priority over the generic style brief. */
+  regenerationNotes?: string
+}
+
+export async function writeAdScript(input: {
+  productName?: string
+  description: string
+  style: string
+  niche?: string
+  goal?: string
+  tone?: string
+  creator?: { source: 'uploaded' | 'generated'; gender?: string; ageRange?: string; ethnicity?: string }
+}): Promise<{ script: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'write-script', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** "AI Magic" — expand a few rough keywords into a concrete regeneration
+ *  directive. Powers the enhance button next to any Regenerate keyword field. */
+export async function enhancePrompt(input: { text: string; productDescription?: string; style?: string }): Promise<{ enhanced: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'enhance-prompt', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
 }
 
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {

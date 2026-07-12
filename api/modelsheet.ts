@@ -2,7 +2,7 @@
  * POST /api/modelsheet
  * Body: { mode?, imageUrl? | imageBase64?, mimeType?, subjectType, subjectHint?, editPrompt? }
  *
- * One Gemini image endpoint ("nano-banana"), three modes — kept in a single
+ * One Gemini image endpoint ("nano-banana"), five modes — kept in a single
  * serverless function to stay under Vercel's 12-function Hobby limit:
  *
  *   mode 'sheet'    (default) — turn ONE reference photo into a 2x3 multi-angle
@@ -15,13 +15,154 @@
  *   mode 'generate'           — generate a fresh image from a text description
  *                               only (no reference). Requires editPrompt.
  *                               Returns { imageDataUrl, prompt }.
+ *   mode 'soul-styles'        — list Higgsfield Soul's preset style catalog.
+ *                               Requires Higgsfield credentials (no Gemini
+ *                               fallback — Soul is Higgsfield-only).
+ *                               Returns { styles: SoulStyle[] }.
+ *   mode 'soul'               — generate a stylized image via Higgsfield Soul
+ *                               (a style_id from 'soul-styles' + a prompt,
+ *                               optionally conditioned on a reference image).
+ *                               Requires Higgsfield credentials. Returns
+ *                               { imageDataUrl, prompt }.
  *
  * Powers the Creator and Product studios (seed-image generation/editing) and the
- * turnaround reference. Requires GEMINI_API_KEY. ANTHROPIC_API_KEY enhances the
- * sheet prompt but isn't required. Self-contained (no src/ imports).
+ * turnaround reference. Requires GEMINI_API_KEY (for sheet/edit/generate) or
+ * Higgsfield credentials. ANTHROPIC_API_KEY enhances the sheet prompt but isn't
+ * required. Self-contained (no src/ imports, except the Higgsfield client).
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@supabase/supabase-js'
+import {
+  pollJob, firstImageUrl, HiggsfieldError,
+  getSoulStyles, submitSoulImage, type SoulImageArgs,
+} from './_lib/higgsfield.js'
+
+// ── Higgsfield image path (rebuild Stage 3) ──────────────────────────────────
+// When Higgsfield credentials are present, image generation routes to Nano
+// Banana Pro; otherwise it falls back to the existing Gemini path so the branch
+// works either way until the Gemini cleanup stage. Higgsfield's `image` field
+// wants a URL/media id (not a data URL) and it returns a hosted URL, so this
+// path hosts data-URL references to Supabase first and downloads the result
+// back to a data URL to preserve the existing { imageDataUrl, sheetDataUrl }
+// contract the frontend already consumes.
+
+function higgsfieldEnabled(): boolean {
+  return !!((process.env.HIGGSFIELD_API_KEY && (process.env.HIGGSFIELD_SECRET || process.env.HIGGSFIELD_API_SECRET))
+    || (process.env.HIGGSFIELD_API_TOKEN || '').includes(':'))
+}
+
+/** Upload raw image bytes to the public product-images bucket, return public URL.
+ *  Returns null when Supabase Storage isn't configured (caller decides fallback). */
+async function uploadToBucket(buf: Buffer, mime: string, prefix: string): Promise<string | null> {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY
+  if (!supabaseUrl || !serviceKey) return null
+  const supabase = createClient(supabaseUrl, serviceKey)
+  const bucket = 'product-images'
+  await supabase.storage.createBucket(bucket, { public: true, fileSizeLimit: 20_971_520 }).catch(() => {})
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+  const path = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const { error } = await supabase.storage.from(bucket).upload(path, buf, { contentType: mime, upsert: true })
+  if (error) throw new Error(`Could not host image: ${error.message}`)
+  return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+}
+
+/** Host a base64/data-URL image on Supabase Storage and return its public URL —
+ *  Higgsfield references images by URL, not by inline data. An https URL passes
+ *  through untouched. */
+async function hostRefUrl(imageUrl?: string, imageBase64?: string, mimeType?: string): Promise<string | undefined> {
+  if (imageUrl && /^https?:\/\//i.test(imageUrl)) return imageUrl
+  const raw = imageBase64 || (imageUrl?.startsWith('data:') ? imageUrl : undefined)
+  if (!raw) return undefined
+  const b64 = raw.includes(',') ? raw.split(',')[1] : raw
+  const mime = mimeType || raw.match(/^data:(.*?);base64/)?.[1] || 'image/jpeg'
+  const url = await uploadToBucket(Buffer.from(b64, 'base64'), mime, 'hf-refs')
+  if (!url) throw new Error('Image hosting not configured (SUPABASE_SERVICE_KEY) — needed to send an uploaded image to Higgsfield.')
+  return url
+}
+
+/** Re-host a generated image (a hosted https URL) onto Supabase and return the
+ *  durable public URL. Returning a URL — not an inlined base64 data URL — keeps
+ *  the JSON response tiny: a 2k image as base64 would blow Vercel's 4.5 MB
+ *  response-body cap and crash the function (FUNCTION_INVOCATION_FAILED). Also
+ *  insulates callers from Higgsfield's 7-day URL TTL. Falls back to the source
+ *  URL if Supabase Storage isn't configured. */
+async function rehostToSupabase(sourceUrl: string): Promise<string> {
+  const resp = await fetch(sourceUrl)
+  if (!resp.ok) throw new Error(`Could not fetch generated image (${resp.status}).`)
+  const mime = resp.headers.get('content-type') || 'image/png'
+  const buf = Buffer.from(await resp.arrayBuffer())
+  const hosted = await uploadToBucket(buf, mime, 'hf-out').catch(() => null)
+  return hosted || sourceUrl
+}
+
+/** Map our aspect hint to Soul's supported width_and_height enum. */
+function soulSize(aspect?: string): SoulImageArgs['width_and_height'] {
+  if (aspect === '16:9') return '2048x1152'
+  if (aspect === '1:1') return '1536x1536'
+  return '1152x2048' // 9:16 default
+}
+
+/**
+ * Generate an image via Higgsfield Soul and return a hosted URL.
+ *
+ * IMPORTANT: this account's Higgsfield image model is Soul (verified), NOT
+ * `nano_banana_pro` (the previous slug here — it isn't on this account and its
+ * requests hung the function). Soul is a text-to-image generator; a reference
+ * image, when supplied, is passed as `image_reference` (style/subject
+ * conditioning). Soul is not a pixel-precise instruction editor, so pure edits
+ * like "remove the background exactly" are approximate on this path — those are
+ * best handled by the Gemini fallback when a GEMINI_API_KEY is present.
+ */
+async function generateImageHiggsfield(
+  prompt: string,
+  refUrl: string | undefined,
+  opts: { aspectRatio?: string; styleId?: string } = {},
+): Promise<string> {
+  const args: SoulImageArgs = { prompt, width_and_height: soulSize(opts.aspectRatio) }
+  if (opts.styleId) args.style_id = opts.styleId
+  if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
+  const jobSet = await submitSoulImage(args)
+  // Kept well under Vercel's 60s ceiling — the request also hosts the reference
+  // beforehand and re-hosts the result afterward.
+  const result = await pollJob(jobSet.id, { intervalMs: 3_000, timeoutMs: 35_000 })
+  if (result.status === 'nsfw') throw new Error('The image was flagged by content moderation. Try a different photo or prompt.')
+  if (result.status !== 'completed') throw new Error(result.error || `Image generation did not finish (status: ${result.status}).`)
+  const outUrl = firstImageUrl(result)
+  if (!outUrl) throw new Error('Higgsfield returned no image.')
+  return rehostToSupabase(outUrl)
+}
+
+// ── Dashboard studio art ──────────────────────────────────────────────────────
+// Curated prompt set for the home dashboard's cinematic cards. Each key maps to
+// a distinct mock UGC creator or product so no two cards feel cookie-cutter.
+// Generated on demand via Higgsfield Soul (mode 'dashboard-art', one key per
+// call to stay under the function time limit), rehosted to Supabase, and cached
+// client-side. Prompts are intentionally specific: real skin texture, warm
+// cinematic grade, single subject, vertical framing for the breakout/fan cards.
+const DASHBOARD_ART: Record<string, { prompt: string; kind: 'character' | 'product' }> = {
+  cloneCreator: {
+    kind: 'character',
+    prompt: 'Photoreal UGC selfie-style portrait of a confident woman in her late 20s holding a frosted glass skincare serum bottle up beside her face, looking straight into the phone camera mid-sentence, warm sunlit bathroom, soft window light, natural skin texture with visible pores, shallow depth of field, cinematic color grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildA: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of an energetic young man in a black tank top holding a matte black supplement pouch toward the camera in a bright modern kitchen, mid-gesture speaking, golden morning light, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildB: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of a stylish woman with curly hair in athletic wear holding a pastel protein shaker, laughing naturally at the phone camera, cozy living room with plants, warm afternoon light, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  buildC: {
+    kind: 'character',
+    prompt: 'Photoreal UGC portrait of a man in his 30s in a beige sweater holding an amber dropper bottle, relaxed on a linen couch by a sunlit window, golden hour, natural skin texture, shallow depth of field, cinematic grade, vertical 9:16, single subject, no text or watermark.',
+  },
+  productHero: {
+    kind: 'product',
+    prompt: 'Premium product hero shot of a frosted glass serum bottle with a bamboo cap, floating above a dark warm surface with a dynamic water splash crown around it, dramatic studio rim light, macro detail, luxury advertising photography, warm amber background, centered, no text or watermark.',
+  },
+}
 
 // Model candidates for native image output via generateContent, best-first.
 // gemini-2.0-flash-preview-image-generation (the previous default here) was a
@@ -75,6 +216,51 @@ async function resolveImage(imageUrl?: string, imageBase64?: string, mimeType?: 
     return { data, mime }
   }
   throw new Error('Provide an image URL or upload.')
+}
+
+export interface ProductSpec {
+  dimensions: string
+  material: string
+  scaleComparison: string
+  notes: string
+}
+
+/**
+ * Analyze a product photo with Claude vision and return structured notes a
+ * spec sheet can display: estimated real-world dimensions, material, a
+ * plain-language scale comparison ("about the size of a golf ball"), and any
+ * notable features (parts, textures, hardware). This is a TEXT-only Claude
+ * call — no image generation — so it can't silently fail the way an
+ * AI-regenerated multi-angle grid can (Soul isn't an instruction-following
+ * compositor and was producing unreliable/blank turnarounds). The turnaround
+ * sheet composes this analysis with the user's OWN real photos client-side.
+ */
+async function analyzeProductSpec(img: { data: string; mime: string }, subjectHint?: string): Promise<ProductSpec> {
+  const anthropic = new Anthropic()
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: img.mime as any, data: img.data } },
+        {
+          type: 'text',
+          text: `Look at this product photo${subjectHint ? ` (product: ${subjectHint})` : ''} and estimate its real-world scale for someone briefing an AI video generator. Respond with STRICT JSON only, no markdown:
+{"dimensions":"approx. WxHxD in inches/cm, your best estimate","material":"primary material(s) and finish","scaleComparison":"one plain-language comparison a viewer instantly understands, e.g. 'about the size of a golf ball' or 'roughly a deck of cards'","notes":"one sentence on parts that matter for video (e.g. a case that opens vs. the smaller item inside it, cap/lid, moving parts) — empty string if not applicable"}`,
+        },
+      ],
+    }],
+  })
+  const text = msg.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').trim()
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+  return {
+    dimensions: String(parsed.dimensions ?? 'Not estimated'),
+    material: String(parsed.material ?? 'Not estimated'),
+    scaleComparison: String(parsed.scaleComparison ?? ''),
+    notes: String(parsed.notes ?? ''),
+  }
 }
 
 async function describeSubject(img: { data: string; mime: string }, subjectType: string): Promise<string> {
@@ -178,16 +364,84 @@ function summarizeUpstreamError(detail: string): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    return res.status(503).json({ error: 'GEMINI_API_KEY is not set. Add it in Vercel → Settings → Environment Variables to enable image generation.' })
+  const useHiggsfield = higgsfieldEnabled()
+  const geminiKey = process.env.GEMINI_API_KEY
+  if (!useHiggsfield && !geminiKey) {
+    return res.status(503).json({ error: 'No image provider configured. Add HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET (or GEMINI_API_KEY) in Vercel → Environment Variables.' })
   }
 
-  const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt } =
+  const { mode = 'sheet', imageUrl, imageBase64, mimeType, subjectType = 'product', subjectHint, editPrompt, styleId } =
     (req.body ?? {}) as Record<string, string>
   const type = subjectType === 'character' ? 'character' : 'product'
 
+  // mode 'spec' — text-only Claude vision analysis (dimensions, material,
+  // scale comparison, notes) for the client-composed spec/turnaround sheet.
+  // No image generation, so it can't silently fail the way an AI-regenerated
+  // multi-angle grid did — see analyzeProductSpec() docblock.
+  if (mode === 'spec') {
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not set.' })
+    try {
+      const img = await resolveImage(imageUrl, imageBase64, mimeType)
+      const spec = await analyzeProductSpec(img, subjectHint)
+      return res.status(200).json(spec)
+    } catch (err) {
+      console.error('[/api/modelsheet spec]', err)
+      return res.status(502).json({ error: err instanceof Error ? err.message : 'Spec analysis failed.' })
+    }
+  }
+
+  // Turnarounds/products read best square; character stills default to vertical.
+  const aspect = mode === 'sheet' ? '1:1' : type === 'character' ? '9:16' : '1:1'
+
+  // Provider selection for image work (generate/edit/sheet): PREFER GEMINI
+  // NANO-BANANA when a Gemini key is present. Nano-banana is a true
+  // instruction-following image EDITOR — it does faithful background removal,
+  // exact edits, and multi-angle work that keep the real product pixel-intact.
+  // Higgsfield Soul is only a fallback (no Gemini key): Soul is a stylized
+  // GENERATOR, not an editor, so it re-imagines the product rather than
+  // editing it — approximate at best for these tasks. This ordering was
+  // reversed deliberately: the Cloud API has no faithful image editor, so
+  // Soul-primary made every edit feature drift.
+  const useHFForImages = useHiggsfield && !geminiKey
+
   try {
+    // ── soul-styles: list the preset style catalog (Higgsfield-only) ─────────
+    if (mode === 'soul-styles') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Soul styles require Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      const styles = await getSoulStyles()
+      return res.status(200).json({ styles })
+    }
+
+    // ── soul: generate a stylized image via Higgsfield Soul (Higgsfield-only) ─
+    if (mode === 'soul') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Soul generation requires Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      if (!editPrompt?.trim()) return res.status(400).json({ error: 'Describe the image you want to generate.' })
+      const args: SoulImageArgs = { prompt: editPrompt.trim(), width_and_height: type === 'character' ? '1152x2048' : '1536x1536' }
+      if (styleId) args.style_id = styleId
+      const refUrl = await hostRefUrl(imageUrl, imageBase64, mimeType).catch(() => undefined)
+      if (refUrl) args.image_reference = { type: 'image_url', image_url: refUrl }
+      const jobSet = await submitSoulImage(args)
+      const result = await pollJob(jobSet.id, { intervalMs: 3_000, timeoutMs: 35_000 })
+      if (result.status === 'nsfw') return res.status(502).json({ error: 'The image was flagged by content moderation. Try a different photo or prompt.' })
+      if (result.status !== 'completed') return res.status(502).json({ error: result.error || `Image generation did not finish (status: ${result.status}).` })
+      const outUrl = firstImageUrl(result)
+      if (!outUrl) return res.status(502).json({ error: 'Higgsfield returned no image.' })
+      const imageDataUrl = await rehostToSupabase(outUrl)
+      return res.status(200).json({ imageDataUrl, prompt: args.prompt })
+    }
+
+    // ── dashboard-art: generate ONE curated dashboard card image (HF Soul) ────
+    // One key per call keeps each Soul job well under the function time limit;
+    // the client loops the keys and caches the returned URLs.
+    if (mode === 'dashboard-art') {
+      if (!useHiggsfield) return res.status(503).json({ error: 'Studio art generation requires Higgsfield credentials (HIGGSFIELD_API_KEY + HIGGSFIELD_SECRET).' })
+      const artKey = (req.body as Record<string, string>)?.artKey
+      const spec = artKey ? DASHBOARD_ART[artKey] : undefined
+      if (!spec) return res.status(400).json({ error: `Unknown artKey. Expected one of: ${Object.keys(DASHBOARD_ART).join(', ')}.` })
+      const url = await generateImageHiggsfield(spec.prompt, undefined, { aspectRatio: spec.kind === 'character' ? '9:16' : '1:1' })
+      return res.status(200).json({ artKey, url })
+    }
+
     // ── generate: text-only, no reference image ──────────────────────────────
     if (mode === 'generate') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Describe the image you want to generate.' })
@@ -195,30 +449,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? 'Photorealistic portrait of a person for a UGC ad, natural skin texture with visible pores (never plastic or airbrushed), authentic lighting, vertical 9:16 framing, single subject, no text or watermark.'
         : 'Photorealistic product photo for an ad, clean composition, accurate materials and color, soft studio lighting, sharp focus, no text or watermark.'
       const prompt = `${editPrompt.trim()}. ${guidance}`
-      const imageDataUrl = await generateImage(apiKey, prompt, undefined, 0.7)
+      const imageDataUrl = useHFForImages
+        ? await generateImageHiggsfield(prompt, undefined, { aspectRatio: aspect })
+        : await generateImage(geminiKey!, prompt, undefined, 0.7)
       return res.status(200).json({ imageDataUrl, prompt })
     }
-
-    // ── edit / sheet: both need a reference image ────────────────────────────
-    const img = await resolveImage(imageUrl, imageBase64, mimeType)
 
     if (mode === 'edit') {
       if (!editPrompt?.trim()) return res.status(400).json({ error: 'Pick or write an edit instruction.' })
       const prompt = buildIdentityLockedEditPrompt(type, editPrompt)
-      const imageDataUrl = await generateImage(apiKey, prompt, img, 0.5)
+      const imageDataUrl = useHFForImages
+        ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
+        : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.5)
       return res.status(200).json({ imageDataUrl, prompt })
     }
 
     // mode 'sheet' (default) — turnaround model sheet.
-    const subject = (subjectHint?.trim()) || (await describeSubject(img, type)) ||
-      (type === 'character' ? 'the person shown in the reference image' : 'the product shown in the reference image')
+    let subject = subjectHint?.trim() || ''
+    if (!subject && !useHFForImages) {
+      // Gemini path already has the reference in base64 for the vision describe.
+      subject = (await describeSubject(await resolveImage(imageUrl, imageBase64, mimeType), type))
+    }
+    subject = subject || (type === 'character' ? 'the person shown in the reference image' : 'the product shown in the reference image')
     const prompt = buildPrompt(type, subject)
-    const imageDataUrl = await generateImage(apiKey, prompt, img, 0.4)
+    const imageDataUrl = useHFForImages
+      ? await generateImageHiggsfield(prompt, await hostRefUrl(imageUrl, imageBase64, mimeType), { aspectRatio: aspect })
+      : await generateImage(geminiKey!, prompt, await resolveImage(imageUrl, imageBase64, mimeType), 0.4)
     // Keep sheetDataUrl for backward compatibility; imageDataUrl is the new name.
     return res.status(200).json({ sheetDataUrl: imageDataUrl, imageDataUrl, subject, prompt })
   } catch (err) {
     console.error('[/api/modelsheet]', err)
-    const message = err instanceof Error ? err.message : 'Image generation failed.'
+    const message = err instanceof HiggsfieldError || err instanceof Error ? err.message : 'Image generation failed.'
     return res.status(502).json({ error: message })
   }
 }

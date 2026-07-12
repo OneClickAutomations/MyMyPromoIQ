@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import BrandVoiceSetup, { loadBrandProfile } from '../components/BrandVoiceSetup'
 import { adForge } from '../copy'
@@ -164,11 +164,11 @@ export default function AdForge() {
             </div>
             <div>
               <p className="font-semibold text-gold mb-1">Build From Scratch</p>
-              <p className="text-ink-faint leading-relaxed text-xs">Best when you want full control. 12 guided steps — how many videos, style, product, creator, brand, scenes, and voiceover — upload your image and Veo 3 animates it.</p>
+              <p className="text-ink-faint leading-relaxed text-xs">Best when you want full control. 12 guided steps — how many videos, style, product, creator, brand, scenes, and voiceover — upload your image and our engine animates it.</p>
             </div>
             <div>
               <p className="font-semibold text-ink-muted mb-1">Quick Generate</p>
-              <p className="text-ink-faint leading-relaxed text-xs">Best for fast iteration. Five fields, one click — upload a product photo and Veo 3 renders image-to-video in minutes.</p>
+              <p className="text-ink-faint leading-relaxed text-xs">Best for fast iteration. Five fields, one click — upload a product photo and our engine renders image-to-video in minutes.</p>
             </div>
           </div>
         </div>

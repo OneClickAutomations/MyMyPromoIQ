@@ -9,7 +9,7 @@
  * change is needed.
  */
 import { useEffect, useState } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUser } from '../hooks/useAuth'
 import { motion } from 'framer-motion'
 import { Check, RefreshCw, X, Star } from './icons'
 import { getBrand, saveBrand } from '../lib/api'
