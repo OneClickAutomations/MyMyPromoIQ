@@ -37,9 +37,12 @@ export function buildNanaBananaPrompt(
   const lighting = resolveLighting(brief.lighting)
   const beat = opts.beat
 
-  const openingAction = beat
-    ? fillSlots(beat.visualInstruction, productShort, identity, scene)
-    : `${identity} holds ${productShort} at ${scene}`
+  // A per-clip action override wins (the start frame should match where THIS
+  // clip's motion begins); otherwise use the beat's opening instruction.
+  const openingAction = clip.action?.trim()
+    || (beat
+      ? fillSlots(beat.visualInstruction, productShort, identity, scene)
+      : `${identity} holds ${productShort} at ${scene}`)
 
   // Point-of-view formats have no visible creator — the frame is the viewer's
   // own hands, so we don't describe a face.
