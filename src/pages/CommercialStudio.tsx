@@ -41,6 +41,7 @@ import {
   generateVoiceover,
   muxVideoAudio,
   stitchVideos,
+  extractLastFrame,
   planStoryboard,
   type StatusResponse,
   type StoredCreator,
@@ -283,7 +284,14 @@ export default function CommercialStudio() {
   const [wizardPlanError, setWizardPlanError] = useState('')
   const [wizardClipCountBusy, setWizardClipCountBusy] = useState(false)
   const [wizardRegenOrder, setWizardRegenOrder] = useState<number | null>(null)
-  const wizardQueue = useGenerationQueue(2, 1)
+  // Concurrency 1 = clips render sequentially, in order — required for
+  // last-frame chaining (each clip conditions on the previous clip's final
+  // frame so the stitched ad reads as one continuous take, not the same
+  // opening shot repeating on every cut).
+  const wizardQueue = useGenerationQueue(1, 1)
+  // The previous clip's extracted last frame, threaded into the next clip's
+  // video conditioning. Reset at the start of every full run.
+  const wizardChainRef = useRef<string | undefined>(undefined)
   const [wizardAssembling, setWizardAssembling] = useState(false)
   const [wizardAssembledUrl, setWizardAssembledUrl] = useState<string | null>(null)
   const [wizardAssemblyError, setWizardAssemblyError] = useState('')
@@ -725,6 +733,11 @@ export default function CommercialStudio() {
       // take instead of each re-opening on the product still.
       sceneIndex: clip.order,
       sceneCount: wizardPlan?.clips.length,
+      // Last-frame chaining: clips 2..N condition on the PREVIOUS clip's final
+      // frame (set below after each render) instead of the static product
+      // photo, so the stitched ad reads as one continuous take. Clip 1 has no
+      // chain (undefined) and uses its Nano Banana start frame / references.
+      conditioningImageUrl: wizardChainRef.current,
     })
     const final: StatusResponse = await pollUntilDone(requestId, () => {}, {
       intervalMs: 5_000,
@@ -732,6 +745,20 @@ export default function CommercialStudio() {
     })
     if (final.status !== 'completed' || !final.videoUrl) {
       throw new Error(final.raw === 'timeout' ? 'Render timed out — try again.' : 'Render failed.')
+    }
+
+    // Chain the NEXT clip off this clip's last frame. Extract from the raw Veo
+    // output (before voiceover/mux). A failed extraction just means the next
+    // clip falls back to its start frame — never fails the ad over continuity.
+    // Skipped on the final clip. Because the queue runs sequentially
+    // (concurrency 1), this ref is always set before the next clip reads it.
+    if (typeof wizardPlan?.clips.length === 'number' && clip.order < wizardPlan.clips.length) {
+      try {
+        const { imageDataUrl } = await extractLastFrame(final.videoUrl)
+        wizardChainRef.current = imageDataUrl
+      } catch {
+        wizardChainRef.current = undefined
+      }
     }
 
     if (!brief.voice.voiceId || !clip.dialogue.trim()) return final.videoUrl
@@ -749,6 +776,9 @@ export default function CommercialStudio() {
     setWizardAssembledUrl(null)
     setWizardAssemblyError('')
     wizardAutoAssembledRef.current = false
+    // Fresh chain — clip 1 starts from its own start frame, not a stale frame
+    // left over from a previous run.
+    wizardChainRef.current = undefined
     setWizardPhase('rendering')
     void wizardQueue.run(clips, wizardGenerateOne)
   }
@@ -1367,7 +1397,7 @@ export default function CommercialStudio() {
           title="Storyboard"
           desc={
             wizardPhase === 'plan' ? 'Review, edit, or regenerate any clip — then generate the whole ad at once.'
-            : wizardPhase === 'rendering' ? 'The queue renders every clip in parallel and presents them together.'
+            : wizardPhase === 'rendering' ? 'Clips render in order, each continuing from the last one’s final frame, then stitch into one seamless ad.'
             : 'Every clip up front — editable, regeneratable — before a single render starts.'
           }
           onBack={wizardPhase === 'idle' || wizardPhase === 'planning' ? goBack : undefined}
@@ -1414,7 +1444,7 @@ export default function CommercialStudio() {
         {wizardPhase === 'rendering' && (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-ink-muted">The queue keeps clips rendering and fires the next automatically.</p>
+              <p className="text-sm text-ink-muted">Each clip continues from the previous one’s final frame, then fires the next automatically.</p>
               <button onClick={() => { wizardQueue.cancel(); setWizardPhase('plan') }} className="btn-ghost gap-1.5 px-3.5 py-2 text-sm">
                 <X className="h-4 w-4" /> Back to storyboard
               </button>

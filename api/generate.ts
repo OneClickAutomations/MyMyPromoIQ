@@ -597,21 +597,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(422).json({ error: 'The generated prompt failed validation.', validation: check })
       }
 
-      // Gather reference photos for the start frame (creator first for identity,
-      // then product). Failures are non-fatal — Nano Banana composes text-only.
-      const refUrls = [creatorReferenceImageUrl || creatorImageUrl, productReferenceImageUrl || productImageUrl]
-        .filter((u): u is string => !!u)
-      const refs: Array<{ data: string; mime: string }> = []
-      for (const u of refUrls) {
-        const img = await fetchImageAsBase64(u).catch(() => undefined)
-        if (img) refs.push(img)
-      }
-
-      // Render the start frame, then hand it to Veo. If the frame can't be made
-      // (no image model / blocked), fall back to a raw reference photo so the
-      // clip still generates rather than hard-failing.
+      // Last-frame chaining wins: when the caller supplies the previous clip's
+      // final frame (conditioningImageUrl), THAT is the start of this clip — a
+      // fresh Nano Banana frame would break the continuity, so skip generating
+      // one entirely (also saves a Gemini image call per chained clip).
       let startFrame: string | null = null
-      if (nanaBananaPrompt && typeof nanaBananaPrompt === 'string') {
+      if (!conditioningImageUrl && nanaBananaPrompt && typeof nanaBananaPrompt === 'string') {
+        // Gather reference photos for the start frame (creator first for
+        // identity, then product). Failures are non-fatal — Nano Banana
+        // composes text-only.
+        const refUrls = [creatorReferenceImageUrl || creatorImageUrl, productReferenceImageUrl || productImageUrl]
+          .filter((u): u is string => !!u)
+        const refs: Array<{ data: string; mime: string }> = []
+        for (const u of refUrls) {
+          const img = await fetchImageAsBase64(u).catch(() => undefined)
+          if (img) refs.push(img)
+        }
         startFrame = await generateStartFrame(apiKey, nanaBananaPrompt, refs)
       }
       const conditioning = conditioningImageUrl || startFrame || creatorImageUrl || productImageUrl
