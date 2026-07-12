@@ -817,6 +817,27 @@ export async function enhancePrompt(input: { text: string; productDescription?: 
   return res.json()
 }
 
+/** "Creative Direction" — the AI-authored alternative to "Write It Myself" on
+ *  the type-specific wizard questions step. Claude reasons about the product,
+ *  its description, the chosen creator/character type, and UGC copywriting
+ *  craft to invent a complete, on-brand answer to every question for the given
+ *  ad type — hook, tone, proof, CTA — grounded in the real product. Returns
+ *  answers keyed by the question's label, same shape as manual answers. */
+export async function autoAnswerWizard(input: {
+  adType: string
+  productName?: string
+  description: string
+  creator?: { source: 'uploaded' | 'generated'; gender?: string; ageRange?: string; ethnicity?: string }
+}): Promise<{ answers: Record<string, string> }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'auto-answer-wizard', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {
   const res = await fetch('/api/director', {
     method: 'POST',
