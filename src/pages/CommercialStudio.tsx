@@ -67,6 +67,8 @@ import { buildClipPromptPackage, resolveAdType, type AdTypeId } from '../lib/stu
 import PromptPreview from '../components/studio/PromptPreview'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
+import DurationSlider from '../components/ui/DurationSlider'
+import { estimateClipCount, MAX_CLIP_SECONDS } from '../lib/studio/storyboard'
 
 /** Nearest legacy preset per engine ad type — seeds camera/lighting defaults. */
 const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
@@ -88,7 +90,7 @@ const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
 
 const STEPS = [
   { num: 1,  key: 'style',       label: 'Ad Type',      required: true,  icon: Wand },
-  { num: 2,  key: 'count',       label: 'How Many',     required: true,  icon: Layers },
+  { num: 2,  key: 'count',       label: 'Length',       required: true,  icon: Layers },
   { num: 3,  key: 'product',     label: 'Assets',        required: true,  icon: Upload },
   { num: 4,  key: 'creator',     label: 'Creator',      required: false, icon: Users },
   { num: 5,  key: 'scene',       label: 'Scene',        required: false, icon: Camera },
@@ -847,28 +849,20 @@ export default function CommercialStudio() {
   // Step 1: How many videos? — asked before style or assets, so the rest of
   // the wizard (and the final render) already knows the scope of the job.
   function renderCount() {
-    const OPTIONS = [1, 2, 3, 4, 5, 6]
     return (
       <div className="space-y-6">
-        <StepHeader title="How many videos do you want to make?" desc="One video, or build a full commercial from several beats — Hook, Problem, Solution, Social Proof, CTA, Outro." onBack={goBack} />
+        <StepHeader title="How long should your ad be?" desc="Pick a length — we build it from clips of up to 8s each. A single 8s clip is one generation; longer ads stitch several together." onBack={goBack} />
 
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-          {OPTIONS.map(n => (
-            <button key={n} type="button" onClick={() => setDesiredVideoCount(n)}
-              className={`rounded-2xl border p-4 text-center transition-all ${
-                desiredVideoCount === n ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
-              }`}>
-              <p className="text-2xl font-black text-ink">{n}</p>
-              <p className="mt-1 text-[11px] text-ink-muted">{n === 1 ? 'video' : 'videos'}</p>
-            </button>
-          ))}
-        </div>
+        <DurationSlider
+          value={desiredVideoCount * MAX_CLIP_SECONDS}
+          onChange={(sec) => setDesiredVideoCount(estimateClipCount(sec))}
+        />
 
         <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-4">
           <p className="text-sm text-ink-muted">
             {desiredVideoCount === 1
-              ? 'A single video in your chosen style — fastest path.'
-              : `A full commercial built from ${desiredVideoCount} scenes: ${SCENE_LABELS.slice(0, desiredVideoCount).join(' → ')}.`}
+              ? 'A single ~8s video in your chosen style — the fastest path, no stitching.'
+              : `A full commercial built from ${desiredVideoCount} beats: ${SCENE_LABELS.slice(0, desiredVideoCount).join(' → ')}.`}
           </p>
         </div>
 

@@ -90,7 +90,9 @@ export default function ReviewAndAdjust() {
   // Video length — replaces the old "how many videos" mental model. The
   // storyboard planner (server-side) translates seconds into however many
   // clips of whatever per-clip length the video model supports.
-  const [durationSeconds, setDurationSeconds] = useState(30)
+  // Default to one 8s clip — the honest "quick" default (a single generation,
+  // no stitching). Users drag right to add whole clips.
+  const [durationSeconds, setDurationSeconds] = useState(8)
 
   // Voiceover (ElevenLabs) — loaded lazily, empty selection = silent/native audio.
   const [voices, setVoices] = useState<ElevenVoice[]>([])
@@ -127,7 +129,7 @@ export default function ReviewAndAdjust() {
   // Updated once the storyboard plan resolves — drives the overlay's per-step
   // time estimate so the ring's pace roughly matches however many scenes
   // this particular ad actually needs.
-  const [planClipCount, setPlanClipCount] = useState(() => estimateClipCount(30))
+  const [planClipCount, setPlanClipCount] = useState(() => estimateClipCount(8))
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [directorPrompt, setDirectorPrompt] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -291,6 +293,9 @@ export default function ReviewAndAdjust() {
         productName: productName.trim() || effectiveDescription.slice(0, 60),
         description: effectiveDescription,
         style,
+        // Pass the exact clip count the slider shows so the server plan matches
+        // the UI (a single 8s clip stays a single clip, not silently 2).
+        clipCount: estimateClipCount(durationSeconds),
         referenceDurationSeconds: durationSeconds,
         creator: creatorArg,
         hookLine: script.trim() || undefined,
