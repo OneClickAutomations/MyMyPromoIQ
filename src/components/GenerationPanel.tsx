@@ -57,9 +57,12 @@ function Tile({ tile, index, onRetry, onRemix, onDownload }: {
           {tile.retryCount > 0 && <p className="relative text-[9px] text-amber-300">retry {tile.retryCount}</p>}
         </div>
       ) : tile.status === 'failed' ? (
-        <div className="flex h-full flex-col items-center justify-center gap-2 p-2 text-center">
+        <div className="flex h-full flex-col items-center justify-center gap-1.5 p-2 text-center">
           <p className="text-[10px] font-bold uppercase tracking-widest text-rose-300">{tile.beat}</p>
           <p className="text-[10px] text-ink-faint">Couldn’t render</p>
+          {tile.error && (
+            <p className="max-h-16 overflow-auto px-1 text-[9px] leading-tight text-rose-300/80" title={tile.error}>{tile.error}</p>
+          )}
           <button onClick={onRetry} className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-[11px] font-bold text-rose-300 ring-1 ring-rose-400/30 hover:bg-rose-500/25">Retry</button>
         </div>
       ) : (
