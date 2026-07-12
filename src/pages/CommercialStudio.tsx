@@ -87,8 +87,8 @@ const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 const STEPS = [
-  { num: 1,  key: 'count',       label: 'How Many',     required: true,  icon: Layers },
-  { num: 2,  key: 'style',       label: 'Style',        required: true,  icon: Wand },
+  { num: 1,  key: 'style',       label: 'Ad Type',      required: true,  icon: Wand },
+  { num: 2,  key: 'count',       label: 'How Many',     required: true,  icon: Layers },
   { num: 3,  key: 'product',     label: 'Assets',        required: true,  icon: Upload },
   { num: 4,  key: 'creator',     label: 'Creator',      required: false, icon: Users },
   { num: 5,  key: 'scene',       label: 'Scene',        required: false, icon: Camera },
@@ -850,7 +850,7 @@ export default function CommercialStudio() {
     const OPTIONS = [1, 2, 3, 4, 5, 6]
     return (
       <div className="space-y-6">
-        <StepHeader title="How many videos do you want to make?" desc="One video, or build a full commercial from several beats — Hook, Problem, Solution, Social Proof, CTA, Outro." />
+        <StepHeader title="How many videos do you want to make?" desc="One video, or build a full commercial from several beats — Hook, Problem, Solution, Social Proof, CTA, Outro." onBack={goBack} />
 
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
           {OPTIONS.map(n => (
@@ -873,7 +873,7 @@ export default function CommercialStudio() {
         </div>
 
         <button onClick={goForward} className="btn-fire w-full">
-          Next — Style <ArrowRight className="h-4 w-4" />
+          Next — Assets <ArrowRight className="h-4 w-4" />
         </button>
       </div>
     )
@@ -1054,7 +1054,7 @@ export default function CommercialStudio() {
   function renderStyle() {
     return (
       <div className="space-y-6">
-        <StepHeader title="What kind of ad are you making?" desc="Pick a format — it shapes the beats, camera, and the exact prompts we generate." onBack={goBack} />
+        <StepHeader title="What kind of ad are you making?" desc="Pick a format — it shapes the beats, camera, and the exact prompts we generate." />
 
         <AdTypeSelector
           selected={resolveAdType(brief.style.commercialStyle)}
@@ -1072,7 +1072,7 @@ export default function CommercialStudio() {
         />
 
         <button onClick={goForward} disabled={!brief.style.commercialStyle} className="btn-fire w-full disabled:opacity-50">
-          Next — Assets <ArrowRight className="h-4 w-4" />
+          Next — How Many <ArrowRight className="h-4 w-4" />
         </button>
       </div>
     )
@@ -1479,8 +1479,8 @@ export default function CommercialStudio() {
 
   function renderStep() {
     switch (stepNum) {
-      case 1:  return renderCount()
-      case 2:  return renderStyle()
+      case 1:  return renderStyle()
+      case 2:  return renderCount()
       case 3:  return renderProduct()
       case 4:  return renderCreator()
       case 5:  return renderScene()
