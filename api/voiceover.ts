@@ -68,26 +68,52 @@ async function synthesize(req: VercelRequest, res: VercelResponse, apiKey: strin
     speed = 1,
   } = (req.body ?? {}) as Record<string, any>
 
+  // When the caller wants captions synced to this voice, use the with-timestamps
+  // endpoint — it returns per-character alignment we group into word cues for
+  // pixel-accurate caption sync (impossible to get from Veo's native audio).
+  const withTimestamps = !!(req.body as Record<string, any>)?.withTimestamps
+
   if (!text?.trim()) return res.status(400).json({ error: 'Script text is required for the voiceover.' })
   if (!voiceId) return res.status(400).json({ error: 'Pick a voice first.' })
   if (text.length > MAX_CHARS) {
     return res.status(400).json({ error: `Script is too long (${text.length} chars). Keep it under ${MAX_CHARS}.` })
   }
 
+  const voiceSettings = {
+    stability: Number(stability),
+    similarity_boost: Number(similarityBoost),
+    style: Number(style),
+    use_speaker_boost: true,
+    speed: Number(speed),
+  }
+
+  if (withTimestamps) {
+    const resp = await fetch(`${EL_BASE}/text-to-speech/${voiceId}/with-timestamps`, {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ text: text.trim(), model_id: modelId, voice_settings: voiceSettings }),
+    })
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '')
+      return res.status(502).json({ error: `ElevenLabs TTS (timestamps) failed (${resp.status}): ${detail.slice(0, 200)}` })
+    }
+    // { audio_base64, alignment: { characters, character_start_times_seconds, character_end_times_seconds } }
+    const data = (await resp.json()) as any
+    const a = data.alignment ?? data.normalized_alignment ?? {}
+    return res.status(200).json({
+      audioDataUrl: `data:audio/mpeg;base64,${data.audio_base64}`,
+      alignment: {
+        characters: a.characters ?? [],
+        startTimes: a.character_start_times_seconds ?? [],
+        endTimes: a.character_end_times_seconds ?? [],
+      },
+    })
+  }
+
   const resp = await fetch(`${EL_BASE}/text-to-speech/${voiceId}`, {
     method: 'POST',
     headers: { 'xi-api-key': apiKey, 'content-type': 'application/json', accept: 'audio/mpeg' },
-    body: JSON.stringify({
-      text: text.trim(),
-      model_id: modelId,
-      voice_settings: {
-        stability: Number(stability),
-        similarity_boost: Number(similarityBoost),
-        style: Number(style),
-        use_speaker_boost: true,
-        speed: Number(speed),
-      },
-    }),
+    body: JSON.stringify({ text: text.trim(), model_id: modelId, voice_settings: voiceSettings }),
   })
 
   if (!resp.ok) {

@@ -117,6 +117,11 @@ export interface CreativeBrief {
   /** Output aspect ratio (9:16, 16:9, 4:5). Chosen up front; threaded to Veo. */
   aspectRatio?: string
 
+  /** Caption style burned into the video ('none' | 'clean' | 'highlight' |
+   *  'karaoke'). Rendered from the known script so spelling is always correct;
+   *  synced precisely for ElevenLabs voices, estimated for Veo/uploaded audio. */
+  captionStyle?: string
+
   voice: {
     mode: 'ai_generated' | 'cloned' | 'uploaded'
     gender?: string

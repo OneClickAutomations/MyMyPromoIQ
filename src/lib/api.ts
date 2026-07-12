@@ -312,6 +312,37 @@ export async function generateVoiceover(input: VoiceoverInput): Promise<{ audioD
   return res.json()
 }
 
+/** ElevenLabs voiceover WITH per-character timing — used to sync captions
+ *  precisely to the spoken audio. */
+export async function generateVoiceoverTimed(
+  input: VoiceoverInput,
+): Promise<{ audioDataUrl: string; alignment: { characters: string[]; startTimes: number[]; endTimes: number[] } }> {
+  const res = await fetch('/api/voiceover', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...input, withTimestamps: true }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** Burn captions onto one clip via ffmpeg (server-side). Returns the captioned
+ *  video, or the original on failure — captions never sink a render. */
+export async function burnCaptionsOnClip(input: {
+  videoUrl: string
+  cues: import('../../api/_lib/captions.js').CaptionCue[]
+  style: import('../../api/_lib/captions.js').CaptionStyleId
+  aspectRatio: string
+}): Promise<{ videoDataUrl: string; captionError?: string }> {
+  const res = await fetch('/api/stitch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'captions', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 /**
  * Upload any data: URL clips to Supabase Storage first so /api/stitch only
  * ever receives plain https:// URLs. Clips that already have a voiceover

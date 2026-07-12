@@ -16,10 +16,56 @@ import { randomUUID } from 'node:crypto'
 // CJS default export types as a module namespace under Node16 resolution; at
 // runtime it's the ffmpeg binary path string (or null), so narrow it here.
 import ffmpegStatic from 'ffmpeg-static'
+import { burnCaptions, cleanupDir } from './_lib/captionsBurn.js'
+import type { CaptionCue, CaptionStyleId } from './_lib/captions.js'
 const ffmpegPath = ffmpegStatic as unknown as string | null
 
 const MAX_CLIPS = 6
 const MAX_VIDEO_BYTES = 80 * 1024 * 1024
+
+const AR_SIZE: Record<string, { width: number; height: number }> = {
+  '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+}
+
+/** Burn captions onto ONE clip and return a data URL. Downloads the source
+ *  (https or data:), runs the ASS burn, re-encodes to base64. Failures return
+ *  the original video untouched — captions never sink a render. */
+async function burnCaptionsForOne(
+  videoUrl: string,
+  cues: CaptionCue[],
+  style: CaptionStyleId,
+  aspectRatio: string,
+  res: VercelResponse,
+) {
+  if (!ffmpegPath) return res.status(503).json({ error: 'ffmpeg binary unavailable.' })
+  const id = randomUUID()
+  const inPath = join(tmpdir(), `${id}-cap-in.mp4`)
+  try {
+    let vbuf: Buffer
+    if (/^data:/i.test(videoUrl)) {
+      const b64 = videoUrl.includes(',') ? videoUrl.split(',')[1] : ''
+      vbuf = Buffer.from(b64, 'base64')
+    } else {
+      const r = await fetch(videoUrl)
+      if (!r.ok) throw new Error(`Could not fetch the clip (${r.status}).`)
+      vbuf = Buffer.from(await r.arrayBuffer())
+    }
+    await writeFile(inPath, vbuf)
+    const size = AR_SIZE[aspectRatio] ?? AR_SIZE['9:16']
+    const outPath = await burnCaptions(ffmpegPath, inPath, cues, style, size)
+    const out = await readFile(outPath)
+    await Promise.all([unlink(inPath).catch(() => {}), outPath !== inPath ? cleanupDir(join(outPath, '..')) : Promise.resolve()])
+    return res.status(200).json({ videoDataUrl: `data:video/mp4;base64,${out.toString('base64')}`, bytes: out.length })
+  } catch (err) {
+    await unlink(inPath).catch(() => {})
+    console.error('[/api/stitch captions]', err)
+    // Non-fatal: hand back the original so the caller keeps the un-captioned clip.
+    return res.status(200).json({ videoDataUrl: videoUrl, captionError: err instanceof Error ? err.message : 'caption burn failed' })
+  }
+}
 
 function run(bin: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -80,6 +126,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (body.action === 'extractLastFrame') {
     if (typeof body.videoUrl !== 'string') return res.status(400).json({ error: 'videoUrl is required.' })
     return extractLastFrame(body.videoUrl, res)
+  }
+  if (body.action === 'captions') {
+    if (typeof body.videoUrl !== 'string') return res.status(400).json({ error: 'videoUrl is required.' })
+    const cues = Array.isArray(body.cues) ? (body.cues as CaptionCue[]) : []
+    const style = (body.style as CaptionStyleId) || 'clean'
+    return burnCaptionsForOne(body.videoUrl, cues, style, String(body.aspectRatio || '9:16'), res)
   }
 
   const { videoUrls } = (req.body ?? {}) as { videoUrls?: unknown }

@@ -436,7 +436,6 @@ export default function ProductInput({ value, onChange, className = '' }: {
               isDragOver ? 'border-fire-start/60 bg-fire-start/[0.05]' : 'border-white/12 hover:border-white/25'
             }`}
           >
-            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => onFiles(e.target.files)} />
             <Upload className="h-7 w-7 text-ink-faint" />
             <p className="mt-2.5 text-sm font-semibold text-ink">Drag images here or click to browse</p>
             <p className="mt-1 text-xs text-ink-faint">JPG, PNG, or WebP · up to 20 MB each</p>
@@ -465,6 +464,20 @@ export default function ProductInput({ value, onChange, className = '' }: {
           </div>
         )}
       </div>
+
+      {/* Always-mounted file input so the "+ add angle" button works in ANY
+          method (previously it lived inside the upload tab only, so + did
+          nothing after a URL/camera capture). Resetting value on click lets the
+          user re-pick the same file. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onClick={e => { (e.target as HTMLInputElement).value = '' }}
+        onChange={e => onFiles(e.target.files)}
+      />
 
       {error && <p className="mt-3 text-xs text-amber-300">{error}</p>}
 
