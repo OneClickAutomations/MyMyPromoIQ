@@ -472,15 +472,16 @@ async function submitVeoJob(
   if (imagePayload) instance.image = imagePayload
 
   // Body shape per the google-genai SDK: instances[] + parameters.
-  // IMPORTANT: for image-to-video Veo derives the aspect ratio from the
-  // conditioning image; passing an EXPLICIT aspectRatio that conflicts with the
-  // image returns a 400 (the "Retry" failure when a non-9:16 ratio was picked).
-  // So only send aspectRatio for text-to-video; for image-to-video the chosen
-  // ratio is honoured via the start frame's aspect instead.
+  // aspectRatio handling: our conditioning frames are portrait (9:16), which is
+  // also Veo's default — sending '9:16' has always worked and is kept. Only when
+  // a NON-9:16 ratio is requested together with a conditioning image do we omit
+  // it, because Veo derives the ratio from the image for image-to-video and a
+  // conflicting explicit value returns a 400 (the aspect-mismatch "Retry").
+  const omitAspect = !!imagePayload && aspectRatio !== '9:16'
   const body = JSON.stringify({
     instances: [instance],
     parameters: {
-      ...(imagePayload ? {} : { aspectRatio }),
+      ...(omitAspect ? {} : { aspectRatio }),
       sampleCount: 1,
       ...(avoid ? { negativePrompt: avoid.slice(0, 400) } : {}),
     },
