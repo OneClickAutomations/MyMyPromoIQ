@@ -1,0 +1,11 @@
+{
+  "name": "mymypromoiq-stitch-lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda that stitches video clips with ffmpeg (offloads the concat step off Vercel).",
+  "type": "module",
+  "main": "index.mjs",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
