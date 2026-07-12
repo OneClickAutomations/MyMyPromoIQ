@@ -84,8 +84,9 @@ export function buildVeoPrompt(
   const duration = clip.durationSeconds
   const segments = Math.max(1, Math.floor(duration / 2))
 
+  const hasCreator = !!brief.creator
   const identity = buildIdentityAnchor(brief.creator)
-  const shortId = buildShortDescriptor(brief.creator)
+  const shortId = hasCreator ? buildShortDescriptor(brief.creator) : 'the shot'
   const productAnchor = buildProductAnchor(brief.product)
   const productShort = buildProductShort(brief.product)
   const scene = brief.environment?.trim() || 'a real, lived-in room'
@@ -125,9 +126,10 @@ export function buildVeoPrompt(
       // product re-popping into frame. Do not re-establish; do not hold a still
       // opening frame.
       if (isContinuationClip) {
-        parts.push(`This continues the SAME unbroken take from the previous clip — ${shortId} is already mid-action from the exact pose, position, and framing where the last clip ended. Begin moving on the very first frame; do NOT hold a static opening frame and do NOT re-introduce or re-reveal the product.`)
+        const subj = hasCreator ? shortId : 'the scene'
+        parts.push(`This continues the SAME unbroken take from the previous clip — ${subj} is already mid-action from the exact pose, position, and framing where the last clip ended. Begin moving on the very first frame; do NOT hold a static opening frame and do NOT re-introduce or re-reveal the product.`)
       }
-      parts.push(`${identity}.`)
+      if (hasCreator) parts.push(`${identity}.`)
       parts.push(`${productAnchor}.`)
       parts.push(stripBanned(action) + (action.trim().endsWith('.') ? '' : '.'))
       // Physics grounding (unless the user opted into floating). The product
@@ -135,12 +137,14 @@ export function buildVeoPrompt(
       // hovering — and hands must be anatomically correct. This is the fix for
       // products floating unheld and mangled hands in testimonial-style ads.
       if (!brief.allowFloating) {
-        parts.push('The product stays physically supported at all times — held in a hand with fingers wrapped around it and its weight resting in the palm, or set down on a solid surface; it never hovers, floats, or hangs unsupported, and always obeys gravity. Hands are anatomically correct with five fingers and a natural, believable grip on the product.')
+        parts.push(hasCreator
+          ? 'The product stays physically supported at all times — held in a hand with fingers wrapped around it and its weight resting in the palm, or set down on a solid surface; it never hovers, floats, or hangs unsupported, and always obeys gravity. Hands are anatomically correct with five fingers and a natural, believable grip on the product.'
+          : 'The product rests on a solid surface with its full weight on it, obeying gravity — it never hovers, floats, or hangs unsupported in mid-air.')
       }
     } else {
       // Continuation: short descriptor, no re-establishing.
       parts.push(`${shot}, continuing the same shot.`)
-      parts.push(`${shortId} continues — no cut.`)
+      parts.push(hasCreator ? `${shortId} continues — no cut.` : 'The shot continues — no cut.')
     }
     const spoken = dialogueSlots[i]?.trim()
     if (spoken) parts.push(`Dialogue: "${spoken}" — ${tone}.`)

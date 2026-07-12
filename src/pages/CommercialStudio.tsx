@@ -10,7 +10,7 @@
  * before a single render starts; "Generate All" fires the whole queue and every
  * clip is presented together, not one scene at a time.
  */
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -66,7 +66,7 @@ import {
   applyStylePreset,
 } from '../lib/studio/presets'
 import { composeRenderPrompt } from '../lib/studio/compositionEngine'
-import { buildClipPromptPackage, resolveAdType, type AdTypeId } from '../lib/studio/promptEngineBridge'
+import { buildClipPromptPackage, resolveAdType, getTemplate, type AdTypeId } from '../lib/studio/promptEngineBridge'
 import PromptPreview from '../components/studio/PromptPreview'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
@@ -522,12 +522,33 @@ export default function CommercialStudio() {
 
   // ── Navigation helpers ────────────────────────────────────────────────────
 
+  // Per-style workflow: some steps don't apply to some ad types (a creator-less
+  // Product Reveal skips the Creator step). Hidden steps are jumped over in
+  // navigation and hidden from the stepper — the workflow adapts to the format.
+  const hiddenStepKeys = useMemo(() => {
+    const t = getTemplate(resolveAdType(brief.style.commercialStyle))
+    const hidden = new Set<string>()
+    if (t.needsCreator === false) hidden.add('creator')
+    return hidden
+  }, [brief.style.commercialStyle])
+  const isStepHidden = (num: number) => {
+    const key = STEPS.find(s => s.num === num)?.key
+    return !!key && hiddenStepKeys.has(key)
+  }
   function goBack() {
-    setStepNum(n => Math.max(1, n - 1))
+    setStepNum(n => {
+      let p = Math.max(1, n - 1)
+      while (p > 1 && isStepHidden(p)) p--
+      return p
+    })
   }
 
   function goForward() {
-    setStepNum(n => Math.min(11, n + 1))
+    setStepNum(n => {
+      let next = Math.min(11, n + 1)
+      while (next < 11 && isStepHidden(next)) next++
+      return next
+    })
   }
 
   // Skip optional step: apply preset defaults then advance
@@ -893,14 +914,15 @@ export default function CommercialStudio() {
   // ── Left-rail stepper ─────────────────────────────────────────────────────
 
   function Stepper() {
+    const visibleSteps = STEPS.filter(s => !hiddenStepKeys.has(s.key))
     return (
       <nav aria-label="Wizard steps" className="space-y-0.5">
-        {STEPS.map((s, i) => {
+        {visibleSteps.map((s, i) => {
           const state = s.num < stepNum ? 'done' : s.num === stepNum ? 'active' : 'future'
           const Icon = s.icon
           return (
-            <div key={s.key} className={`relative flex gap-3 ${i < STEPS.length - 1 ? 'pb-4' : ''}`}>
-              {i < STEPS.length - 1 && (
+            <div key={s.key} className={`relative flex gap-3 ${i < visibleSteps.length - 1 ? 'pb-4' : ''}`}>
+              {i < visibleSteps.length - 1 && (
                 <div className="absolute left-[14px] top-8 bottom-0 w-px bg-void-600" />
               )}
               <div className={`relative z-10 mt-0.5 grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg transition-all duration-300 ${
@@ -1277,6 +1299,13 @@ export default function CommercialStudio() {
     // conditioning image the video model sees. Surface that clearly instead
     // of only offering artificial settings that don't apply.
     const hasRealPhoto = !!(brief.creator.transformedImageUrl || brief.creator.seedImages?.length || productPreview)
+    // Environment options tailored to the chosen ad type (a street interview
+    // offers sidewalks, not living rooms). The "Keep My Setting" option is kept
+    // available whenever a real photo already carries a usable background.
+    const typePresets = getTemplate(resolveAdType(brief.style.commercialStyle)).environmentPresets
+    const envOptions = typePresets
+      ? [...(hasRealPhoto ? [ENVIRONMENT_OPTIONS[0]] : []), ...typePresets]
+      : ENVIRONMENT_OPTIONS
     return (
       <div className="space-y-6">
         <StepHeader title="Choose an environment" desc="Where does the scene take place?" onBack={goBack} />
@@ -1290,7 +1319,7 @@ export default function CommercialStudio() {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          {ENVIRONMENT_OPTIONS.map(opt => (
+          {envOptions.map(opt => (
             <button key={opt.id} type="button"
               onClick={() => patch({ scene: { ...brief.scene, environment: opt.id } })}
               className={`rounded-2xl border p-4 text-left transition-all ${

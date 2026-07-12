@@ -34,6 +34,12 @@ export interface WizardQuestion {
   feedsIntoPromptField: string
 }
 
+export interface EnvironmentPreset {
+  id: string
+  label: string
+  phrase: string
+}
+
 export interface AdTypeTemplate {
   id: AdTypeId
   displayName: string
@@ -50,7 +56,40 @@ export interface AdTypeTemplate {
   hookTypes: string[]
   platformNotes: string
   negativePromptAdditions: string[]
+  /** Whether this format needs an on-camera creator. Defaults to true; set
+   *  false for creator-less formats (product reveal) → the wizard SKIPS the
+   *  Creator step and the engine builds a person-free prompt. */
+  needsCreator?: boolean
+  /** Environment options tailored to this format (a street interview belongs on
+   *  a sidewalk, not a cozy living room). Falls back to the generic list when
+   *  omitted. */
+  environmentPresets?: EnvironmentPreset[]
 }
+
+// Reusable environment sets per format family.
+const ENV_TALKING = [
+  { id: 'bedroom_natural', label: 'Bedroom', phrase: 'a lived-in bedroom with soft natural light' },
+  { id: 'bathroom_vanity', label: 'Bathroom Vanity', phrase: 'a bright bathroom vanity with a mirror' },
+  { id: 'kitchen_counter', label: 'Kitchen', phrase: 'a kitchen counter with morning light' },
+  { id: 'cozy_home_interior', label: 'Cozy Home', phrase: 'a cozy, lived-in home interior' },
+]
+const ENV_TABLETOP = [
+  { id: 'clean_tabletop', label: 'Clean Desk', phrase: 'a clean, uncluttered desk surface' },
+  { id: 'kitchen_counter', label: 'Kitchen Counter', phrase: 'a bright kitchen counter' },
+  { id: 'wood_table', label: 'Wood Table', phrase: 'a warm wooden tabletop' },
+]
+const ENV_STREET = [
+  { id: 'city_sidewalk', label: 'City Sidewalk', phrase: 'a busy city sidewalk with passersby' },
+  { id: 'outdoor_market', label: 'Outdoor Market', phrase: 'a lively outdoor market' },
+  { id: 'storefront', label: 'Storefront', phrase: 'in front of a storefront on a shopping street' },
+  { id: 'park_path', label: 'Park', phrase: 'a park path with greenery behind' },
+]
+const ENV_REVEAL = [
+  { id: 'wet_stone', label: 'Wet Stone', phrase: 'wet black stone under a single beam of light' },
+  { id: 'seamless_studio', label: 'Studio Sweep', phrase: 'a clean seamless studio sweep' },
+  { id: 'marble_pedestal', label: 'Marble Pedestal', phrase: 'a marble pedestal in soft shadow' },
+  { id: 'bold_seamless', label: 'Bold Color', phrase: 'a bold, saturated seamless backdrop' },
+]
 
 /** durationSeconds * 2.5 words/second. */
 export function beatMaxWords(durationSeconds: number): number {
@@ -92,6 +131,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     hookTypes: ['contrarian confession', 'result-first', 'skeptic-turned-believer'],
     platformNotes: 'TikTok/Reels: keep the first line under 2s and eyes locked to lens. Meta Feed: front-load the result so it reads with sound off.',
     negativePromptAdditions: ['scripted delivery', 'studio backdrop'],
+    environmentPresets: ENV_TALKING,
   },
 
   unboxing: {
@@ -126,6 +166,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     hookTypes: ['what\'s inside', 'genuine reaction', 'satisfying open'],
     platformNotes: 'ASMR-adjacent — sound sells this format. Keep hands always in frame; never cut away during the open.',
     negativePromptAdditions: ['pre-opened box', 'product already visible at start'],
+    environmentPresets: ENV_TABLETOP,
   },
 
   problem_solution: {
@@ -304,6 +345,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     hookTypes: ['candid stranger', 'live test', 'unscripted reaction'],
     platformNotes: 'Handheld and outdoor ambience sell authenticity. A slightly imperfect frame beats a stable one here.',
     negativePromptAdditions: ['studio backdrop', 'perfectly stable tripod'],
+    environmentPresets: ENV_STREET,
   },
 
   pov: {
@@ -369,6 +411,8 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     hookTypes: ['cinematic unveil', 'texture and light'],
     platformNotes: 'No dialogue in the reveal beat — let sound design and one clean tagline carry it. Works 1:1 and 9:16.',
     negativePromptAdditions: ['creator in frame', 'hands in frame', 'cluttered background'],
+    needsCreator: false,
+    environmentPresets: ENV_REVEAL,
   },
 
   comparison: {
@@ -403,6 +447,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     hookTypes: ['the obvious gap', 'why settle'],
     platformNotes: 'Never show or name a real competitor brand — use a plain unbranded stand-in. Keep both sides in identical light.',
     negativePromptAdditions: ['named competitor brand', 'recognizable rival logo', 'different lighting per side'],
+    environmentPresets: ENV_TABLETOP,
   },
 
   founder_story: {

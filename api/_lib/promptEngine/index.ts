@@ -29,6 +29,7 @@ export type {
   AdTypeTemplate,
   BeatDefinition,
   WizardQuestion,
+  EnvironmentPreset,
 } from './adTypeTemplates.js'
 export { BANNED_WORDS } from './buildVeoPrompt.js'
 export { buildNegativePrompt } from './negativePrompts.js'

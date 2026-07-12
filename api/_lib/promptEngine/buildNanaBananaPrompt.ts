@@ -45,15 +45,20 @@ export function buildNanaBananaPrompt(
       : `${identity} holds ${productShort} at ${scene}`)
 
   // Point-of-view formats have no visible creator — the frame is the viewer's
-  // own hands, so we don't describe a face.
+  // own hands. Creator-less formats (e.g. product reveal) show the product only.
   const isPov = brief.adType === 'pov'
+  const hasCreator = !!brief.creator
   const subject = isPov
     ? `First-person point of view: the viewer's own hands entering the bottom of the frame, reaching toward ${productAnchor}, at ${scene}.`
-    : `${identity}, at ${scene}. ${productAnchor}.`
+    : hasCreator
+      ? `${identity}, at ${scene}. ${productAnchor}.`
+      : `${productAnchor}, alone on a clean surface at ${scene} — no people, no hands in frame.`
 
   const framing = isPov
     ? 'Frame: wide first-person view, hands filling the lower third, sharp focus on the product label, natural background blur.'
-    : 'Frame: tight medium shot, the subject fills about 60 percent of the frame, top of the head at the upper third, sharp focus on both the face and the product label, shallow depth of field behind.'
+    : hasCreator
+      ? 'Frame: tight medium shot, the subject fills about 60 percent of the frame, top of the head at the upper third, sharp focus on both the face and the product label, shallow depth of field behind.'
+      : 'Frame: product hero shot, the product centered and filling about half the frame, label squared to the lens, sharp focus on the product, soft background.'
 
   const lensLine = 'Optically: shallow depth of field, natural bokeh behind the subject, sharp focus on the product label — no visible camera gear, no on-screen text.'
 
