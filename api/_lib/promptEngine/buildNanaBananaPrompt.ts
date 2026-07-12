@@ -57,12 +57,15 @@ export function buildNanaBananaPrompt(
 
   const lensLine = 'Optically: shallow depth of field, natural bokeh behind the subject, sharp focus on the product label — no visible camera gear, no on-screen text.'
 
+  const ar = brief.aspectRatio ?? '9:16'
+  const orientation = ar === '16:9' ? 'horizontal' : ar === '1:1' ? 'square' : 'vertical'
+
   return [
-    `Create a photorealistic vertical first frame for a short UGC ad. ${subject}`,
+    `Create a photorealistic ${orientation} first frame for a short UGC ad. ${subject}`,
     `Opening pose: ${openingAction}.`,
     framing,
     `Lighting: ${lighting}.`,
     lensLine,
-    'Match a real phone-shot look: natural skin texture, believable imperfection, no studio backdrop. Aspect ratio 9:16.',
+    `Match a real phone-shot look: natural skin texture, believable imperfection, no studio backdrop. Aspect ratio ${ar}.`,
   ].join(' ')
 }

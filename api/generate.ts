@@ -437,10 +437,20 @@ async function generateStartFrame(
   return null
 }
 
+// Veo accepts a limited set of aspect ratios. Map a requested UI ratio to the
+// closest supported one (4:5 → 9:16, since Veo has no tall-feed ratio).
+const VEO_SUPPORTED_RATIOS = new Set(['9:16', '16:9', '1:1'])
+function resolveVeoAspectRatio(requested?: string): string {
+  const r = (requested || process.env.VEO_ASPECT_RATIO || '9:16').trim()
+  if (VEO_SUPPORTED_RATIOS.has(r)) return r
+  if (r === '4:5') return '9:16' // nearest portrait
+  return '9:16'
+}
+
 async function submitVeoJob(
   prompt: string,
   imageUrl?: string,
-  opts?: { negativePrompt?: string },
+  opts?: { negativePrompt?: string; aspectRatio?: string },
 ) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
@@ -455,7 +465,7 @@ async function submitVeoJob(
   // Discover the models this key actually has — no guessing, no single hard-coded id.
   const candidates = await resolveVeoModels(apiKey)
 
-  const aspectRatio = process.env.VEO_ASPECT_RATIO || '9:16'
+  const aspectRatio = resolveVeoAspectRatio(opts?.aspectRatio)
   const avoid = opts?.negativePrompt?.trim()
 
   const instance: Record<string, unknown> = { prompt }
@@ -565,6 +575,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // (character consistency). Product ref is productReferenceImageUrl/
       // productImageUrl. Optional — Nano Banana works text-only too.
       creatorReferenceImageUrl,
+      // Output aspect ratio (9:16 / 16:9 / 4:5) — mapped to a Veo-supported value.
+      aspectRatio,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -602,16 +614,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[generate] engine prompt failed validation, falling back to legacy path:', check.errors.join('; '))
       } else {
 
-      // Last-frame chaining wins: when the caller supplies the previous clip's
-      // final frame (conditioningImageUrl), THAT is the start of this clip — a
-      // fresh Nano Banana frame would break the continuity, so skip generating
-      // one entirely (also saves a Gemini image call per chained clip).
+      // Conditioning-image priority for THIS clip:
+      //  1. A chain frame (previous clip's last frame) — seamless continuity.
+      //  2. A REAL creator photo — condition Veo DIRECTLY on it so an
+      //     uploaded/saved person keeps their exact face. A Nano Banana
+      //     recomposite can drift a real face into "a random person" (the
+      //     saved-creator bug), so we deliberately skip the start frame here.
+      //  3. A Nano Banana start frame — only for GENERATED creators (no photo),
+      //     giving them a consistent invented opening.
+      //  4. The product photo — last resort.
+      const realCreatorPhoto =
+        creatorImageUrl && /^(https?:|data:)/i.test(creatorImageUrl) ? creatorImageUrl : undefined
+
       let startFrame: string | null = null
-      if (!conditioningImageUrl && nanaBananaPrompt && typeof nanaBananaPrompt === 'string') {
-        // Gather reference photos for the start frame (creator first for
-        // identity, then product). Failures are non-fatal — Nano Banana
-        // composes text-only.
-        const refUrls = [creatorReferenceImageUrl || creatorImageUrl, productReferenceImageUrl || productImageUrl]
+      if (!conditioningImageUrl && !realCreatorPhoto && nanaBananaPrompt && typeof nanaBananaPrompt === 'string') {
+        // No real face to preserve — build the start frame from the product
+        // (and any creator reference) so a generated creator opens consistently.
+        const refUrls = [creatorReferenceImageUrl, productReferenceImageUrl || productImageUrl]
           .filter((u): u is string => !!u)
         const refs: Array<{ data: string; mime: string }> = []
         for (const u of refUrls) {
@@ -620,8 +639,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         startFrame = await generateStartFrame(apiKey, nanaBananaPrompt, refs)
       }
-      const conditioning = conditioningImageUrl || startFrame || creatorImageUrl || productImageUrl
-      const { requestId, status } = await submitVeoJob(veoPrompt, conditioning || undefined, { negativePrompt })
+      const conditioning = conditioningImageUrl || realCreatorPhoto || startFrame || productImageUrl
+      const { requestId, status } = await submitVeoJob(veoPrompt, conditioning || undefined, { negativePrompt, aspectRatio })
       return res.status(200).json({
         requestId,
         status,
@@ -705,7 +724,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // reversed deliberately: DoP is a capable general animator but the app was
     // assembling ads from general parts with no faithful editor in the stack.
     if (process.env.GEMINI_API_KEY) {
-      const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt })
+      const { requestId, status } = await submitVeoJob(directorPrompt, referenceImage || undefined, { negativePrompt, aspectRatio })
       return res.status(200).json({ requestId, status, directorPrompt, provider: 'veo3' })
     }
 

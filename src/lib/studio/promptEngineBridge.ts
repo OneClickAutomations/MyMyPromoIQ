@@ -21,6 +21,7 @@ import type {
 } from '../../../api/_lib/promptEngine/index.js'
 import type { CreativeBrief } from './types'
 import type { StoryboardClip } from './storyboard'
+import { PRODUCT_ACTION_OPTIONS } from './presets'
 
 /** Map the wizard's commercialStyle preset ids onto engine ad types. Engine
  *  ids also map to themselves, so a type chosen via the new selector round-trips. */
@@ -68,13 +69,20 @@ export function briefToEngineBrief(brief: CreativeBrief): EngineBrief {
       }
     : undefined
 
+  // Combine the canned product-action pick (resolved to its phrase) with any
+  // free-text direction, so both reach the engine's on-screen action.
+  const cannedPhrase = PRODUCT_ACTION_OPTIONS.find(o => o.id === brief.scene.productAction)?.phrase
+  const freeDirection = brief.scene.actionDirection?.trim()
+  const actionDirection = [cannedPhrase, freeDirection].filter(Boolean).join('; ') || undefined
+
   return {
     adType: resolveAdType(brief.style.commercialStyle),
     product: { name: productName, description },
     creator,
     environment: brief.scene.environment?.trim() || undefined,
     lighting: brief.scene.lighting?.trim() || undefined,
-    aspectRatio: '9:16',
+    actionDirection,
+    aspectRatio: (brief.aspectRatio as EngineBrief['aspectRatio']) || '9:16',
     resolution: '1080p',
     clipCount: brief.storyboard.scenes.length || undefined,
   }

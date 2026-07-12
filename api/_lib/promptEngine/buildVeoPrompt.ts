@@ -94,8 +94,15 @@ export function buildVeoPrompt(
   const camera = resolveCamera(clip.cameraDirection || beat?.cameraKey)
   // Slot-fill the beat with the SHORT product ref — the full anchor is stated
   // once as its own sentence in segment 1, so this avoids double-stating it.
-  const action = clip.action?.trim()
+  const beatAction = clip.action?.trim()
     || (beat ? fillSlots(beat.visualInstruction, productShort, shortId, scene) : `${shortId} uses ${productShort} at ${scene}`)
+  // The user's explicit product-action direction (canned pick + free text) wins
+  // over the beat's generic default — this is the fix for "holding/demonstrating
+  // was ignored". Woven into the beat so framing + the directed action both land.
+  const dir = brief.actionDirection?.trim()
+  const action = dir
+    ? `${beatAction.endsWith('.') ? beatAction : beatAction + '.'} Specifically, ${shortId} is ${dir}${dir.endsWith('.') ? '' : '.'}`
+    : beatAction
   const sfx = beat?.sfx || 'quiet room tone, the soft sound of the action'
 
   const dialogueSlots = chunkDialogue(clip.dialogue, segments)

@@ -28,7 +28,7 @@ export type AdTypeId =
 
 /** Veo's supported per-clip durations. Every beat is 2s, so duration must be even. */
 export type VeoDuration = 4 | 6 | 8
-export type AspectRatio = '9:16' | '16:9' | '1:1'
+export type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5'
 export type Resolution = '720p' | '1080p'
 
 /** A physically-described product. `physicalDescription` is the exact wording
@@ -82,6 +82,10 @@ export interface EngineBrief {
   creator?: EngineCreator
   /** Physical environment description, e.g. "a bright kitchen, marble counter". */
   environment?: string
+  /** What the creator should physically DO with the product (from the canned
+   *  action picker + any free-text direction). When set, this drives the
+   *  on-screen action instead of the beat template's generic default. */
+  actionDirection?: string
   /** A lighting key from lightingVocabulary, or a free-text physical description. */
   lighting?: string
   aspectRatio?: AspectRatio
