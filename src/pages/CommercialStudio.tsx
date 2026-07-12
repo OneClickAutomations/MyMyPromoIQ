@@ -63,6 +63,26 @@ import {
   applyStylePreset,
 } from '../lib/studio/presets'
 import { composeRenderPrompt } from '../lib/studio/compositionEngine'
+import { buildClipPromptPackage, resolveAdType, type AdTypeId } from '../lib/studio/promptEngineBridge'
+import PromptPreview from '../components/studio/PromptPreview'
+import AdTypeSelector from '../components/studio/AdTypeSelector'
+import TypeQuestions from '../components/studio/TypeQuestions'
+
+/** Nearest legacy preset per engine ad type — seeds camera/lighting defaults. */
+const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
+  testimonial: 'ugc_testimonial',
+  problem_solution: 'ugc_testimonial',
+  before_after: 'ugc_testimonial',
+  street_interview: 'ugc_testimonial',
+  founder_story: 'founder_story',
+  day_in_the_life: 'cinematic_brand',
+  pov: 'cinematic_brand',
+  unboxing: 'unboxing',
+  tutorial: 'explainer',
+  comparison: 'explainer',
+  product_reveal: 'luxury_commercial',
+  hook_only: 'fast_cut_hook',
+}
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -206,68 +226,9 @@ function StepHeader({
   )
 }
 
-// ── Card option (preset cards) ────────────────────────────────────────────────
-
-function PresetCard({
-  label,
-  blurb,
-  img,
-  selected,
-  onSelect,
-}: {
-  label: string
-  blurb: string
-  img?: string
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`group relative overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
-        selected
-          ? 'border-fire-start/60 ring-2 ring-fire-start/20 shadow-[0_0_28px_rgba(255,107,53,0.18)]'
-          : 'border-white/[0.08] hover:border-white/[0.26] hover:shadow-[0_8px_32px_rgba(0,0,0,0.55)]'
-      }`}
-    >
-      {img && (
-        <div className="relative aspect-video overflow-hidden">
-          <img src={img} alt={label} loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-          {selected && (
-            <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              className="absolute right-2.5 top-2.5 grid h-6 w-6 place-items-center rounded-full bg-gradient-fire shadow-fire-soft"
-            >
-              <Check className="h-3.5 w-3.5 text-white" />
-            </motion.div>
-          )}
-        </div>
-      )}
-      <div className={`p-4 ${img ? 'border-t' : ''} ${selected ? 'border-fire-start/20 bg-fire-start/[0.06]' : 'border-white/[0.06] bg-void-900/80'}`}>
-        <div className="flex items-center justify-between gap-2">
-          <p className="font-bold text-ink">{label}</p>
-          {!img && selected && <Check className="h-4 w-4 flex-shrink-0 text-fire-start" />}
-        </div>
-        <p className="mt-1 text-xs leading-relaxed text-ink-muted">{blurb}</p>
-      </div>
-    </button>
-  )
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type InputMethod = 'upload' | 'camera' | 'url' | 'product-url'
-
-const STYLE_IMAGES: Record<string, string> = {
-  ugc_testimonial:   '/assets/fmt-testimonial.png',
-  founder_story:     '/assets/fmt-testimonial.png',
-  luxury_commercial: '/assets/fmt-life.png',
-  cinematic_brand:   '/assets/fmt-life.png',
-  fast_cut_hook:     '/assets/fmt-hook.png',
-  unboxing:          '/assets/fmt-unbox.png',
-  explainer:         '/assets/fmt-unbox.png',
-}
 
 export default function CommercialStudio() {
   const { user } = useUser()
@@ -680,6 +641,7 @@ export default function CommercialStudio() {
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
+        answers: brief.wizardAnswers,
       })
       setWizardPlan(plan)
       setWizardPhase('plan')
@@ -707,6 +669,7 @@ export default function CommercialStudio() {
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
+        answers: brief.wizardAnswers,
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -726,13 +689,26 @@ export default function CommercialStudio() {
     const composed = composeRenderPrompt(brief)
     const composedPrompt = composed.scenes.map(s => s.prompt).join(' ')
     const creatorImageUrl = brief.creator.transformedImageUrl || brief.creator.seedImages?.[0]?.url || undefined
+
+    // Prompt engine: build the timed-beat Veo prompt + Nano Banana start-frame
+    // prompt for this clip. The server runs the engine path (start frame → Veo)
+    // when a Gemini key is present, and falls back to the legacy path otherwise.
+    // Never let a prompt-build hiccup block generation — degrade to legacy.
+    let enginePkg: ReturnType<typeof buildClipPromptPackage> | null = null
+    try { enginePkg = buildClipPromptPackage(brief, clip) } catch { enginePkg = null }
+
     const { requestId } = await startGeneration({
       productImageUrl,
       productDescription: brief.product.description ?? descInput,
       style: brief.style.commercialStyle || 'testimonial',
       quality: 'turbo',
       composedPrompt,
-      negativePrompt: composed.negativePrompt,
+      negativePrompt: enginePkg?.negativePrompt ?? composed.negativePrompt,
+      // Engine path (used server-side only with a Gemini key):
+      veoPrompt: enginePkg?.veoPrompt,
+      nanaBananaPrompt: enginePkg?.nanaBananaPrompt,
+      clipDurationSeconds: clip.durationSeconds,
+      creatorReferenceImageUrl: creatorImageUrl,
       brandVoice: savedBrand?.brand_voice ?? undefined,
       brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
       brandCta: savedBrand?.cta_preferences ?? undefined,
@@ -1022,12 +998,26 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 5: Scene (product action)
+  // Step 5: Scene — type-specific questions (the content specifics for this ad
+  // format) + how the creator interacts with the product. The questions change
+  // completely based on the chosen ad type; their answers ground the storyboard
+  // planner's dialogue in what the user actually told us.
   function renderScene() {
+    const adType = resolveAdType(brief.style.commercialStyle)
     return (
       <div className="space-y-6">
-        <StepHeader title="Set the scene" desc="How should the creator interact with your product?" onBack={goBack} />
+        <StepHeader title="Tell us about your ad" desc="A few specifics for this format — then how the creator interacts with your product." onBack={goBack} />
 
+        <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+          <TypeQuestions
+            adType={adType}
+            answers={brief.wizardAnswers ?? {}}
+            onChange={(next) => patch({ wizardAnswers: next })}
+          />
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-medium text-ink">How should the creator interact with your product?</p>
         <div className="grid grid-cols-2 gap-3">
           {PRODUCT_ACTION_OPTIONS.map(opt => (
             <button key={opt.id} type="button"
@@ -1045,6 +1035,7 @@ export default function CommercialStudio() {
             </button>
           ))}
         </div>
+        </div>
 
         <div className="flex flex-col gap-3">
           <button onClick={goForward} disabled={!brief.scene.productAction} className="btn-fire w-full disabled:opacity-50">
@@ -1056,32 +1047,29 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 2: Style (required)
+  // Step 2: Ad type (required) — the type-first choice. Each of the 12 engine
+  // ad types drives its own beat structure, camera progression, and prompts.
+  // Choosing one also seeds camera/lighting defaults from the nearest legacy
+  // preset, then stores the engine ad-type id as commercialStyle.
   function renderStyle() {
-    const presets = Object.values(STYLE_PRESETS)
     return (
       <div className="space-y-6">
-        <StepHeader title="Pick a commercial style" desc="This determines the look, feel, and energy of your entire campaign." onBack={goBack} />
+        <StepHeader title="What kind of ad are you making?" desc="Pick a format — it shapes the beats, camera, and the exact prompts we generate." onBack={goBack} />
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {presets.map(preset => (
-            <PresetCard
-              key={preset.id}
-              label={preset.label}
-              blurb={preset.blurb}
-              img={STYLE_IMAGES[preset.id]}
-              selected={brief.style.commercialStyle === preset.id}
-              onSelect={() => {
-                const updated = applyStylePreset(brief, preset.id)
-                setBrief(prev => {
-                  const next = { ...prev, ...updated }
-                  scheduleSave(next)
-                  return next
-                })
-              }}
-            />
-          ))}
-        </div>
+        <AdTypeSelector
+          selected={resolveAdType(brief.style.commercialStyle)}
+          onSelect={(adType) => {
+            const seedPreset = ADTYPE_TO_PRESET[adType]
+            const seeded = seedPreset ? applyStylePreset(brief, seedPreset) : brief
+            setBrief(prev => {
+              // Apply preset defaults for camera/lighting, but store the engine
+              // ad-type id as commercialStyle so the engine drives generation.
+              const next = { ...prev, ...seeded, style: { ...seeded.style, commercialStyle: adType } }
+              scheduleSave(next)
+              return next
+            })
+          }}
+        />
 
         <button onClick={goForward} disabled={!brief.style.commercialStyle} className="btn-fire w-full disabled:opacity-50">
           Next — Assets <ArrowRight className="h-4 w-4" />
@@ -1425,6 +1413,7 @@ export default function CommercialStudio() {
             regeneratingOrder={wizardRegenOrder}
             clipCountBusy={wizardClipCountBusy}
             onClipCountChange={changeWizardClipCount}
+            renderClipExtra={(clip) => <PromptPreview brief={brief} clip={clip} />}
           />
         )}
 

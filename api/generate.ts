@@ -14,6 +14,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { submitDopVideo, type DopArgs, type DopModel } from './_lib/higgsfield.js'
+import { validateVeoPrompt } from './_lib/promptEngine/index.js'
 
 type Quality = 'lite' | 'turbo' | 'standard'
 
@@ -116,6 +117,19 @@ const STYLE_ALIASES: Record<string, StyleId> = {
   fast_cut_hook:     'fast-cut',
   unboxing:          'unboxing',
   explainer:         'unboxing',
+  // Prompt-engine ad-type ids — so the legacy/Higgsfield fallback path also
+  // accepts a type chosen via the new type-first selector (the engine path
+  // ignores `style`, but this keeps the fallback from 400-ing on an engine id).
+  testimonial:       'testimonial',
+  problem_solution:  'testimonial',
+  before_after:      'testimonial',
+  street_interview:  'testimonial',
+  day_in_the_life:   'day-in-life',
+  pov:               'day-in-life',
+  tutorial:          'unboxing',
+  product_reveal:    'day-in-life',
+  comparison:        'unboxing',
+  hook_only:         'fast-cut',
 }
 
 /** Resolve any incoming style id (canonical or wizard preset) to a StyleId. */
@@ -363,6 +377,66 @@ async function fetchImageAsBase64(imageUrl: string): Promise<{ data: string; mim
   }
 }
 
+// Nano Banana start-frame image models (same candidates modelsheet.ts uses).
+// Runtime discovery, not a hardcoded id — a 404 means retired for this key.
+const GEMINI_IMAGE_MODELS = process.env.GEMINI_IMAGE_MODEL
+  ? [process.env.GEMINI_IMAGE_MODEL]
+  : ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview']
+
+/**
+ * Generate the Nano Banana start frame for a clip (the mandatory image→video
+ * handoff — character consistency comes from anchoring every clip on a matching
+ * first frame). Accepts up to a few reference images (product + creator) that
+ * Nano Banana composites. Returns a data URL, or null if the key has no image
+ * model / the call is blocked (caller then falls back to a raw reference photo
+ * rather than hard-failing the whole generation).
+ */
+async function generateStartFrame(
+  apiKey: string,
+  prompt: string,
+  refs: Array<{ data: string; mime: string }>,
+): Promise<string | null> {
+  const parts: Array<Record<string, unknown>> = []
+  for (const r of refs) parts.push({ inline_data: { mime_type: r.mime, data: r.data } })
+  parts.push({ text: prompt })
+
+  for (const model of GEMINI_IMAGE_MODELS) {
+    try {
+      const resp = await fetch(
+        `${GEMINI_BASE}/models/${model}:generateContent`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { temperature: 0.35, responseModalities: ['IMAGE', 'TEXT'] },
+          }),
+        },
+      )
+      if (resp.status === 404) { console.warn(`[generate] start-frame ${model} → 404, trying next`); continue }
+      if (!resp.ok) {
+        console.warn(`[generate] start-frame ${model} failed (${resp.status}); falling back to reference photo`)
+        return null
+      }
+      const data = (await resp.json()) as any
+      const outParts = data?.candidates?.[0]?.content?.parts ?? []
+      const imagePart = outParts.find((p: any) => p.inline_data?.data || p.inlineData?.data)
+      const out = imagePart?.inline_data?.data ?? imagePart?.inlineData?.data
+      if (!out) {
+        const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason
+        console.warn(`[generate] start-frame ${model} produced no image (${reason ?? 'unknown'}); falling back`)
+        return null
+      }
+      const outMime = imagePart?.inline_data?.mime_type ?? imagePart?.inlineData?.mimeType ?? 'image/png'
+      return `data:${outMime};base64,${out}`
+    } catch (err) {
+      console.warn('[generate] start-frame error, falling back:', err instanceof Error ? err.message : err)
+      return null
+    }
+  }
+  return null
+}
+
 async function submitVeoJob(
   prompt: string,
   imageUrl?: string,
@@ -478,6 +552,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // NOT overridden by this — it stays pinned to the real product photo so
       // the written description never drifts across a chain of re-derived frames.
       conditioningImageUrl,
+      // ── Prompt-engine path (opt-in) ──────────────────────────────────────
+      // When the type-first wizard builds prompts via api/_lib/promptEngine,
+      // it sends the finished timed-beat Veo prompt + the Nano Banana start-
+      // frame prompt + the negative prompt. Their presence switches generate
+      // into the engine path: render the start frame first (Nano Banana),
+      // then animate it (Veo). This is the mandatory image→video handoff.
+      veoPrompt,
+      nanaBananaPrompt,
+      clipDurationSeconds,
+      // The creator's reference selfie/photos to composite into the start frame
+      // (character consistency). Product ref is productReferenceImageUrl/
+      // productImageUrl. Optional — Nano Banana works text-only too.
+      creatorReferenceImageUrl,
     } = (req.body ?? {}) as Record<string, string> & { brandTaglines?: string[]; sceneIndex?: number; sceneCount?: number }
 
     // ProductInput/CreatorInput both emit resized data: URLs directly (no
@@ -495,6 +582,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (creatorImageUrl && !creatorConsentAt) {
       return res.status(400).json({ error: 'Confirm you have the right to use this person\'s likeness before generating.' })
     }
+
+    // ── Prompt-engine path ─────────────────────────────────────────────────
+    // The wizard pre-built the timed-beat prompt. Validate it (blocking gate,
+    // never submit a known-bad prompt), render the Nano Banana start frame from
+    // the matching image prompt + reference photos, then animate with Veo.
+    // Only when a Gemini key is present — otherwise fall through to the legacy
+    // path (which can still use Higgsfield DoP) rather than dead-ending.
+    if (typeof veoPrompt === 'string' && veoPrompt.trim() && process.env.GEMINI_API_KEY) {
+      const apiKey = process.env.GEMINI_API_KEY
+      const dur = Number(clipDurationSeconds) || 6
+      const check = validateVeoPrompt(veoPrompt, dur)
+      if (!check.valid) {
+        return res.status(422).json({ error: 'The generated prompt failed validation.', validation: check })
+      }
+
+      // Gather reference photos for the start frame (creator first for identity,
+      // then product). Failures are non-fatal — Nano Banana composes text-only.
+      const refUrls = [creatorReferenceImageUrl || creatorImageUrl, productReferenceImageUrl || productImageUrl]
+        .filter((u): u is string => !!u)
+      const refs: Array<{ data: string; mime: string }> = []
+      for (const u of refUrls) {
+        const img = await fetchImageAsBase64(u).catch(() => undefined)
+        if (img) refs.push(img)
+      }
+
+      // Render the start frame, then hand it to Veo. If the frame can't be made
+      // (no image model / blocked), fall back to a raw reference photo so the
+      // clip still generates rather than hard-failing.
+      let startFrame: string | null = null
+      if (nanaBananaPrompt && typeof nanaBananaPrompt === 'string') {
+        startFrame = await generateStartFrame(apiKey, nanaBananaPrompt, refs)
+      }
+      const conditioning = conditioningImageUrl || startFrame || creatorImageUrl || productImageUrl
+      const { requestId, status } = await submitVeoJob(veoPrompt, conditioning || undefined, { negativePrompt })
+      return res.status(200).json({
+        requestId,
+        status,
+        directorPrompt: veoPrompt,
+        provider: 'veo3',
+        startFrameGenerated: !!startFrame,
+        validation: check,
+      })
+    }
+
     if (!productDescription?.trim()) {
       return res.status(400).json({ error: 'Describe the product in a sentence.' })
     }
