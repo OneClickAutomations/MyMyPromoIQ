@@ -84,8 +84,9 @@ export function buildVeoPrompt(
   const duration = clip.durationSeconds
   const segments = Math.max(1, Math.floor(duration / 2))
 
+  const hasCreator = !!brief.creator
   const identity = buildIdentityAnchor(brief.creator)
-  const shortId = buildShortDescriptor(brief.creator)
+  const shortId = hasCreator ? buildShortDescriptor(brief.creator) : 'the shot'
   const productAnchor = buildProductAnchor(brief.product)
   const productShort = buildProductShort(brief.product)
   const scene = brief.environment?.trim() || 'a real, lived-in room'
@@ -94,8 +95,15 @@ export function buildVeoPrompt(
   const camera = resolveCamera(clip.cameraDirection || beat?.cameraKey)
   // Slot-fill the beat with the SHORT product ref — the full anchor is stated
   // once as its own sentence in segment 1, so this avoids double-stating it.
-  const action = clip.action?.trim()
+  const beatAction = clip.action?.trim()
     || (beat ? fillSlots(beat.visualInstruction, productShort, shortId, scene) : `${shortId} uses ${productShort} at ${scene}`)
+  // The user's explicit product-action direction (canned pick + free text) wins
+  // over the beat's generic default — this is the fix for "holding/demonstrating
+  // was ignored". Woven into the beat so framing + the directed action both land.
+  const dir = brief.actionDirection?.trim()
+  const action = dir
+    ? `${beatAction.endsWith('.') ? beatAction : beatAction + '.'} Specifically, ${shortId} is ${dir}${dir.endsWith('.') ? '' : '.'}`
+    : beatAction
   const sfx = beat?.sfx || 'quiet room tone, the soft sound of the action'
 
   const dialogueSlots = chunkDialogue(clip.dialogue, segments)
@@ -107,17 +115,36 @@ export function buildVeoPrompt(
     const to = ts((i + 1) * 2)
     const shot = camera
 
+    const isContinuationClip = typeof clip.order === 'number' && clip.order > 1
+
     const parts: string[] = []
     if (i === 0) {
       // First segment: full identity + product anchor + the action.
       parts.push(`${shot}.`)
-      parts.push(`${identity}.`)
+      // Continuation clips open ALREADY IN MOTION from the previous clip's final
+      // frame — this is what removes the ~1s static "flash" at every cut and the
+      // product re-popping into frame. Do not re-establish; do not hold a still
+      // opening frame.
+      if (isContinuationClip) {
+        const subj = hasCreator ? shortId : 'the scene'
+        parts.push(`This continues the SAME unbroken take from the previous clip — ${subj} is already mid-action from the exact pose, position, and framing where the last clip ended. Begin moving on the very first frame; do NOT hold a static opening frame and do NOT re-introduce or re-reveal the product.`)
+      }
+      if (hasCreator) parts.push(`${identity}.`)
       parts.push(`${productAnchor}.`)
       parts.push(stripBanned(action) + (action.trim().endsWith('.') ? '' : '.'))
+      // Physics grounding (unless the user opted into floating). The product
+      // must obey gravity — held with a real grip or set on a surface, never
+      // hovering — and hands must be anatomically correct. This is the fix for
+      // products floating unheld and mangled hands in testimonial-style ads.
+      if (!brief.allowFloating) {
+        parts.push(hasCreator
+          ? 'The product stays physically supported at all times — held in a hand with fingers wrapped around it and its weight resting in the palm, or set down on a solid surface; it never hovers, floats, or hangs unsupported, and always obeys gravity. Hands are anatomically correct with five fingers and a natural, believable grip on the product.'
+          : 'The product rests on a solid surface with its full weight on it, obeying gravity — it never hovers, floats, or hangs unsupported in mid-air.')
+      }
     } else {
       // Continuation: short descriptor, no re-establishing.
       parts.push(`${shot}, continuing the same shot.`)
-      parts.push(`${shortId} continues — no cut.`)
+      parts.push(hasCreator ? `${shortId} continues — no cut.` : 'The shot continues — no cut.')
     }
     const spoken = dialogueSlots[i]?.trim()
     if (spoken) parts.push(`Dialogue: "${spoken}" — ${tone}.`)

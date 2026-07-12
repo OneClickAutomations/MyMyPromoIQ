@@ -10,7 +10,7 @@
  * before a single render starts; "Generate All" fires the whole queue and every
  * clip is presented together, not one scene at a time.
  */
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -44,6 +44,7 @@ import {
   extractLastFrame,
   planStoryboard,
   autoAnswerWizard,
+  enhancePrompt,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
@@ -65,12 +66,20 @@ import {
   applyStylePreset,
 } from '../lib/studio/presets'
 import { composeRenderPrompt } from '../lib/studio/compositionEngine'
-import { buildClipPromptPackage, resolveAdType, type AdTypeId } from '../lib/studio/promptEngineBridge'
+import { buildClipPromptPackage, resolveAdType, getTemplate, type AdTypeId } from '../lib/studio/promptEngineBridge'
 import PromptPreview from '../components/studio/PromptPreview'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
 import DurationSlider from '../components/ui/DurationSlider'
 import { estimateClipCount, MAX_CLIP_SECONDS } from '../lib/studio/storyboard'
+
+/** Output aspect ratios offered up front. 4:5 maps to 9:16 server-side if Veo
+ *  rejects it (Veo has no tall-feed ratio). `box` is a little visual swatch. */
+const ASPECT_RATIOS = [
+  { id: '9:16', label: '9:16', hint: 'Reels · TikTok', box: 'h-8 w-[18px]' },
+  { id: '16:9', label: '16:9', hint: 'YouTube', box: 'h-[18px] w-8' },
+  { id: '4:5',  label: '4:5',  hint: 'Meta feed',  box: 'h-8 w-[26px]' },
+] as const
 
 /** Nearest legacy preset per engine ad type — seeds camera/lighting defaults. */
 const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
@@ -513,12 +522,33 @@ export default function CommercialStudio() {
 
   // ── Navigation helpers ────────────────────────────────────────────────────
 
+  // Per-style workflow: some steps don't apply to some ad types (a creator-less
+  // Product Reveal skips the Creator step). Hidden steps are jumped over in
+  // navigation and hidden from the stepper — the workflow adapts to the format.
+  const hiddenStepKeys = useMemo(() => {
+    const t = getTemplate(resolveAdType(brief.style.commercialStyle))
+    const hidden = new Set<string>()
+    if (t.needsCreator === false) hidden.add('creator')
+    return hidden
+  }, [brief.style.commercialStyle])
+  const isStepHidden = (num: number) => {
+    const key = STEPS.find(s => s.num === num)?.key
+    return !!key && hiddenStepKeys.has(key)
+  }
   function goBack() {
-    setStepNum(n => Math.max(1, n - 1))
+    setStepNum(n => {
+      let p = Math.max(1, n - 1)
+      while (p > 1 && isStepHidden(p)) p--
+      return p
+    })
   }
 
   function goForward() {
-    setStepNum(n => Math.min(11, n + 1))
+    setStepNum(n => {
+      let next = Math.min(11, n + 1)
+      while (next < 11 && isStepHidden(next)) next++
+      return next
+    })
   }
 
   // Skip optional step: apply preset defaults then advance
@@ -699,7 +729,7 @@ export default function CommercialStudio() {
     try { await runWizardPlan(n) } finally { setWizardClipCountBusy(false) }
   }
 
-  async function regenWizardClip(clip: StoryboardClip) {
+  async function regenWizardClip(clip: StoryboardClip, notes?: string) {
     if (!wizardPlan) return
     setWizardRegenOrder(clip.order)
     try {
@@ -714,6 +744,7 @@ export default function CommercialStudio() {
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
         intent: brief.product.intent || undefined,
+        regenerationNotes: notes,
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -757,6 +788,7 @@ export default function CommercialStudio() {
       // (the "Retry" error). enginePkg.durationSeconds is already snapped.
       clipDurationSeconds: enginePkg?.durationSeconds ?? clip.durationSeconds,
       creatorReferenceImageUrl: creatorImageUrl,
+      aspectRatio: brief.aspectRatio || '9:16',
       brandVoice: savedBrand?.brand_voice ?? undefined,
       brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,
       brandCta: savedBrand?.cta_preferences ?? undefined,
@@ -823,7 +855,14 @@ export default function CommercialStudio() {
 
   function retryWizardClip(clipId: string) {
     const clip = wizardPlan?.clips.find(c => c.id === clipId)
-    if (clip) void wizardQueue.retryOne(clip, wizardGenerateOne)
+    if (!clip) return
+    // Re-running a clip makes the previously assembled video stale — clear it
+    // and re-arm the auto-assemble so the final RE-STITCHES automatically once
+    // this clip finishes. (Answers "is the video re-stitched when I modify a
+    // clip?" — yes, automatically.)
+    setWizardAssembledUrl(null)
+    wizardAutoAssembledRef.current = false
+    void wizardQueue.retryOne(clip, wizardGenerateOne)
   }
 
   async function assembleWizardAd() {
@@ -875,14 +914,15 @@ export default function CommercialStudio() {
   // ── Left-rail stepper ─────────────────────────────────────────────────────
 
   function Stepper() {
+    const visibleSteps = STEPS.filter(s => !hiddenStepKeys.has(s.key))
     return (
       <nav aria-label="Wizard steps" className="space-y-0.5">
-        {STEPS.map((s, i) => {
+        {visibleSteps.map((s, i) => {
           const state = s.num < stepNum ? 'done' : s.num === stepNum ? 'active' : 'future'
           const Icon = s.icon
           return (
-            <div key={s.key} className={`relative flex gap-3 ${i < STEPS.length - 1 ? 'pb-4' : ''}`}>
-              {i < STEPS.length - 1 && (
+            <div key={s.key} className={`relative flex gap-3 ${i < visibleSteps.length - 1 ? 'pb-4' : ''}`}>
+              {i < visibleSteps.length - 1 && (
                 <div className="absolute left-[14px] top-8 bottom-0 w-px bg-void-600" />
               )}
               <div className={`relative z-10 mt-0.5 grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg transition-all duration-300 ${
@@ -925,6 +965,26 @@ export default function CommercialStudio() {
           value={desiredVideoCount * MAX_CLIP_SECONDS}
           onChange={(sec) => setDesiredVideoCount(estimateClipCount(sec))}
         />
+
+        <div className="rounded-2xl border border-white/[0.08] bg-void-800 p-5">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-faint">Aspect ratio</p>
+          <div className="grid grid-cols-3 gap-3">
+            {ASPECT_RATIOS.map(ar => {
+              const selected = (brief.aspectRatio || '9:16') === ar.id
+              return (
+                <button key={ar.id} type="button"
+                  onClick={() => patch({ aspectRatio: ar.id })}
+                  className={`flex flex-col items-center gap-2 rounded-xl border p-3 transition ${
+                    selected ? 'border-fire-start/60 bg-fire-start/[0.08] ring-1 ring-fire-start/30' : 'border-white/[0.08] bg-void-900 hover:border-white/20'
+                  }`}>
+                  <span className={`block rounded-sm bg-gradient-fire ${ar.box}`} />
+                  <span className="text-xs font-semibold text-ink">{ar.label}</span>
+                  <span className="text-[10px] text-ink-faint">{ar.hint}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <div className="rounded-2xl border border-white/[0.07] bg-void-900/40 p-4">
           <p className="text-sm text-ink-muted">
@@ -1143,6 +1203,18 @@ export default function CommercialStudio() {
             </button>
           ))}
         </div>
+
+          <div className="mt-3">
+            <p className="mb-1.5 text-xs font-medium text-ink-muted">Add your own direction <span className="text-ink-faint">(optional)</span></p>
+            <textarea
+              value={brief.scene.actionDirection ?? ''}
+              onChange={e => patch({ scene: { ...brief.scene, actionDirection: e.target.value } })}
+              placeholder="Exactly what should the creator do with the product? e.g. “unscrew the cap, squeeze one drop onto a fingertip, then dab it under the eye”"
+              rows={2}
+              className="w-full resize-none rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+            />
+            <p className="mt-1 text-[11px] text-ink-faint">This is baked into the video prompt, so be specific — it overrides the generic action above.</p>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3">
@@ -1227,6 +1299,13 @@ export default function CommercialStudio() {
     // conditioning image the video model sees. Surface that clearly instead
     // of only offering artificial settings that don't apply.
     const hasRealPhoto = !!(brief.creator.transformedImageUrl || brief.creator.seedImages?.length || productPreview)
+    // Environment options tailored to the chosen ad type (a street interview
+    // offers sidewalks, not living rooms). The "Keep My Setting" option is kept
+    // available whenever a real photo already carries a usable background.
+    const typePresets = getTemplate(resolveAdType(brief.style.commercialStyle)).environmentPresets
+    const envOptions = typePresets
+      ? [...(hasRealPhoto ? [ENVIRONMENT_OPTIONS[0]] : []), ...typePresets]
+      : ENVIRONMENT_OPTIONS
     return (
       <div className="space-y-6">
         <StepHeader title="Choose an environment" desc="Where does the scene take place?" onBack={goBack} />
@@ -1240,7 +1319,7 @@ export default function CommercialStudio() {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          {ENVIRONMENT_OPTIONS.map(opt => (
+          {envOptions.map(opt => (
             <button key={opt.id} type="button"
               onClick={() => patch({ scene: { ...brief.scene, environment: opt.id } })}
               className={`rounded-2xl border p-4 text-left transition-all ${
@@ -1522,6 +1601,7 @@ export default function CommercialStudio() {
             clipCountBusy={wizardClipCountBusy}
             onClipCountChange={changeWizardClipCount}
             renderClipExtra={(clip) => <PromptPreview brief={brief} clip={clip} />}
+            enhanceNotes={(text) => enhancePrompt({ text, productDescription: brief.product.description ?? descInput, style: brief.style.commercialStyle }).then(r => r.enhanced)}
           />
         )}
 

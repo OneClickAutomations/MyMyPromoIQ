@@ -21,6 +21,19 @@ import type {
 } from '../../../api/_lib/promptEngine/index.js'
 import type { CreativeBrief } from './types'
 import type { StoryboardClip } from './storyboard'
+import { PRODUCT_ACTION_OPTIONS, ENVIRONMENT_OPTIONS, KEEP_ORIGINAL_ENVIRONMENT } from './presets'
+
+/** Resolve an environment id (from the wizard picker) to its physical phrase.
+ *  Searches the type-specific presets first, then the generic list. The
+ *  "keep my setting" sentinel and free text pass through as-is. */
+function resolveEnvironment(adType: AdTypeId, envId?: string): string | undefined {
+  const raw = envId?.trim()
+  if (!raw || raw === KEEP_ORIGINAL_ENVIRONMENT) return undefined
+  const fromType = getTemplate(adType).environmentPresets?.find(e => e.id === raw)?.phrase
+  if (fromType) return fromType
+  const fromGeneric = ENVIRONMENT_OPTIONS.find(e => e.id === raw)?.phrase
+  return fromGeneric ?? raw
+}
 
 /** Map the wizard's commercialStyle preset ids onto engine ad types. Engine
  *  ids also map to themselves, so a type chosen via the new selector round-trips. */
@@ -56,8 +69,12 @@ export function briefToEngineBrief(brief: CreativeBrief): EngineBrief {
     brief.product.productName?.trim() ||
     'the product'
 
+  const adType = resolveAdType(brief.style.commercialStyle)
+  // Creator-less formats (e.g. product reveal) get NO creator — the engine then
+  // builds a person-free, product-only prompt.
+  const needsCreator = getTemplate(adType).needsCreator !== false
   const a = brief.creator.attributes
-  const creator = a
+  const creator = needsCreator && a
     ? {
         gender: a.gender,
         ageRange: a.ageRange,
@@ -68,13 +85,20 @@ export function briefToEngineBrief(brief: CreativeBrief): EngineBrief {
       }
     : undefined
 
+  // Combine the canned product-action pick (resolved to its phrase) with any
+  // free-text direction, so both reach the engine's on-screen action.
+  const cannedPhrase = PRODUCT_ACTION_OPTIONS.find(o => o.id === brief.scene.productAction)?.phrase
+  const freeDirection = brief.scene.actionDirection?.trim()
+  const actionDirection = [cannedPhrase, freeDirection].filter(Boolean).join('; ') || undefined
+
   return {
-    adType: resolveAdType(brief.style.commercialStyle),
+    adType,
     product: { name: productName, description },
     creator,
-    environment: brief.scene.environment?.trim() || undefined,
+    environment: resolveEnvironment(adType, brief.scene.environment),
     lighting: brief.scene.lighting?.trim() || undefined,
-    aspectRatio: '9:16',
+    actionDirection,
+    aspectRatio: (brief.aspectRatio as EngineBrief['aspectRatio']) || '9:16',
     resolution: '1080p',
     clipCount: brief.storyboard.scenes.length || undefined,
   }

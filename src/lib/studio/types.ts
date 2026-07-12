@@ -101,6 +101,10 @@ export interface CreativeBrief {
 
   scene: {
     productAction: string
+    /** Free-text direction for what the creator does with the product, on top
+     *  of the canned productAction pick. Threaded to the prompt engine so the
+     *  user's specific intent drives the on-screen action. */
+    actionDirection?: string
     environment: string
     lighting: string
   }
@@ -109,6 +113,9 @@ export interface CreativeBrief {
     commercialStyle: string
     cameraDirection: string[]
   }
+
+  /** Output aspect ratio (9:16, 16:9, 4:5). Chosen up front; threaded to Veo. */
+  aspectRatio?: string
 
   voice: {
     mode: 'ai_generated' | 'cloned' | 'uploaded'

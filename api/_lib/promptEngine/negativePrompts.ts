@@ -26,9 +26,29 @@ export const CHARACTER_NEGATIVES = [
 // Product accuracy.
 export const PRODUCT_NEGATIVES = [
   'wrong product color', 'wrong product shape', 'unreadable label',
-  'label on wrong side', 'product floating', 'product too large',
+  'label on wrong side', 'product too large',
   'product too small relative to hand', 'extra product copies in frame',
   'product changing shape', 'incorrect product label text',
+]
+
+// Physics / gravity — the product must be held or resting, never hovering, and
+// hands must be correct. Applied unless the user explicitly wants floating.
+export const PHYSICS_NEGATIVES = [
+  'floating product', 'product hovering in mid-air', 'levitating product',
+  'product suspended with no support', 'product defying gravity',
+  'product not touching the hand', 'hand not gripping the product',
+  'product passing through the hand', 'product stuck to the palm unnaturally',
+  'deformed hands', 'extra fingers', 'missing fingers', 'fused fingers',
+  'fingers merging with the product', 'mangled hands', 'unnatural grip',
+]
+
+// On-screen text — Veo tends to hallucinate garbled captions/watermarks. We add
+// captions ourselves as a clean burn-in from the real script (perfect spelling),
+// so the video model must render NONE.
+export const TEXT_NEGATIVES = [
+  'text on screen', 'captions', 'subtitles', 'garbled text', 'gibberish text',
+  'misspelled words', 'random letters', 'fake writing', 'watermark',
+  'on-screen graphics', 'title cards', 'lower-third text',
 ]
 
 // UGC — avoid anything that reads "produced".
@@ -67,13 +87,16 @@ const PER_TYPE: Partial<Record<AdTypeId, string[]>> = {
 }
 
 /** Assemble the negative prompt for an ad type: universal + character + product
- *  + (UGC vs. commercial) + per-type extras + any template additions. */
-export function buildNegativePrompt(adType: AdTypeId, extra: string[] = []): string {
+ *  + physics + text + (UGC vs. commercial) + per-type extras + any additions.
+ *  Pass allowFloating to drop the anti-gravity negatives (intentional float). */
+export function buildNegativePrompt(adType: AdTypeId, extra: string[] = [], allowFloating = false): string {
   const commercialTypes: AdTypeId[] = ['product_reveal', 'comparison']
   const base = [
     ...UNIVERSAL_NEGATIVES,
     ...CHARACTER_NEGATIVES,
     ...PRODUCT_NEGATIVES,
+    ...(allowFloating ? [] : PHYSICS_NEGATIVES),
+    ...TEXT_NEGATIVES,
     ...(commercialTypes.includes(adType) ? [] : UGC_NEGATIVES),
     ...(PER_TYPE[adType] ?? []),
     ...extra,

@@ -28,7 +28,7 @@ export type AdTypeId =
 
 /** Veo's supported per-clip durations. Every beat is 2s, so duration must be even. */
 export type VeoDuration = 4 | 6 | 8
-export type AspectRatio = '9:16' | '16:9' | '1:1'
+export type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5'
 export type Resolution = '720p' | '1080p'
 
 /** A physically-described product. `physicalDescription` is the exact wording
@@ -82,12 +82,21 @@ export interface EngineBrief {
   creator?: EngineCreator
   /** Physical environment description, e.g. "a bright kitchen, marble counter". */
   environment?: string
+  /** What the creator should physically DO with the product (from the canned
+   *  action picker + any free-text direction). When set, this drives the
+   *  on-screen action instead of the beat template's generic default. */
+  actionDirection?: string
   /** A lighting key from lightingVocabulary, or a free-text physical description. */
   lighting?: string
   aspectRatio?: AspectRatio
   resolution?: Resolution
   /** Total clips in the sequence (drives continuity phrasing). */
   clipCount?: number
+  /** When true, the product may float/levitate (the user explicitly wants it,
+   *  e.g. a surreal product reveal). Default false → the engine hard-grounds
+   *  the product in a hand or on a surface and adds anti-gravity negatives, so
+   *  a testimonial never shows a product hovering unheld. */
+  allowFloating?: boolean
 }
 
 export interface VeoPromptOutput {

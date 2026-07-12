@@ -153,6 +153,12 @@ HARD RULES:
 - beat: one of hook, problem, solution, demo, proof, cta, bridge, reveal, outro — pick the DOMINANT element for clips that compress more than one (e.g. a clip compressing hook+problem+solution is still tagged "hook").
 - The final clip's beat is cta or outro, and must contain an explicit call-to-action.
 
+CONTINUITY ACROSS CLIPS (critical — the clips are stitched into ONE seamless video, not separate ads):
+- The dialogue must flow as ONE continuous spoken monologue across all clips. Read clips 1→N end to end: it must sound like one person talking without interruption.
+- NEVER end a clip's dialogue mid-sentence or on a cut-off word. Each clip's dialogue ends on a natural clause or sentence boundary (a breath point), and the next clip PICKS UP the thought and continues it — do not restart, do not re-hook, do not repeat what was already said.
+- Only clip 1 opens the ad. Clips 2..N continue mid-conversation ("...and that's when I noticed", "so I kept using it", "which is why") — they must NOT re-introduce the speaker, the product, or the premise.
+- creatorAction/visualDescription must also continue: each clip begins in the pose/position the previous clip ended in (same hands, same product position), so the motion is unbroken across the cut.
+
 Respond with STRICT JSON only, no markdown:
 {"recommendedClipCount":N,"reasoning":"one sentence explaining how the narrative was compressed to fit","clips":[{"order":1,"beat":"hook","durationSeconds":5,"visualDescription":"...","dialogue":"...","cameraDirection":"...","creatorAction":"..."}]}`
 

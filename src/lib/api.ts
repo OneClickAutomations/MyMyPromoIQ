@@ -66,6 +66,9 @@ export type GenerateInput = {
   clipDurationSeconds?: number
   /** Creator selfie/reference for the start-frame composite (character lock). */
   creatorReferenceImageUrl?: string
+  /** Output aspect ratio (9:16, 16:9, 4:5). Mapped to a Veo-supported value
+   *  server-side (4:5 → 9:16 if Veo rejects it). */
+  aspectRatio?: string
 }
 
 export type GenerateResponse = {
