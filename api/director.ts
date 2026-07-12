@@ -70,6 +70,10 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     // Free-text notes from the "Regenerate" panel — incorporated into the
     // whole storyboard with priority over the generic style brief.
     regenerationNotes,
+    // Type-specific wizard answers (the result, the first impression, the 3
+    // steps, …) keyed by question label — the concrete specifics the user gave
+    // for this ad format. The planner must weave these into the actual dialogue.
+    answers,
   } = body
 
   // Who's on camera. Without this, the planner invents a person and defaults to
@@ -103,6 +107,17 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
   const brandSection = [brandVoice ? `Brand voice: ${brandVoice}.` : '', cta ? `End on this CTA: "${cta}".` : ''].filter(Boolean).join(' ')
   const hookSection = hookLine?.trim() ? `\nHOOK LINE (given by the user) — clip 1's dialogue must open with or closely echo this line verbatim, then continue naturally: "${hookLine.trim()}"` : ''
   const regenSection = regenerationNotes?.trim() ? `\nREGENERATION NOTES from the user — incorporate these specific changes into the storyboard (priority over the generic style direction where they conflict): ${regenerationNotes.trim()}` : ''
+  // The user's concrete, type-specific answers are the truth of this ad — the
+  // real result, the real first impression, the real steps. Ground the dialogue
+  // in them; never invent generic filler when a specific answer exists.
+  const answerLines = answers && typeof answers === 'object'
+    ? Object.entries(answers as Record<string, string>)
+        .filter(([, v]) => typeof v === 'string' && v.trim())
+        .map(([k, v]) => `- ${k}: ${String(v).trim()}`)
+    : []
+  const answersSection = answerLines.length
+    ? `\nWHAT THE USER TOLD US (ground the dialogue in these specifics — use their real words/claims, don't invent vaguer ones):\n${answerLines.join('\n')}`
+    : ''
 
   const system = `You are an expert direct-response copywriter AND short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3. The dialogue you write is real sales copy, not filler — it must be good enough to actually move someone to buy, using the same craft a senior DR copywriter would bring to a script.
 
@@ -144,7 +159,7 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
-Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}
+Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}${answersSection}
 ${brandSection}
 
 Plan the ${desired} clips.`,

@@ -748,6 +748,10 @@ export type StoryboardPlanInput = {
   /** Free-text keywords/notes from the "Regenerate" panel — incorporated with
    *  priority over the generic style brief. */
   regenerationNotes?: string
+  /** Type-specific wizard answers (result, first impression, the 3 steps, …),
+   *  keyed by question label. The planner weaves these concrete specifics into
+   *  the spoken dialogue so the ad reflects what the user actually said. */
+  answers?: Record<string, string>
 }
 
 export async function writeAdScript(input: {

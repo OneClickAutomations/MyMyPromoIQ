@@ -66,6 +66,7 @@ import { composeRenderPrompt } from '../lib/studio/compositionEngine'
 import { buildClipPromptPackage, resolveAdType, type AdTypeId } from '../lib/studio/promptEngineBridge'
 import PromptPreview from '../components/studio/PromptPreview'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
+import TypeQuestions from '../components/studio/TypeQuestions'
 
 /** Nearest legacy preset per engine ad type — seeds camera/lighting defaults. */
 const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
@@ -640,6 +641,7 @@ export default function CommercialStudio() {
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
+        answers: brief.wizardAnswers,
       })
       setWizardPlan(plan)
       setWizardPhase('plan')
@@ -667,6 +669,7 @@ export default function CommercialStudio() {
         brandVoice: savedBrand?.brand_voice ?? undefined,
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
+        answers: brief.wizardAnswers,
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -995,12 +998,26 @@ export default function CommercialStudio() {
     )
   }
 
-  // Step 5: Scene (product action)
+  // Step 5: Scene — type-specific questions (the content specifics for this ad
+  // format) + how the creator interacts with the product. The questions change
+  // completely based on the chosen ad type; their answers ground the storyboard
+  // planner's dialogue in what the user actually told us.
   function renderScene() {
+    const adType = resolveAdType(brief.style.commercialStyle)
     return (
       <div className="space-y-6">
-        <StepHeader title="Set the scene" desc="How should the creator interact with your product?" onBack={goBack} />
+        <StepHeader title="Tell us about your ad" desc="A few specifics for this format — then how the creator interacts with your product." onBack={goBack} />
 
+        <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+          <TypeQuestions
+            adType={adType}
+            answers={brief.wizardAnswers ?? {}}
+            onChange={(next) => patch({ wizardAnswers: next })}
+          />
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-medium text-ink">How should the creator interact with your product?</p>
         <div className="grid grid-cols-2 gap-3">
           {PRODUCT_ACTION_OPTIONS.map(opt => (
             <button key={opt.id} type="button"
@@ -1017,6 +1034,7 @@ export default function CommercialStudio() {
               <p className="mt-1 text-xs leading-relaxed text-ink-faint">{opt.phrase}</p>
             </button>
           ))}
+        </div>
         </div>
 
         <div className="flex flex-col gap-3">

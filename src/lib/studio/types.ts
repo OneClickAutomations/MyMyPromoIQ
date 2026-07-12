@@ -125,6 +125,12 @@ export interface CreativeBrief {
     cta?: string
   }
 
+  /** Type-specific wizard answers, keyed by the ad type's question ids (see
+   *  the prompt engine's AdTypeTemplate.wizardQuestions). These are the concrete
+   *  specifics — the result, the first impression, the 3 steps — that the
+   *  storyboard planner turns into real dialogue for this format. */
+  wizardAnswers?: Record<string, string>
+
   storyboard: {
     scenes: StoryboardScene[]
     approvedAt?: string
@@ -189,6 +195,7 @@ export function createEmptyBrief(id: string, userId: string): CreativeBrief {
     style: { commercialStyle: '', cameraDirection: [] },
     voice: { mode: 'ai_generated' },
     script: { generationMode: 'product' },
+    wizardAnswers: {},
     storyboard: { scenes: [] },
     render: { statusLog: [] },
   }
