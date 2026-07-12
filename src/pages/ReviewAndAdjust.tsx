@@ -4,6 +4,8 @@ import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
+import AdTypeSelector from '../components/studio/AdTypeSelector'
+import { resolveAdType } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
@@ -79,6 +81,7 @@ export default function ReviewAndAdjust() {
   const [productName, setProductName] = useState('')
   const [productDescription, setProductDescription] = useState('')
   const [productSourceUrl, setProductSourceUrl] = useState<string | undefined>(undefined)
+  const [productIntent, setProductIntent] = useState<string | undefined>(undefined)
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
   const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
@@ -199,12 +202,14 @@ export default function ReviewAndAdjust() {
     primaryImage: productImageUrl,
     name: productName,
     description: productDescription,
+    intent: productIntent,
     sourceUrl: productSourceUrl,
   }
   function onProductChange(v: ProductInputValue) {
     setProductImageUrl(v.primaryImage)
     setProductName(v.name)
     setProductDescription(v.description)
+    setProductIntent(v.intent)
     setProductSourceUrl(v.sourceUrl)
   }
 
@@ -297,6 +302,7 @@ export default function ReviewAndAdjust() {
         // the UI (a single 8s clip stays a single clip, not silently 2).
         clipCount: estimateClipCount(durationSeconds),
         referenceDurationSeconds: durationSeconds,
+        intent: productIntent || undefined,
         creator: creatorArg,
         hookLine: script.trim() || undefined,
         regenerationNotes: regenerationNotes?.trim() || undefined,
@@ -558,32 +564,16 @@ export default function ReviewAndAdjust() {
               seconds, Claude figures out how many scenes of what length fit. */}
           <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
 
-          {/* Style picker */}
-          <div className="space-y-2">
+          {/* Ad type — the full 12-format selector (same engine templates as the
+              Build-From-Scratch studio) instead of the old 4 canned styles. */}
+          <div className="space-y-3">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Ad style
+              Ad type
               {isFromClone && (
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {STYLE_OPTIONS.map(opt => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => setStyle(opt.id)}
-                  className={`flex flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-left transition-all disabled:opacity-50 ${
-                    style === opt.id
-                      ? 'border-fire-start/50 bg-fire-start/[0.08] text-ink'
-                      : 'border-white/[0.08] bg-void-800/60 text-ink-muted hover:border-white/20'
-                  }`}
-                >
-                  <span className="text-sm font-semibold leading-tight">{opt.label}</span>
-                  <span className="text-[10px] text-ink-faint leading-snug">{opt.hint}</span>
-                </button>
-              ))}
-            </div>
+            <AdTypeSelector selected={resolveAdType(style)} onSelect={(ad) => setStyle(ad)} />
           </div>
 
           {/* Script / hook */}

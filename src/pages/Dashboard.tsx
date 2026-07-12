@@ -16,7 +16,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
-import { generateDashboardArt, DASHBOARD_ART_KEYS, type DashboardArtKey } from '../lib/api'
+import { generateDashboardArt, DASHBOARD_ART_KEYS, type DashboardArtKey, listCampaigns, listBriefs, type StoredCampaign, type StoredBriefSummary } from '../lib/api'
 import {
   ArrowRight, Check, PlayIcon, Spark, Upload, Users, ChevronRight, RefreshCw,
   Film, Compass, Package, Star, TrendingUp,
@@ -30,7 +30,6 @@ const FALLBACK: Record<DashboardArtKey, string> = {
   buildC:       '/assets/ad-life.jpg',
   productHero:  '/assets/ad-splash.jpg',
 }
-const CAMPAIGN_STILLS = ['/assets/ugc-main.jpg', '/assets/ugc-demo.jpg', '/assets/ad-splash.jpg', '/assets/ad-life.jpg', '/assets/ad-unbox.jpg', '/assets/ugc-lifestyle.jpg']
 
 const ART_LS_KEY = 'promoiq_dashboard_art'
 
@@ -236,24 +235,6 @@ function HeroCard({ to, title, subtitle, cta, tone, badge, children }: {
   )
 }
 
-// ── In-progress + recent (static, curated; upgrade with generated creators) ────
-type Mode = 'CLONE' | 'BUILD' | 'QUICK'
-const MODE_CHIP: Record<Mode, string> = { CLONE: 'text-fire-start', BUILD: 'text-gold', QUICK: 'text-emerald-300' }
-
-const IN_PROGRESS: Array<{ name: string; mode: Mode; done: number; total: number; generating: boolean; updated: string; art: DashboardArtKey }> = [
-  { name: 'Glow Serum — UGC',    mode: 'CLONE', done: 3, total: 7, generating: true,  updated: '2 min ago', art: 'cloneCreator' },
-  { name: 'Daily Greens Launch', mode: 'BUILD', done: 5, total: 5, generating: false, updated: '1 hr ago',  art: 'buildA' },
-  { name: 'Recovery Fuel Promo', mode: 'QUICK', done: 1, total: 3, generating: true,  updated: 'Yesterday', art: 'buildB' },
-  { name: 'Morning Ritual Ad',   mode: 'QUICK', done: 2, total: 4, generating: false, updated: 'Yesterday', art: 'buildC' },
-]
-const RECENT = [
-  { name: 'Skincare Routine',    views: '12.1K views', when: '3 days ago',  duration: '0:27' },
-  { name: 'Recovery Fuel',       views: '9.2K views',  when: '5 days ago',  duration: '0:24' },
-  { name: 'Serum Drop',          views: '18.7K views', when: '1 week ago',  duration: '0:21' },
-  { name: 'Morning Ritual',      views: '15.3K views', when: '1 week ago',  duration: '0:29' },
-  { name: 'Unboxing — Glow Kit', views: '8.7K views',  when: '1 week ago',  duration: '0:18' },
-  { name: 'Pre-Workout Boost',   views: '11.4K views', when: '2 weeks ago', duration: '0:30' },
-]
 const STATS = [
   { icon: Film,    label: 'Videos generated', value: '128' },
   { icon: Compass, label: 'Ads analyzed',     value: '52' },
@@ -261,39 +242,33 @@ const STATS = [
   { icon: Star,    label: 'Credits remaining', value: '1,250', gold: true },
 ]
 
-function ProgressCard({ p, art }: { p: (typeof IN_PROGRESS)[number]; art: ArtMap }) {
-  const pct = Math.round((p.done / p.total) * 100)
-  return (
-    <Link to="/forge/generate" className="group relative w-[300px] flex-shrink-0 overflow-hidden rounded-2xl bg-void-700 ring-1 ring-white/[0.06] transition-all duration-300 hover:-translate-y-0.5 hover:ring-fire-start/30">
-      <div className="relative aspect-video overflow-hidden">
-        <ArtImg artKey={p.art} art={art} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
-        <span className={`absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide backdrop-blur-md ${MODE_CHIP[p.mode]}`}>{p.mode}</span>
-        {p.generating && (
-          <span className="absolute right-2.5 top-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/50 px-2 py-0.5 text-[9px] font-semibold text-fire-start backdrop-blur-md">
-            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-fire-start" /> Rendering
-          </span>
-        )}
-        <span className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-          <span className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/40 backdrop-blur-md"><PlayIcon className="ml-0.5 h-5 w-5 text-white" /></span>
-        </span>
-        <div className="absolute inset-x-0 bottom-0 h-1 bg-black/40"><div className="h-full bg-gradient-fire transition-all duration-500" style={{ width: `${pct}%` }} /></div>
-      </div>
-      <div className="p-3.5">
-        <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
-        <div className="mt-1.5 flex items-center justify-between text-[11px]">
-          <span className="font-medium text-ink-muted">{p.done} / {p.total} clips</span>
-          <span className="text-ink-faint">{p.updated}</span>
-        </div>
-      </div>
-    </Link>
-  )
-}
-
 export default function Dashboard() {
   const { user } = useUser()
   const firstName = user?.firstName || (user?.primaryEmailAddress?.emailAddress?.split('@')[0] ?? '')
   const { art, done, error, generateAll, generating } = useDashboardArt()
+
+  // Real campaigns + drafts (replaces the old mock stills). Best-effort — if
+  // persistence is unavailable the sections simply show their empty prompts.
+  const [realCampaigns, setRealCampaigns] = useState<StoredCampaign[]>([])
+  const [realVideos, setRealVideos] = useState<Record<string, string>>({})
+  const [realDrafts, setRealDrafts] = useState<StoredBriefSummary[]>([])
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [{ campaigns, videos }, { briefs }] = await Promise.all([
+          listCampaigns(user.id),
+          listBriefs(user.id).catch(() => ({ briefs: [] as StoredBriefSummary[] })),
+        ])
+        if (cancelled) return
+        setRealCampaigns(campaigns.slice(0, 6))
+        setRealVideos(videos)
+        setRealDrafts(briefs.filter(b => b.status === 'draft').slice(0, 4))
+      } catch { /* persistence unavailable — leave empty */ }
+    })()
+    return () => { cancelled = true }
+  }, [user?.id])
 
   return (
     <AppShell>
@@ -332,39 +307,78 @@ export default function Dashboard() {
           </HeroCard>
         </div>
 
-        {/* In progress */}
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">In Progress</p>
-            <Link to="/history" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted transition-colors hover:text-fire-start">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
-          </div>
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            {IN_PROGRESS.map((p, i) => <ProgressCard key={i} p={p} art={art} />)}
-          </div>
-        </section>
+        {/* In progress — real drafts (resume where you left off) */}
+        {realDrafts.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">In Progress</p>
+              <Link to="/history" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted transition-colors hover:text-fire-start">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {realDrafts.map(d => {
+                const prod = d.product as Record<string, unknown>
+                const name = (prod?.productName as string) || 'Untitled draft'
+                const imgUrl = prod?.productImageUrl as string | undefined
+                return (
+                  <Link key={d.id} to={`/studio/new?brief=${d.id}`} className="group relative w-[300px] flex-shrink-0 overflow-hidden rounded-2xl bg-void-700 ring-1 ring-white/[0.06] transition-all duration-300 hover:-translate-y-0.5 hover:ring-fire-start/30">
+                    <div className="relative aspect-video overflow-hidden">
+                      {imgUrl
+                        ? <img src={imgUrl} alt="" className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                        : <div className="grid h-full w-full place-items-center bg-void-800"><Film className="h-7 w-7 text-ink-faint/40" /></div>}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
+                      <span className="absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-ink-muted backdrop-blur-md">Draft</span>
+                    </div>
+                    <div className="p-3.5">
+                      <p className="truncate text-sm font-semibold text-ink">{name}</p>
+                      <p className="mt-1.5 text-[11px] text-ink-faint">Resume editing →</p>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          </section>
+        )}
 
-        {/* Recent campaigns */}
-        <section>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Recent Campaigns</p>
-            <Link to="/history" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted transition-colors hover:text-fire-start">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
-          </div>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            {RECENT.map((c, i) => (
-              <Link key={i} to="/history" className="group block">
-                <div className="relative aspect-video overflow-hidden rounded-xl ring-1 ring-white/[0.06] transition-all duration-300 group-hover:ring-fire-start/30">
-                  <img src={CAMPAIGN_STILLS[i % CAMPAIGN_STILLS.length]} alt="" className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                  <span className="absolute right-2 bottom-2 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">{c.duration}</span>
-                  <span className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                    <span className="grid h-11 w-11 place-items-center rounded-full border border-white/25 bg-black/40 backdrop-blur-md"><PlayIcon className="ml-0.5 h-4 w-4 text-white" /></span>
-                  </span>
-                </div>
-                <p className="mt-2 truncate text-sm font-semibold text-ink">{c.name}</p>
-                <p className="text-[11px] text-ink-faint">{c.views} · {c.when}</p>
-              </Link>
-            ))}
-          </div>
-        </section>
+        {/* Recent campaigns — real finished ads */}
+        {realCampaigns.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Recent Campaigns</p>
+              <Link to="/history" className="inline-flex items-center gap-1 text-xs font-semibold text-ink-muted transition-colors hover:text-fire-start">View all <ChevronRight className="h-3.5 w-3.5" /></Link>
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+              {realCampaigns.map(c => {
+                const videoUrl = realVideos[c.id]
+                return (
+                  <Link key={c.id} to={`/studio?campaign=${c.id}`} className="group block">
+                    <div className="relative aspect-[9/16] overflow-hidden rounded-xl bg-void-700/60 ring-1 ring-white/[0.06] transition-all duration-300 group-hover:ring-fire-start/30">
+                      {videoUrl
+                        ? <video src={`${videoUrl}#t=0.1`} poster={c.product_image_url ?? undefined} muted loop playsInline preload="metadata" className="h-full w-full object-cover" />
+                        : c.product_image_url
+                          ? <img src={c.product_image_url} alt="" className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                          : <div className="grid h-full w-full place-items-center"><Film className="h-6 w-6 text-ink-faint/40" /></div>}
+                      <span className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                        <span className="grid h-11 w-11 place-items-center rounded-full border border-white/25 bg-black/40 backdrop-blur-md"><PlayIcon className="ml-0.5 h-4 w-4 text-white" /></span>
+                      </span>
+                    </div>
+                    <p className="mt-2 truncate text-sm font-semibold text-ink">{c.name}</p>
+                    <p className="text-[11px] capitalize text-ink-faint">{c.style?.replace(/[-_]/g, ' ') ?? 'custom'}</p>
+                  </Link>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Nothing yet — a single honest prompt instead of fake stills */}
+        {realDrafts.length === 0 && realCampaigns.length === 0 && (
+          <section className="rounded-2xl border border-dashed border-white/[0.10] px-6 py-10 text-center">
+            <div className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-2xl bg-gradient-fire shadow-fire-soft"><Film className="h-5 w-5 text-white" /></div>
+            <h3 className="text-base font-bold text-ink">No campaigns yet</h3>
+            <p className="mx-auto mt-1 max-w-xs text-sm text-ink-muted">Generate your first ad and it'll show up here — ready to open, download, or share.</p>
+            <Link to="/studio/new" className="btn-fire mx-auto mt-5 inline-flex gap-2"><Spark className="h-4 w-4" /> Create your first ad</Link>
+          </section>
+        )}
 
         {/* Stats strip */}
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
