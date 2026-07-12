@@ -11,11 +11,15 @@
  * (api/director.ts CLIP_DURATIONS/WORDS_PER_SECOND) — the server plan is
  * always the authoritative one; this just sets expectations before generating.
  */
-import { estimateClipCount, WORDS_PER_SECOND } from '../../lib/studio/storyboard'
+import { estimateClipCount, WORDS_PER_SECOND, MAX_CLIP_SECONDS } from '../../lib/studio/storyboard'
 
-const MIN = 15
-const MAX = 60
-const STEP = 5
+// Veo renders at most 8s per clip. The slider steps in whole-clip units so the
+// on-screen length is always achievable: 8s = one generation (no stitching),
+// 16s = two clips stitched, and so on. This is why "one video" can never be
+// 30s — a single generation tops out at 8s.
+const MIN = MAX_CLIP_SECONDS          // 8s — one clip
+const MAX = MAX_CLIP_SECONDS * 8      // 64s — eight clips
+const STEP = MAX_CLIP_SECONDS
 
 function estimateWords(totalSeconds: number): number {
   return Math.round(totalSeconds * WORDS_PER_SECOND)
@@ -60,12 +64,14 @@ export default function DurationSlider({ value, onChange, disabled }: { value: n
       </div>
 
       <div className="mt-2 flex justify-between text-[10px] font-medium text-ink-faint">
-        <span>{MIN}s</span>
-        <span>{MAX}s</span>
+        <span>{MIN}s · 1 clip</span>
+        <span>{MAX}s · {MAX / MAX_CLIP_SECONDS} clips</span>
       </div>
 
       <p className="mt-3 text-[11px] text-ink-muted">
-        ≈ {clips} scene{clips === 1 ? '' : 's'} · ~{words} words spoken · Claude adapts the script and scene count to fit {value}s exactly.
+        {clips === 1
+          ? `One clip, up to ${MAX_CLIP_SECONDS}s — a single generation, no stitching. ~${words} words spoken.`
+          : `${clips} clips of up to ${MAX_CLIP_SECONDS}s each, stitched into one ~${value}s ad · ~${words} words spoken. Claude sizes the script to fit.`}
       </p>
     </div>
   )

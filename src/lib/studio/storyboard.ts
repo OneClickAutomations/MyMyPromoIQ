@@ -18,11 +18,14 @@ export function maxWords(durationSeconds: number): number {
   return Math.floor(durationSeconds * WORDS_PER_SECOND)
 }
 
-/** Mirrors the server planner's clip-count inference (api/director.ts
- *  planStoryboard) so any client-side estimate matches what will actually be
- *  planned for a given target total duration. */
+/** Veo renders at most 8s per clip, so a video's clip count is the total
+ *  duration divided by that ceiling — never fewer than 1. A single ~8s ad is
+ *  ONE clip (one generation, no stitching); longer ads are several clips
+ *  stitched together. This is the honest math the UI shows the user, and the
+ *  count the client passes to the planner so client and server agree exactly. */
+export const MAX_CLIP_SECONDS = 8
 export function estimateClipCount(totalSeconds: number): number {
-  return Math.max(2, Math.min(10, Math.round(totalSeconds / 5)))
+  return Math.max(1, Math.min(10, Math.ceil(totalSeconds / MAX_CLIP_SECONDS)))
 }
 
 export function countWords(text: string): number {
