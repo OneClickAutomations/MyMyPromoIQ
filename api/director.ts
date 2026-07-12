@@ -75,6 +75,8 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     // steps, …) keyed by question label — the concrete specifics the user gave
     // for this ad format. The planner must weave these into the actual dialogue.
     answers,
+    // Campaign goal — steers the hook/angle/CTA toward the objective.
+    intent,
   } = body
 
   // Who's on camera. Without this, the planner invents a person and defaults to
@@ -119,6 +121,9 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
   const answersSection = answerLines.length
     ? `\nWHAT THE USER TOLD US (ground the dialogue in these specifics — use their real words/claims, don't invent vaguer ones):\n${answerLines.join('\n')}`
     : ''
+  const intentSection = intent && String(intent).trim()
+    ? `\nCAMPAIGN GOAL: ${String(intent).trim()} — bias the hook, emotional angle, and CTA toward achieving this objective (e.g. a conversions goal wants a sharper offer/CTA; a brand-awareness goal wants a memorable, shareable hook).`
+    : ''
 
   const system = `You are an expert direct-response copywriter AND short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3. The dialogue you write is real sales copy, not filler — it must be good enough to actually move someone to buy, using the same craft a senior DR copywriter would bring to a script.
 
@@ -160,7 +165,7 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
-Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}${answersSection}
+Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}${answersSection}${intentSection}
 ${brandSection}
 
 Plan the ${desired} clips.`,
@@ -292,6 +297,42 @@ Rules:
   return res.status(200).json({ enhanced: enhanced || text.trim() })
 }
 
+/** Enrich a thin product description (or just a name) into a fuller one the
+ *  script writer / Creative Direction can actually use — what it is, who it's
+ *  for, and the core benefit — biased toward the campaign intent when given. */
+async function enhanceDescription(body: Record<string, any>, res: VercelResponse) {
+  const { name, description, intent } = body
+  const seed = (description || name || '').toString().trim()
+  if (!seed) return res.status(400).json({ error: 'Add a product name or a few words first.' })
+
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 220,
+    system: `You sharpen a rough product description into a tight, concrete one an ad scriptwriter can use. Given a product name and/or a thin description${intent ? ', plus the campaign intent' : ''}, write 1–2 sentences that state: what the product is, who it's for, and the single core benefit.
+
+Rules:
+- Stay faithful to what's given — never invent a product category or feature that contradicts the input. If the input is only a name, infer the most likely product conservatively.
+- Concrete and specific — real benefit, real audience — not marketing fluff.
+- No hype words: amazing, incredible, revolutionary, game-changing, best-in-class, premium, luxurious.
+- No hashtags, emojis, or quotes.
+- Output ONLY the improved description. No preamble.`,
+    messages: [{
+      role: 'user',
+      content: `Product name: ${name || '(none)'}
+Current description: ${description || '(none)'}${intent ? `\nCampaign intent: ${intent}` : ''}
+
+Write the improved description.`,
+    }],
+  })
+
+  const enhanced = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim()
+
+  return res.status(200).json({ enhanced: enhanced || seed })
+}
+
 /**
  * "Creative Direction" mode — the AI-authored alternative to answering the
  * type-specific wizard questions by hand. Reads the ad type's real
@@ -304,7 +345,7 @@ Rules:
  * specific product, never generic filler.
  */
 async function autoAnswerWizard(body: Record<string, any>, res: VercelResponse) {
-  const { adType, productName, description, creator } = body
+  const { adType, productName, description, intent, creator } = body
   if (!description && !productName) {
     return res.status(400).json({ error: 'description or productName is required' })
   }
@@ -344,7 +385,7 @@ Include every question id listed. No other keys.`,
       role: 'user',
       content: `Product name: ${productName || '(unnamed)'}
 Product description: ${description || '(none given)'}
-Ad format: ${template.displayName} — ${template.description}
+Ad format: ${template.displayName} — ${template.description}${intent ? `\nCampaign goal: ${intent} — bias the hook, angle, and CTA toward this objective.` : ''}
 ${creatorLine}
 
 Answer these questions as if you are the creator, in character, selling this exact product:
@@ -403,6 +444,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director enhance-prompt]', err)
       const message = err instanceof Error ? err.message : 'Enhancement failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'enhance-description') {
+    try {
+      return await enhanceDescription(body, res)
+    } catch (err) {
+      console.error('[/api/director enhance-description]', err)
+      const message = err instanceof Error ? err.message : 'Description enhancement failed.'
       return res.status(502).json({ error: message })
     }
   }
