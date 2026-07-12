@@ -88,6 +88,11 @@ export interface EngineBrief {
   resolution?: Resolution
   /** Total clips in the sequence (drives continuity phrasing). */
   clipCount?: number
+  /** When true, the product may float/levitate (the user explicitly wants it,
+   *  e.g. a surreal product reveal). Default false → the engine hard-grounds
+   *  the product in a hand or on a surface and adds anti-gravity negatives, so
+   *  a testimonial never shows a product hovering unheld. */
+  allowFloating?: boolean
 }
 
 export interface VeoPromptOutput {

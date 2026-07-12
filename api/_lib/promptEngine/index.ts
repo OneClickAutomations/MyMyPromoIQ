@@ -53,7 +53,7 @@ export function buildPromptPackage(clip: EngineClip, brief: EngineBrief): Prompt
 
   const { prompt: veoPrompt } = buildVeoPrompt(clip, brief, { template, beat })
   const nanaBananaPrompt = buildNanaBananaPrompt(clip, brief, { template, beat })
-  const negativePrompt = buildNegativePrompt(brief.adType, template.negativePromptAdditions)
+  const negativePrompt = buildNegativePrompt(brief.adType, template.negativePromptAdditions, brief.allowFloating)
   const validation: ValidationResult = validateVeoPrompt(veoPrompt, clip.durationSeconds)
 
   return {

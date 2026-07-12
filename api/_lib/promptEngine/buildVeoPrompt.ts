@@ -114,6 +114,13 @@ export function buildVeoPrompt(
       parts.push(`${identity}.`)
       parts.push(`${productAnchor}.`)
       parts.push(stripBanned(action) + (action.trim().endsWith('.') ? '' : '.'))
+      // Physics grounding (unless the user opted into floating). The product
+      // must obey gravity — held with a real grip or set on a surface, never
+      // hovering — and hands must be anatomically correct. This is the fix for
+      // products floating unheld and mangled hands in testimonial-style ads.
+      if (!brief.allowFloating) {
+        parts.push('The product stays physically supported at all times — held in a hand with fingers wrapped around it and its weight resting in the palm, or set down on a solid surface; it never hovers, floats, or hangs unsupported, and always obeys gravity. Hands are anatomically correct with five fingers and a natural, believable grip on the product.')
+      }
     } else {
       // Continuation: short descriptor, no re-establishing.
       parts.push(`${shot}, continuing the same shot.`)
