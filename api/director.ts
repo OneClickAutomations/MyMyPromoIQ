@@ -10,6 +10,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
+import { getTemplate, type AdTypeId } from './_lib/promptEngine/index.js'
 
 const STYLE_BLURBS: Record<string, string> = {
   ugc_testimonial:   'authentic UGC testimonial — real person, phone-shot feel',
@@ -291,6 +292,85 @@ Rules:
   return res.status(200).json({ enhanced: enhanced || text.trim() })
 }
 
+/**
+ * "Creative Direction" mode — the AI-authored alternative to answering the
+ * type-specific wizard questions by hand. Reads the ad type's real
+ * wizardQuestions from the prompt engine template (so the two modes always
+ * stay in lockstep — new ad types automatically get both), then has Claude
+ * invent a complete, specific, on-brand answer to EVERY question by reasoning
+ * about the product, its title/description, the chosen creator/character
+ * type, and direct-response UGC copywriting craft — hook, tone, proof, CTA,
+ * all grounded in claims a real person could plausibly make about this
+ * specific product, never generic filler.
+ */
+async function autoAnswerWizard(body: Record<string, any>, res: VercelResponse) {
+  const { adType, productName, description, creator } = body
+  if (!description && !productName) {
+    return res.status(400).json({ error: 'description or productName is required' })
+  }
+  const template = getTemplate((adType as AdTypeId) || 'testimonial')
+
+  let creatorLine = 'Creator: unspecified — write as a believable, relatable person for this product\'s audience.'
+  if (creator?.source === 'uploaded') {
+    creatorLine = 'Creator: a specific real person (their look is fixed by an uploaded photo) — write only what they SAY and CLAIM, never describe their appearance.'
+  } else if (creator?.source === 'generated') {
+    const attrs = [creator.gender, creator.ageRange, creator.ethnicity].filter(Boolean).join(', ')
+    if (attrs) creatorLine = `Creator: ${attrs} — write dialogue/claims that read as authentic coming from this person.`
+  }
+
+  const questionList = template.wizardQuestions
+    .map((q, i) => `${i + 1}. [id: ${q.id}] ${q.question}`)
+    .join('\n')
+
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 700,
+    system: `You are a senior direct-response copywriter who specializes in UGC (user-generated-content-style) ad scripts. You are answering, ON BEHALF OF a creator, the exact questions a wizard would ask a real person before writing a "${template.displayName}" ad (${template.description}).
+
+Your answers become the raw material for the actual video script — they must read like something a real, specific person would say about THIS specific product, not generic ad copy. Apply direct-response craft:
+- HOOK: a pattern-interrupt or a genuinely surprising, specific claim — never "I love this product" energy.
+- TONE: match ${template.displayName} conventions (${template.hookTypes.join(', ')}).
+- PROOF: concrete, plausible specifics — a number, a timeframe, a before/after, a sensory detail — never vague superlatives ("amazing", "life-changing").
+- CTA: a direct, specific push tied to what was just claimed, never a generic "check it out".
+- Ground every answer in the ACTUAL product description given — do not invent features that contradict it, but you MAY invent a plausible personal anecdote/result/context that a real user of this exact product could have.
+- Keep each answer to ONE tight, spoken-sounding sentence (this is dialogue material, not a paragraph).
+- Never use these words: cinematic, professional, amazing, incredible, perfect, stunning, seamless, elegant, luxurious, premium, life-changing.
+
+Respond with STRICT JSON only, no markdown, no preamble:
+{"answers": {"<question id>": "<your answer>", ...}}
+Include every question id listed. No other keys.`,
+    messages: [{
+      role: 'user',
+      content: `Product name: ${productName || '(unnamed)'}
+Product description: ${description || '(none given)'}
+Ad format: ${template.displayName} — ${template.description}
+${creatorLine}
+
+Answer these questions as if you are the creator, in character, selling this exact product:
+${questionList}`,
+    }],
+  })
+
+  const rawText = message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text?.trim() ?? '{}'
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+  const byId: Record<string, string> = parsed.answers && typeof parsed.answers === 'object' ? parsed.answers : {}
+
+  // The planner keys answers by the human-readable question label (see
+  // director.ts planStoryboard's answersSection) — map id -> question here so
+  // both wizard modes produce the exact same shape for downstream planning.
+  const answers: Record<string, string> = {}
+  for (const q of template.wizardQuestions) {
+    const val = byId[q.id]
+    if (typeof val === 'string' && val.trim()) answers[q.question] = val.trim()
+  }
+  if (!Object.keys(answers).length) {
+    return res.status(502).json({ error: 'Creative Direction returned no answers. Try again.' })
+  }
+  return res.status(200).json({ answers })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -323,6 +403,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director enhance-prompt]', err)
       const message = err instanceof Error ? err.message : 'Enhancement failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'auto-answer-wizard') {
+    try {
+      return await autoAnswerWizard(body, res)
+    } catch (err) {
+      console.error('[/api/director auto-answer-wizard]', err)
+      const message = err instanceof Error ? err.message : 'Creative Direction failed.'
       return res.status(502).json({ error: message })
     }
   }

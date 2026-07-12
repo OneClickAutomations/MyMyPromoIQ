@@ -43,6 +43,7 @@ import {
   stitchVideos,
   extractLastFrame,
   planStoryboard,
+  autoAnswerWizard,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
@@ -254,6 +255,13 @@ export default function CommercialStudio() {
   const [descInput, setDescInput]         = useState('')
   const [uploadingImage, setUploadingImage] = useState(false)
   const [step1Error, setStep1Error]       = useState('')
+  // Scene step: "Write It Myself" (manual TypeQuestions) vs "Creative
+  // Direction" (Claude authors every answer — hook, tone, proof, CTA — from
+  // the product + creator + ad-copy craft). Both modes land in the same
+  // brief.wizardAnswers, so Creative Direction's output stays editable.
+  const [wizardAnswerMode, setWizardAnswerMode] = useState<'write' | 'creative'>('write')
+  const [creativeDirectionBusy, setCreativeDirectionBusy] = useState(false)
+  const [creativeDirectionError, setCreativeDirectionError] = useState('')
   const [cameraOpen, setCameraOpen]       = useState(false)
 
   // ── Voiceover (ElevenLabs) state
@@ -636,6 +644,28 @@ export default function CommercialStudio() {
       return { source: 'generated' as const, gender: a.gender || undefined, ageRange: a.ageRange || undefined, ethnicity: a.ethnicity || undefined }
     }
     return undefined
+  }
+
+  // "Creative Direction" — Claude authors every type-specific answer (hook,
+  // tone, proof, CTA) from the product + creator + UGC copywriting craft,
+  // instead of the user typing them in. Results land in the same
+  // brief.wizardAnswers as manual entry, so they stay fully editable.
+  async function generateCreativeDirection() {
+    setCreativeDirectionBusy(true)
+    setCreativeDirectionError('')
+    try {
+      const { answers } = await autoAnswerWizard({
+        adType: resolveAdType(brief.style.commercialStyle),
+        productName: brief.product.productName,
+        description: brief.product.description ?? descInput,
+        creator: planCreatorContext(),
+      })
+      patch({ wizardAnswers: { ...brief.wizardAnswers, ...answers } })
+    } catch (e) {
+      setCreativeDirectionError(e instanceof Error ? e.message : 'Could not generate creative direction.')
+    } finally {
+      setCreativeDirectionBusy(false)
+    }
   }
 
   async function runWizardPlan(clipCount?: number) {
@@ -1033,6 +1063,52 @@ export default function CommercialStudio() {
         <StepHeader title="Tell us about your ad" desc="A few specifics for this format — then how the creator interacts with your product." onBack={goBack} />
 
         <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+          <div className="mb-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setWizardAnswerMode('write')}
+              className={`flex-1 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition ${
+                wizardAnswerMode === 'write'
+                  ? 'border-fire-start/60 bg-fire-start/[0.08] text-ink'
+                  : 'border-white/[0.10] bg-void-900 text-ink-muted hover:border-white/20'
+              }`}
+            >
+              Write It Myself
+            </button>
+            <button
+              type="button"
+              onClick={() => setWizardAnswerMode('creative')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition ${
+                wizardAnswerMode === 'creative'
+                  ? 'border-fire-start/60 bg-fire-start/[0.08] text-ink'
+                  : 'border-white/[0.10] bg-void-900 text-ink-muted hover:border-white/20'
+              }`}
+            >
+              <Spark className="h-3.5 w-3.5" /> Creative Direction
+            </button>
+          </div>
+
+          {wizardAnswerMode === 'creative' && (
+            <div className="mb-4 rounded-xl border border-fire-start/20 bg-fire-start/[0.05] p-4">
+              <p className="text-xs leading-relaxed text-ink-muted">
+                Claude studies your product, its description, and your chosen creator, then writes a complete hook, proof, and CTA in this format's voice — like a senior UGC copywriter would. Review and tweak anything below.
+              </p>
+              <button
+                type="button"
+                onClick={generateCreativeDirection}
+                disabled={creativeDirectionBusy}
+                className="btn-fire mt-3 gap-1.5 px-4 py-2 text-xs disabled:opacity-50"
+              >
+                {creativeDirectionBusy
+                  ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Writing your ad…</>
+                  : <><Spark className="h-3.5 w-3.5" /> {Object.keys(brief.wizardAnswers ?? {}).length ? 'Regenerate' : 'Generate'}</>}
+              </button>
+              {creativeDirectionError && (
+                <p className="mt-2 text-xs text-fire-start">{creativeDirectionError}</p>
+              )}
+            </div>
+          )}
+
           <TypeQuestions
             adType={adType}
             answers={brief.wizardAnswers ?? {}}
