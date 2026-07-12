@@ -323,9 +323,42 @@ async function hostForStitch(urls: string[]): Promise<string[]> {
   return Promise.all(urls.map(u => (u.startsWith('data:') ? uploadAsset(u) : u)))
 }
 
-/** Stitch 2–6 silent video URLs into one concatenated MP4. */
+// Optional AWS Lambda stitch worker (offloads ffmpeg off Vercel for long ads).
+// When VITE_STITCH_LAMBDA_URL is set, stitching goes to Lambda; if that call
+// fails we fall back to the Vercel /api/stitch path so a Lambda outage never
+// blocks a render. See lambda/stitch/README.md for deployment.
+const STITCH_LAMBDA_URL = import.meta.env.VITE_STITCH_LAMBDA_URL as string | undefined
+const STITCH_SHARED_SECRET = import.meta.env.VITE_STITCH_SHARED_SECRET as string | undefined
+
+async function stitchViaLambda(hostedUrls: string[]): Promise<{ videoDataUrl: string; bytes: number; clips: number }> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (STITCH_SHARED_SECRET) headers['x-stitch-secret'] = STITCH_SHARED_SECRET
+  const res = await fetch(STITCH_LAMBDA_URL as string, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ videoUrls: hostedUrls }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  // Lambda returns { videoUrl } (a hosted https URL); the app treats
+  // videoDataUrl as a playable src, and an https URL works the same.
+  const out = await res.json()
+  return { videoDataUrl: out.videoUrl ?? out.videoDataUrl, bytes: out.bytes ?? 0, clips: out.clips ?? hostedUrls.length }
+}
+
+/** Stitch 2+ silent video URLs into one concatenated MP4. Uses the AWS Lambda
+ *  worker when configured (better for long ads), else the Vercel function. */
 export async function stitchVideos(videoUrls: string[]): Promise<{ videoDataUrl: string; bytes: number; clips: number }> {
   const hosted = await hostForStitch(videoUrls)
+
+  if (STITCH_LAMBDA_URL) {
+    try {
+      return await stitchViaLambda(hosted)
+    } catch (err) {
+      // Lambda unavailable — fall through to Vercel rather than failing the ad.
+      console.warn('[stitch] Lambda failed, falling back to /api/stitch:', err instanceof Error ? err.message : err)
+    }
+  }
+
   const res = await fetch('/api/stitch', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
