@@ -15,8 +15,8 @@ export default function History() {
       >
         <div>
           <p className="text-xs font-medium text-ink-faint md:text-sm">Your library</p>
-          <h1 className="text-[26px] font-black tracking-tight text-ink md:text-4xl">History</h1>
-          <p className="mt-1 text-sm text-ink-muted">Revisit, download, regenerate, or delete anything you've made.</p>
+          <h1 className="text-[26px] font-black tracking-tight text-ink md:text-4xl">Projects</h1>
+          <p className="mt-1 text-sm text-ink-muted">Open, edit, regenerate, download, or share anything you've made.</p>
         </div>
         <Link
           to="/studio"
