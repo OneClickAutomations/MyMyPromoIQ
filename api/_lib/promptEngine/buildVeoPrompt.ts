@@ -114,10 +114,19 @@ export function buildVeoPrompt(
     const to = ts((i + 1) * 2)
     const shot = camera
 
+    const isContinuationClip = typeof clip.order === 'number' && clip.order > 1
+
     const parts: string[] = []
     if (i === 0) {
       // First segment: full identity + product anchor + the action.
       parts.push(`${shot}.`)
+      // Continuation clips open ALREADY IN MOTION from the previous clip's final
+      // frame — this is what removes the ~1s static "flash" at every cut and the
+      // product re-popping into frame. Do not re-establish; do not hold a still
+      // opening frame.
+      if (isContinuationClip) {
+        parts.push(`This continues the SAME unbroken take from the previous clip — ${shortId} is already mid-action from the exact pose, position, and framing where the last clip ended. Begin moving on the very first frame; do NOT hold a static opening frame and do NOT re-introduce or re-reveal the product.`)
+      }
       parts.push(`${identity}.`)
       parts.push(`${productAnchor}.`)
       parts.push(stripBanned(action) + (action.trim().endsWith('.') ? '' : '.'))
