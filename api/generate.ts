@@ -593,9 +593,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const apiKey = process.env.GEMINI_API_KEY
       const dur = Number(clipDurationSeconds) || 6
       const check = validateVeoPrompt(veoPrompt, dur)
+      // A bad engine prompt must NOT dead-end the render with a 422 (the user
+      // just sees "Retry"). Log it and fall through to the legacy director-
+      // prompt path below, which can still produce a video from the same
+      // request. The client also sends productDescription/style/composedPrompt,
+      // so the fallback has everything it needs.
       if (!check.valid) {
-        return res.status(422).json({ error: 'The generated prompt failed validation.', validation: check })
-      }
+        console.warn('[generate] engine prompt failed validation, falling back to legacy path:', check.errors.join('; '))
+      } else {
 
       // Last-frame chaining wins: when the caller supplies the previous clip's
       // final frame (conditioningImageUrl), THAT is the start of this clip — a
@@ -625,6 +630,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         startFrameGenerated: !!startFrame,
         validation: check,
       })
+      } // end engine path (valid prompt)
     }
 
     if (!productDescription?.trim()) {

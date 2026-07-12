@@ -72,6 +72,9 @@ export interface CreativeBrief {
     productType?: string
     productName: string
     description?: string
+    /** Campaign goal (drive conversions, brand awareness, …) — steers the
+     *  script writer and Creative Direction toward the right objective. */
+    intent?: string
     url?: string
     /** 2x3 multi-angle turnaround sheet, once generated. Passed to Claude as a
      *  vision reference when writing the director prompt, so the product's

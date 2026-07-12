@@ -19,7 +19,7 @@ import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import CameraStudio from './CameraStudio'
 import { Upload, Camera, LinkIcon, Wand, Spark, Check, RefreshCw, Package, Plus, Trash, Grid, Download } from './icons'
-import { extractProductFromUrl, generateImage, generateModelSheet, enhancePrompt } from '../lib/api'
+import { extractProductFromUrl, generateImage, generateModelSheet, enhancePrompt, enhanceProductDescription } from '../lib/api'
 
 export interface ProductInputValue {
   /** All captured angles, newest-first. Data URLs or https URLs, up to 5. */
@@ -28,6 +28,9 @@ export interface ProductInputValue {
   primaryImage: string
   name: string
   description: string
+  /** Campaign intent (drive conversions, brand awareness, etc.) — feeds the
+   *  script writer / Creative Direction so the copy targets the right goal. */
+  intent?: string
   sourceUrl?: string
   /** 2×3 multi-angle turnaround sheet of the hero, once generated. Used as a
    *  vision reference at generation time so the product stays faithful. */
@@ -35,8 +38,18 @@ export interface ProductInputValue {
 }
 
 export const EMPTY_PRODUCT: ProductInputValue = {
-  images: [], primaryImage: '', name: '', description: '', sourceUrl: undefined, turnaroundImage: undefined,
+  images: [], primaryImage: '', name: '', description: '', intent: '', sourceUrl: undefined, turnaroundImage: undefined,
 }
+
+/** Common campaign intents offered as quick-picks (the user can also type). */
+export const INTENT_OPTIONS = [
+  'Drive conversions / sales',
+  'Brand awareness',
+  'Product launch',
+  'Retargeting / warm audience',
+  'Grow followers / engagement',
+  'Educate about the product',
+] as const
 
 type Method = 'upload' | 'camera' | 'url'
 const MAX_IMAGES = 5
@@ -157,6 +170,12 @@ export default function ProductInput({ value, onChange, className = '' }: {
   const [enhanceText, setEnhanceText] = useState('')
   const [enhanceMagicBusy, setEnhanceMagicBusy] = useState(false)
 
+  // "AI Magic" on the product Description — expands a thin description into a
+  // richer one (features, who it's for, benefit) so the script writer /
+  // Creative Direction has real material to work with.
+  const [descMagicBusy, setDescMagicBusy] = useState(false)
+  const [descMagicErr, setDescMagicErr] = useState('')
+
   // Turnaround / model-sheet state (a faithful multi-angle grid of the hero).
   const [turnaroundBusy, setTurnaroundBusy] = useState(false)
   const [turnaroundErr, setTurnaroundErr] = useState('')
@@ -273,6 +292,27 @@ export default function ProductInput({ value, onChange, className = '' }: {
       setError(e instanceof Error ? e.message : 'Enhance failed — try again.')
     } finally {
       setAiBusy(null)
+    }
+  }
+
+  /** "AI Magic" on the Description — enrich a thin product description into a
+   *  fuller one the script writer can actually use. */
+  async function magicEnhanceDescription() {
+    const seed = value.description.trim() || value.name.trim()
+    if (!seed) { setDescMagicErr('Add a product name or a few words first.'); return }
+    setDescMagicBusy(true)
+    setDescMagicErr('')
+    try {
+      const { enhanced } = await enhanceProductDescription({
+        name: value.name || undefined,
+        description: value.description || undefined,
+        intent: value.intent || undefined,
+      })
+      if (enhanced) patch({ description: enhanced })
+    } catch (e) {
+      setDescMagicErr(e instanceof Error ? e.message : 'Could not enhance the description.')
+    } finally {
+      setDescMagicBusy(false)
     }
   }
 
@@ -607,7 +647,18 @@ export default function ProductInput({ value, onChange, className = '' }: {
           />
         </div>
         <div>
-          <p className="mb-1.5 text-xs font-semibold text-ink-muted">Description</p>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-ink-muted">Description</p>
+            <button
+              type="button"
+              onClick={magicEnhanceDescription}
+              disabled={descMagicBusy}
+              title="Let AI enrich your description so the script writer has more to work with"
+              className="inline-flex items-center gap-1 rounded-lg border border-fire-start/30 bg-fire-start/[0.06] px-2 py-1 text-[11px] font-semibold text-fire-start transition hover:bg-fire-start/[0.12] disabled:opacity-50"
+            >
+              {descMagicBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Spark className="h-3 w-3" />} AI Magic
+            </button>
+          </div>
           <textarea
             value={value.description}
             onChange={e => patch({ description: e.target.value })}
@@ -615,6 +666,38 @@ export default function ProductInput({ value, onChange, className = '' }: {
             rows={2}
             className="w-full resize-none rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
           />
+          {descMagicErr && <p className="mt-1 text-[11px] text-fire-start">{descMagicErr}</p>}
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-xs font-semibold text-ink-muted">Campaign intent</p>
+          <input
+            value={value.intent ?? ''}
+            onChange={e => patch({ intent: e.target.value })}
+            list="intent-options"
+            placeholder="What's the goal? e.g. drive conversions, brand awareness…"
+            className="w-full rounded-xl border border-white/10 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+          />
+          <datalist id="intent-options">
+            {INTENT_OPTIONS.map(o => <option key={o} value={o} />)}
+          </datalist>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {INTENT_OPTIONS.slice(0, 4).map(o => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => patch({ intent: o })}
+                className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
+                  value.intent === o
+                    ? 'border-fire-start/60 bg-fire-start/[0.08] text-ink'
+                    : 'border-white/[0.10] bg-void-900 text-ink-muted hover:border-white/20'
+                }`}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-ink-faint">Steers the script — especially “Creative Direction” in the next step.</p>
         </div>
       </div>
     </div>

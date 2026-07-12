@@ -601,6 +601,7 @@ export default function CommercialStudio() {
     primaryImage: productPreview,
     name: brief.product.productName,
     description: descInput,
+    intent: brief.product.intent,
     sourceUrl: undefined,
     turnaroundImage: brief.product.turnaroundImageUrl,
   }
@@ -624,7 +625,7 @@ export default function CommercialStudio() {
     if (v.description) setDescInput(v.description)
     // Persist the turnaround sheet (generated inside ProductInput) so it's used
     // as Claude's vision reference at generation time.
-    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description, turnaroundImageUrl: v.turnaroundImage ?? brief.product.turnaroundImageUrl } })
+    patch({ product: { ...brief.product, productName: v.name || brief.product.productName, description: v.description || brief.product.description, intent: v.intent ?? brief.product.intent, turnaroundImageUrl: v.turnaroundImage ?? brief.product.turnaroundImageUrl } })
   }
 
   // ── Storyboard plan → Generate All ────────────────────────────────────────
@@ -658,6 +659,7 @@ export default function CommercialStudio() {
         adType: resolveAdType(brief.style.commercialStyle),
         productName: brief.product.productName,
         description: brief.product.description ?? descInput,
+        intent: brief.product.intent || undefined,
         creator: planCreatorContext(),
       })
       patch({ wizardAnswers: { ...brief.wizardAnswers, ...answers } })
@@ -682,6 +684,7 @@ export default function CommercialStudio() {
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
+        intent: brief.product.intent || undefined,
       })
       setWizardPlan(plan)
       setWizardPhase('plan')
@@ -710,6 +713,7 @@ export default function CommercialStudio() {
         cta: savedBrand?.cta_preferences ?? undefined,
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
+        intent: brief.product.intent || undefined,
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -747,7 +751,11 @@ export default function CommercialStudio() {
       // Engine path (used server-side only with a Gemini key):
       veoPrompt: enginePkg?.veoPrompt,
       nanaBananaPrompt: enginePkg?.nanaBananaPrompt,
-      clipDurationSeconds: clip.durationSeconds,
+      // MUST be the engine's SNAPPED duration (Veo only does 4/6/8s), not the
+      // planner's raw 4–8s — the server validates the prompt's segment count
+      // against this, and a 5s/7s mismatch was 422-ing every odd-length clip
+      // (the "Retry" error). enginePkg.durationSeconds is already snapped.
+      clipDurationSeconds: enginePkg?.durationSeconds ?? clip.durationSeconds,
       creatorReferenceImageUrl: creatorImageUrl,
       brandVoice: savedBrand?.brand_voice ?? undefined,
       brandTaglines: (savedBrand?.taglines as string[] | undefined) ?? undefined,

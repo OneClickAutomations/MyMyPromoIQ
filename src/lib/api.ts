@@ -785,6 +785,9 @@ export type StoryboardPlanInput = {
    *  keyed by question label. The planner weaves these concrete specifics into
    *  the spoken dialogue so the ad reflects what the user actually said. */
   answers?: Record<string, string>
+  /** Campaign goal (drive conversions, brand awareness, …) — steers the hook,
+   *  angle, and CTA toward the objective. */
+  intent?: string
 }
 
 export async function writeAdScript(input: {
@@ -817,6 +820,23 @@ export async function enhancePrompt(input: { text: string; productDescription?: 
   return res.json()
 }
 
+/** "AI Magic" on the product Description — enrich a thin description (or just a
+ *  product name) into a fuller one the script writer can use. Optionally biased
+ *  by the campaign intent. */
+export async function enhanceProductDescription(input: {
+  name?: string
+  description?: string
+  intent?: string
+}): Promise<{ enhanced: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'enhance-description', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 /** "Creative Direction" — the AI-authored alternative to "Write It Myself" on
  *  the type-specific wizard questions step. Claude reasons about the product,
  *  its description, the chosen creator/character type, and UGC copywriting
@@ -827,6 +847,7 @@ export async function autoAnswerWizard(input: {
   adType: string
   productName?: string
   description: string
+  intent?: string
   creator?: { source: 'uploaded' | 'generated'; gender?: string; ageRange?: string; ethnicity?: string }
 }): Promise<{ answers: Record<string, string> }> {
   const res = await fetch('/api/director', {
