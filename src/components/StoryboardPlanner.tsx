@@ -30,7 +30,7 @@ function reindex(clips: StoryboardClip[]): StoryboardClip[] {
 
 // ── One clip card ─────────────────────────────────────────────────────────────
 function ClipCard({
-  clip, index, total, selected, onToggleSelect, onPatch, onLock, onRegen, onDuplicate, onDelete, onMove, regenerating,
+  clip, index, total, selected, onToggleSelect, onPatch, onLock, onRegen, onDuplicate, onDelete, onMove, regenerating, enhanceNotes,
 }: {
   clip: StoryboardClip
   index: number
@@ -39,15 +39,20 @@ function ClipCard({
   onToggleSelect: () => void
   onPatch: (u: Partial<StoryboardClip>) => void
   onLock: () => void
-  onRegen: () => void
+  onRegen: (notes?: string) => void
   onDuplicate: () => void
   onDelete: () => void
   onMove: (dir: -1 | 1) => void
   regenerating: boolean
+  /** AI Magic: expand rough regen keywords into a concrete direction. */
+  enhanceNotes?: (text: string) => Promise<string>
 }) {
   const cap = maxWords(clip.durationSeconds)
   const used = countWords(clip.dialogue)
   const fit = wordFit(clip.dialogue, clip.durationSeconds)
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenNotes, setRegenNotes] = useState('')
+  const [magicBusy, setMagicBusy] = useState(false)
 
   return (
     <div className={`relative flex w-full flex-shrink-0 flex-col rounded-2xl border bg-[#161618] p-5 transition-colors lg:w-[320px] ${
@@ -125,8 +130,8 @@ function ClipCard({
           className={`grid h-7 w-7 place-items-center rounded-lg transition-colors ${clip.locked ? 'bg-gold/15 text-gold' : 'text-ink-faint hover:bg-white/[0.06] hover:text-ink'}`}>
           {clip.locked ? <span className="text-xs">🔒</span> : <span className="text-xs">🔓</span>}
         </button>
-        <button onClick={onRegen} disabled={clip.locked} title="Regenerate this clip"
-          className="grid h-7 w-7 place-items-center rounded-lg text-ink-faint transition-colors hover:bg-white/[0.06] hover:text-ink disabled:opacity-30">
+        <button onClick={() => setRegenOpen(o => !o)} disabled={clip.locked} title="Regenerate this clip"
+          className={`grid h-7 w-7 place-items-center rounded-lg transition-colors disabled:opacity-30 ${regenOpen ? 'bg-fire-start/15 text-fire-start' : 'text-ink-faint hover:bg-white/[0.06] hover:text-ink'}`}>
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
         <button onClick={onDuplicate} title="Duplicate"
@@ -147,24 +152,62 @@ function ClipCard({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Regenerate panel — keywords + AI Magic (parity with Quick Generate). */}
+      {regenOpen && !clip.locked && (
+        <div className="mt-3 space-y-2 rounded-xl border border-fire-start/20 bg-fire-start/[0.05] p-3">
+          <p className="text-[11px] font-medium text-ink-muted">What should change? Add a keyword or direction, then regenerate this clip.</p>
+          <textarea
+            value={regenNotes}
+            onChange={e => setRegenNotes(e.target.value)}
+            placeholder="e.g. more energy, hold the bottle lower, mention the 30-day guarantee"
+            rows={2}
+            className="w-full resize-none rounded-lg border border-white/10 bg-void-900 px-3 py-2 text-xs text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+          />
+          <div className="flex gap-2">
+            {enhanceNotes && (
+              <button
+                type="button"
+                disabled={!regenNotes.trim() || magicBusy}
+                onClick={async () => {
+                  setMagicBusy(true)
+                  try { setRegenNotes(await enhanceNotes(regenNotes.trim())) } catch { /* keep as-is */ } finally { setMagicBusy(false) }
+                }}
+                className="inline-flex items-center gap-1 rounded-lg border border-fire-start/30 bg-fire-start/[0.06] px-2.5 py-1.5 text-[11px] font-semibold text-fire-start transition hover:bg-fire-start/[0.12] disabled:opacity-40"
+              >
+                {magicBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Spark className="h-3 w-3" />} AI Magic
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { onRegen(regenNotes.trim() || undefined); setRegenOpen(false) }}
+              className="btn-fire flex-1 justify-center gap-1.5 px-3 py-1.5 text-[11px]"
+            >
+              <RefreshCw className="h-3 w-3" /> Regenerate clip
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export default function StoryboardPlanner({
   plan, onChange, onGenerate, onRegenClip, regeneratingOrder = null,
-  clipCountBusy = false, onClipCountChange, creditsPerClip = 1, renderClipExtra,
+  clipCountBusy = false, onClipCountChange, creditsPerClip = 1, renderClipExtra, enhanceNotes,
 }: {
   plan: StoryboardPlan
   onChange: (plan: StoryboardPlan) => void
   onGenerate: (clips: StoryboardClip[]) => void
-  onRegenClip?: (clip: StoryboardClip) => void
+  onRegenClip?: (clip: StoryboardClip, notes?: string) => void
   regeneratingOrder?: number | null
   clipCountBusy?: boolean
   onClipCountChange?: (n: number) => void
   creditsPerClip?: number
   /** Optional per-clip footer (e.g. the engine prompt preview). */
   renderClipExtra?: (clip: StoryboardClip) => ReactNode
+  /** AI Magic for the per-clip regenerate keyword box. */
+  enhanceNotes?: (text: string) => Promise<string>
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewing, setPreviewing] = useState(false)
@@ -275,7 +318,8 @@ export default function StoryboardPlanner({
                 onToggleSelect={() => toggleSelect(clip.id)}
                 onPatch={u => patchClip(clip.id, u)}
                 onLock={() => patchClip(clip.id, { locked: !clip.locked })}
-                onRegen={() => onRegenClip?.(clip)}
+                onRegen={(notes) => onRegenClip?.(clip, notes)}
+                enhanceNotes={enhanceNotes}
                 onDuplicate={() => {
                   const copy = { ...clip, id: `clip_${Date.now()}`, locked: false }
                   const idx = clips.findIndex(c => c.id === clip.id)

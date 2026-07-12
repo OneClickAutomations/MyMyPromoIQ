@@ -44,6 +44,7 @@ import {
   extractLastFrame,
   planStoryboard,
   autoAnswerWizard,
+  enhancePrompt,
   type StatusResponse,
   type StoredCreator,
   type StoredProduct,
@@ -707,7 +708,7 @@ export default function CommercialStudio() {
     try { await runWizardPlan(n) } finally { setWizardClipCountBusy(false) }
   }
 
-  async function regenWizardClip(clip: StoryboardClip) {
+  async function regenWizardClip(clip: StoryboardClip, notes?: string) {
     if (!wizardPlan) return
     setWizardRegenOrder(clip.order)
     try {
@@ -722,6 +723,7 @@ export default function CommercialStudio() {
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
         intent: brief.product.intent || undefined,
+        regenerationNotes: notes,
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -832,7 +834,14 @@ export default function CommercialStudio() {
 
   function retryWizardClip(clipId: string) {
     const clip = wizardPlan?.clips.find(c => c.id === clipId)
-    if (clip) void wizardQueue.retryOne(clip, wizardGenerateOne)
+    if (!clip) return
+    // Re-running a clip makes the previously assembled video stale — clear it
+    // and re-arm the auto-assemble so the final RE-STITCHES automatically once
+    // this clip finishes. (Answers "is the video re-stitched when I modify a
+    // clip?" — yes, automatically.)
+    setWizardAssembledUrl(null)
+    wizardAutoAssembledRef.current = false
+    void wizardQueue.retryOne(clip, wizardGenerateOne)
   }
 
   async function assembleWizardAd() {
@@ -1563,6 +1572,7 @@ export default function CommercialStudio() {
             clipCountBusy={wizardClipCountBusy}
             onClipCountChange={changeWizardClipCount}
             renderClipExtra={(clip) => <PromptPreview brief={brief} clip={clip} />}
+            enhanceNotes={(text) => enhancePrompt({ text, productDescription: brief.product.description ?? descInput, style: brief.style.commercialStyle }).then(r => r.enhanced)}
           />
         )}
 
