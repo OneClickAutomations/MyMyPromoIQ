@@ -97,6 +97,27 @@ const ENV_REVEAL = [
   { id: 'marble_pedestal', label: 'Marble Pedestal', phrase: 'a marble pedestal in soft shadow' },
   { id: 'bold_seamless', label: 'Bold Color', phrase: 'a bold, saturated seamless backdrop' },
 ]
+// Founder story reads as documentary intimacy — real places where a thing is made.
+const ENV_FOUNDER = [
+  { id: 'workshop_bench', label: 'Workshop', phrase: 'a working bench with tools and materials behind them' },
+  { id: 'kitchen_table', label: 'Kitchen Table', phrase: 'a home kitchen table with soft window light' },
+  { id: 'small_studio', label: 'Studio', phrase: 'a small maker studio with shelves of product batches' },
+  { id: 'home_office', label: 'Home Office', phrase: 'a lived-in home office, plants and papers in frame' },
+]
+// Day in the life — the routine's real rooms, imperfect and unstaged.
+const ENV_ROUTINE = [
+  { id: 'morning_kitchen', label: 'Morning Kitchen', phrase: 'a kitchen mid-morning-routine, coffee and clutter in frame' },
+  { id: 'bedroom_natural', label: 'Bedroom', phrase: 'a lived-in bedroom with soft natural light' },
+  { id: 'bathroom_vanity', label: 'Bathroom', phrase: 'a bright bathroom vanity mid-routine' },
+  { id: 'entryway_desk', label: 'Desk / Entryway', phrase: 'a desk or entryway with keys, a mug, everyday mess' },
+]
+// Before/after — beauty-grade settings where identical light can be held.
+const ENV_BEAUTY = [
+  { id: 'bathroom_vanity', label: 'Bathroom Vanity', phrase: 'a bathroom vanity with an even mirror light' },
+  { id: 'bedroom_vanity', label: 'Bedroom Vanity', phrase: 'a bedroom vanity with steady soft window light' },
+  { id: 'beauty_seat', label: 'Window Seat', phrase: 'a window seat with flat, consistent daylight' },
+  { id: 'clean_backdrop', label: 'Clean Backdrop', phrase: 'a plain neutral backdrop with unchanging light' },
+]
 
 /** durationSeconds * 2.5 words/second. */
 export function beatMaxWords(durationSeconds: number): number {
@@ -210,8 +231,8 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'kitchen_morning',
     hookTypes: ['relatable frustration', 'the old way vs the new way'],
     platformNotes: 'The problem beat must be instantly recognizable with sound off — exaggerate the physical failure slightly.',
-    expertSkill: 'You are shooting a contrast story. The pain must be PHYSICAL and on-camera first — a real failed attempt (spill, fumble, mess), shoulders dropping, an audible sigh — never a narrated complaint over neutral footage. Environment carries the emotion (cluttered counter, harsh light for the problem; cleaner light after). The solution lands in ONE clean motion with a satisfying contact sound — the visual contrast between the two states is the story, so the framing must let the viewer SEE the difference, not be told it. Close with a shrug-to-lens that-is-it beat.',
-    negativePromptAdditions: [],
+    expertSkill: 'You are shooting a contrast story built on a deliberate LIGHTING TURN. The problem beat is cool and cluttered — flat, slightly harsh or dim light, messy counter, tight nervous framing — and the moment the product solves it the world visibly warms and opens: light lifts, shadows soften, the frame breathes wider. That lighting shift IS the emotional payoff and must be legible with sound off. The pain must be PHYSICAL and on-camera first — a real failed attempt (spill, fumble, mess), shoulders dropping, an audible sigh — never a narrated complaint over neutral footage. The solution lands in ONE clean motion with a satisfying contact sound; the framing must let the viewer SEE the before/after difference, not be told it. Close with a shrug-to-lens that-is-it beat in the new warm light.',
+    negativePromptAdditions: ['narrated complaint over neutral footage', 'identical mood before and after'],
   },
 
   day_in_the_life: {
@@ -250,8 +271,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'golden_hour',
     hookTypes: ['aspirational-but-real', 'a calm moment', 'relatable routine'],
     platformNotes: 'Lean into believable imperfection — a slightly messy counter reads more authentic than a staged set.',
-    expertSkill: 'You are shooting lifestyle b-roll woven around a routine (genre: day-in-the-life). The product is NEVER pitched head-on — it enters mid-scene as a natural step in the routine, used without ceremony. Handheld follow at eye level, golden ambient light, real environmental mess (a mug, keys, an unmade corner) — believable imperfection outperforms staging. Proof is shown through the person\'s genuine micro-reaction (a pause, an exhale, a second glance), never a spoken claim. Keep dialogue conversational voiceover cadence, like narrating your own morning.',
+    expertSkill: 'You are shooting lifestyle b-roll woven around a routine (genre: day-in-the-life). The product is NEVER pitched head-on — it enters mid-scene as a natural step in the routine, used without ceremony, often half out of focus before the hand finds it. Handheld follow at eye level, golden ambient light that shifts naturally across the day, real environmental mess (a mug, keys, an unmade corner) — believable imperfection outperforms staging. The signature move is the OVERLOOKED-then-noticed beat: the product sits ignored in the background of an earlier shot, then becomes the quiet hinge of the routine. Proof is shown through the person\'s genuine micro-reaction (a pause, an exhale, a second glance out the window), never a spoken claim. Dialogue is soft voiceover cadence, half-heard, like narrating your own morning to no one — never ad copy.',
     negativePromptAdditions: ['staged set', 'overly tidy background'],
+    environmentPresets: ENV_ROUTINE,
   },
 
   before_after: {
@@ -288,6 +310,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     platformNotes: 'Keep lighting IDENTICAL between before and after or the transformation reads as a lighting trick, not the product.',
     expertSkill: 'You are shooting a transformation. The ONLY thing that may change between the before and after states is the subject itself — identical framing, identical lens, identical lighting direction and color temperature, or the transformation reads as a camera trick and credibility dies. Shoot the application as a macro insert (fingers, texture, product label passing the lens). The after-reveal is the emotional peak: a small, genuine reaction, not a gasp. State the timeframe out loud — specificity is the proof.',
     negativePromptAdditions: ['different lighting between before and after', 'filter change mid-clip'],
+    environmentPresets: ENV_BEAUTY,
   },
 
   tutorial: {
@@ -322,8 +345,8 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'studio_softbox',
     hookTypes: ['numbered steps', 'the mistake everyone makes'],
     platformNotes: 'Number the steps on the audio so it works saved-for-later. Keep each step to one clean physical action.',
-    expertSkill: 'You are shooting an instructional demo (genre: clarity above all). Spoken numbered steps so it works saved-for-later and sound-off with captions. One clean physical action per step — never two motions in one beat. Overhead and 45-degree tabletop grammar, hands and product fully visible, no speed ramps. Name the common mistake mid-way (it is the retention hook). End on the finished result beside the product, label to lens.',
-    negativePromptAdditions: [],
+    expertSkill: 'You are shooting an instructional demo (genre: clarity above all). Spoken numbered steps so it works saved-for-later and sound-off with captions. SIGNATURE MOTIF: return to the SAME clean overhead "reset" frame at the start of every step — identical camera height, identical layout — so each step reads as a beat in a rhythm and the viewer never loses their place; the repetition is the format\'s fingerprint. One clean physical action per step — never two motions in one beat, no speed ramps, hands and product fully visible. Name the common mistake mid-way and physically show the WRONG way for half a second before the right way (contrast is the retention hook). End on the finished result held beside the product, label to lens.',
+    negativePromptAdditions: ['jump cut mid-step', 'two actions in one step'],
   },
 
   street_interview: {
@@ -357,7 +380,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'outdoor_daylight',
     hookTypes: ['candid stranger', 'live test', 'unscripted reaction'],
     platformNotes: 'Handheld and outdoor ambience sell authenticity. A slightly imperfect frame beats a stable one here.',
-    expertSkill: 'You are shooting man-on-the-street. Authenticity signals are the format: outdoor ambience (traffic wash, passersby, wind), handheld imperfection, an off-screen interviewer\'s question starting the clip. The subject\'s cadence is unscripted — false starts, a laugh, a beat of skepticism BEFORE trying the product, then a genuine surprised reaction ON camera as they try it. The verdict is delivered to the interviewer, half to lens. Never let it feel staged: no perfect framing, no studio silence.',
+    expertSkill: 'You are shooting man-on-the-street. Authenticity signals ARE the format: outdoor ambience (traffic wash, passersby cutting through frame, wind on the mic), handheld imperfection with a real reframe or refocus, an off-screen interviewer\'s question audibly starting the clip. Make the cadence concretely unscripted: a false start or filler ("um— wait, really?"), the eyes flicking to the off-screen interviewer before answering, a half-laugh, and a visible beat of SKEPTICISM before trying the product — the arms-crossed doubt is what makes the turn land. Then a genuine, involuntary surprised reaction ON camera the instant they try it (eyebrows up, a step back). The verdict is tossed to the interviewer, only half to lens. Never let it feel staged: no perfect framing, no studio silence, no polished delivery.',
     negativePromptAdditions: ['studio backdrop', 'perfectly stable tripod'],
     environmentPresets: ENV_STREET,
   },
@@ -463,7 +486,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'studio_softbox',
     hookTypes: ['the obvious gap', 'why settle'],
     platformNotes: 'Never show or name a real competitor brand — use a plain unbranded stand-in. Keep both sides in identical light.',
-    expertSkill: 'You are shooting a side-by-side comparison. The gap must be VISIBLE, not narrated — both sides perform the same task in the same frame or in matched back-to-back shots with IDENTICAL lighting and framing per side. The rival is a plain, unbranded generic stand-in. No people on camera; a voiceover carries the argument with one concrete, checkable difference (time, count, residue). Verdict beat: the product moves center-frame in focus, the alternative pushed soft and aside.',
+    expertSkill: 'You are shooting a side-by-side comparison where the gap must be VISIBLE, not narrated. Run the SAME task on both sides under a locked split-frame with IDENTICAL lighting, distance and lens per side — the only variable allowed to change is the result, or the comparison is a rigged trick and dies. Make the difference physical and undeniable: streaks vs none, chunks vs smooth, a puddle vs a dry surface — a difference the eye settles in under a second. The rival is a plain, unbranded generic stand-in (no logos, no recognizable shape). No people on camera; a spare voiceover states ONE concrete checkable number (time, count, residue) and nothing more. Verdict beat: the product slides center-frame into sharp focus as the alternative is pushed soft and out.',
     negativePromptAdditions: ['named competitor brand', 'recognizable rival logo', 'different lighting per side'],
     needsCreator: false,
     environmentPresets: ENV_TABLETOP,
@@ -500,8 +523,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'window_light',
     hookTypes: ['origin story', 'personal conviction', 'the gap I found'],
     platformNotes: 'Sincerity over polish. A real workspace behind the founder outperforms a clean studio.',
-    expertSkill: 'You are shooting documentary intimacy (founder story). Real workspace behind them — shelves, tools, product batches — window key light, a locked-off or barely-breathing camera. The hook is a candid, specific admission of a struggle. Credibility comes from specifics: dates, batch numbers, a failure named out loud. Hands touch the product like it is theirs, because it is. The close is a warm, personal invitation, never a corporate CTA.',
+    expertSkill: 'You are shooting documentary intimacy (founder story). Real workspace behind them — shelves, tools, half-finished product batches, a whiteboard — window key light, a locked-off or barely-breathing camera on a longer lens so the background falls soft. The hook is a candid, specific admission of a struggle, delivered like a confession to one person off-lens, not a pitch to a crowd. Credibility lives entirely in specifics: a real date, a batch number, a named failure ("the first 200 units were wrong"). Hands touch the product like it is theirs, because it is — turning it, checking a seam, a small proprietary gesture. The close is a warm, personal invitation ("give it one honest week"), never a corporate CTA, never "shop now".',
     negativePromptAdditions: ['corporate boardroom', 'stock-footage feel'],
+    environmentPresets: ENV_FOUNDER,
   },
 
   hook_only: {
@@ -526,7 +550,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'beauty',
     hookTypes: ['pattern interrupt', 'open loop', 'shock open'],
     platformNotes: 'Built to be the first 4s of a longer edit or a standalone scroll-stopper. Front-load everything into frame one.',
-    expertSkill: 'You are shooting a pure pattern-interrupt (rhythm: impact-first). Frame ONE must contain the arresting thing — a fast reach, an object dropped, a snap to lens — with a sharp sound event on the very first frame. No setup, no context, no brand-first. Cut BEFORE resolution: the open loop is the mechanic; the viewer keeps watching to close it. One idea, one motion, maximum contrast (fast motion against a still frame, loud against silence).',
+    expertSkill: 'You are shooting a pure pattern-interrupt (rhythm: impact-first). Frame ONE must already contain the arresting thing — a fast reach, an object dropped, a snap of eye-contact to lens — with a sharp transient sound event landing on that very first frame (zero ramp-up). No setup, no context, no brand-first, no slow build. The mechanic is a deliberately UNCLOSED loop: pose or imply a question the frame refuses to answer, and cut on the motion BEFORE any resolution — the itch to see what happens is what holds the thumb. One idea, one motion, maximum contrast (fast against still, loud against silence, one bold element against empty space). The last frame should feel like it was clipped a half-second early on purpose.',
     negativePromptAdditions: [],
   },
 }
