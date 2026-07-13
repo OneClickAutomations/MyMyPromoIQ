@@ -125,6 +125,38 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     ? `\nCAMPAIGN GOAL: ${String(intent).trim()} — bias the hook, emotional angle, and CTA toward achieving this objective (e.g. a conversions goal wants a sharper offer/CTA; a brand-awareness goal wants a memorable, shareable hook).`
     : ''
 
+  // ── TYPE-SPECIFIC beat structure (the fix for "unboxing looks like a generic
+  // product reveal"). Pull the chosen ad type's real beat sequence from the
+  // prompt-engine template and REQUIRE the plan to follow it — an unboxing must
+  // be a package arriving/opening/first-use, a POV must be first-person hands,
+  // a product reveal has no creator, etc. This is what makes each template
+  // actually behave like its format instead of a generic hook→proof→cta arc.
+  // Map legacy/wizard style ids onto engine ad types so the right beat DNA is
+  // used even from clone mode (which may pass an old style id).
+  const LEGACY_TO_ADTYPE: Record<string, AdTypeId> = {
+    ugc_testimonial: 'testimonial', founder_story: 'founder_story',
+    luxury_commercial: 'product_reveal', cinematic_brand: 'product_reveal',
+    fast_cut_hook: 'hook_only', 'fast-cut': 'hook_only', explainer: 'tutorial',
+    'day-in-life': 'day_in_the_life',
+  }
+  const adTypeForTemplate = (LEGACY_TO_ADTYPE[style] ?? style) as AdTypeId
+  const template = getTemplate(adTypeForTemplate)
+  const fillBeat = (s: string) => s
+    .replace(/\{product\}/g, 'the product')
+    .replace(/\{creator\}/g, template.needsCreator === false ? 'no on-camera person' : 'the creator')
+    .replace(/\{scene\}/g, 'the setting')
+  const beatSequence = template.beats
+    .map((b, i) => `  ${i + 1}. ${b.name} — ${fillBeat(b.visualInstruction)}${b.dialogueTemplate ? ` (they say something like: "${b.dialogueTemplate}")` : ' (no dialogue — visual/sound only)'}`)
+    .join('\n')
+  const formatSection = `
+THIS IS A "${template.displayName}" AD — ${template.description}
+It MUST play like a real ${template.displayName}, NOT a generic product hero shot. Follow THIS format's beat DNA (adapt the wording to the actual product, but keep each beat's PURPOSE and physical action):
+${beatSequence}
+Hook mechanics that work for this format: ${template.hookTypes.join('; ')}.
+Platform behaviour: ${template.platformNotes}
+${template.needsCreator === false ? 'There is NO on-camera creator — describe the PRODUCT and the environment/camera only; never write a person speaking.' : ''}
+When you output clips, set each clip's "beat" to the beat NAME above (lowercased). If the requested clip count differs from the number of beats, compress or expand while KEEPING this format's signature moments (e.g. an unboxing must still show the package being opened; a POV must stay first-person; a before/after must show both states).`
+
   const system = `You are an expert direct-response copywriter AND short-form video director planning a ${styleBlurb}. You break a commercial into EXACTLY ${desired} sequential clips for Google Veo 3. The dialogue you write is real sales copy, not filler — it must be good enough to actually move someone to buy, using the same craft a senior DR copywriter would bring to a script.
 
 THE #1 RULE — COMPLETENESS OVER COUNT:
@@ -171,10 +203,11 @@ Respond with STRICT JSON only, no markdown:
       role: 'user',
       content: `Product: ${productName || 'the product'}
 What it is / who it's for: ${description}
+${formatSection}
 Style: ${styleBlurb}${narrativeSection}${refSection}${creatorSection}${hookSection}${regenSection}${answersSection}${intentSection}
 ${brandSection}
 
-Plan the ${desired} clips.`,
+Plan the ${desired} clips — and make them unmistakably a ${template.displayName}.`,
     }],
   })
 
