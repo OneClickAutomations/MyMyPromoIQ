@@ -50,21 +50,48 @@ function extractVeoUri(response: Record<string, any>): string | null {
     response.generatedSamples?.[0] ??
     // Older preview nesting
     response.generateVideoResponse?.generatedSamples?.[0] ??
+    response.generateVideoResponse?.generatedVideos?.[0] ??
     // Other variant field names
     response.generatedVideos?.[0] ??
     response.videos?.[0] ??
     null
 
-  if (!sample) return null
-
-  return (
+  const fromSample = sample && (
     sample?.video?.uri ??
     sample?.video?.url ??
+    sample?.video?.gcsUri ??
     sample?.uri ??
     sample?.url ??
+    sample?.gcsUri ??
     (typeof sample?.video === 'string' ? sample.video : null) ??
     null
   )
+  if (fromSample) return fromSample
+
+  // Last-resort fallback: Veo occasionally changes where the URI nests. Rather
+  // than fail EVERY generation on a shape tweak, recursively find the first
+  // string in the response that looks like a video/file download URL.
+  return deepFindVideoUri(response)
+}
+
+/** Recursively scan an object for the first video-looking URL string. */
+function deepFindVideoUri(obj: any, depth = 0): string | null {
+  if (obj == null || depth > 6) return null
+  if (typeof obj === 'string') {
+    return /^https?:\/\//.test(obj) && /(\.mp4|\/files\/|videos?\/|:download|generativelanguage)/i.test(obj) ? obj : null
+  }
+  if (Array.isArray(obj)) {
+    for (const v of obj) { const hit = deepFindVideoUri(v, depth + 1); if (hit) return hit }
+    return null
+  }
+  if (typeof obj === 'object') {
+    // Prefer explicit uri/url/gcsUri keys, then anything else.
+    for (const k of ['uri', 'url', 'gcsUri', 'videoUri', 'downloadUri']) {
+      const hit = deepFindVideoUri(obj[k], depth + 1); if (hit) return hit
+    }
+    for (const v of Object.values(obj)) { const hit = deepFindVideoUri(v, depth + 1); if (hit) return hit }
+  }
+  return null
 }
 
 /** Poll a Veo long-running operation and, when done, re-host the resulting clip. */
@@ -93,9 +120,11 @@ async function pollVeo(opName: string, res: VercelResponse) {
   const uri = extractVeoUri(response)
 
   if (!uri) {
-    // Log the actual response shape so format changes are diagnosable.
-    console.error('[/api/status] veo-no-video-uri — response keys:', Object.keys(response), JSON.stringify(response).slice(0, 500))
-    return res.status(200).json({ status: 'failed', videoUrl: null, raw: 'veo-no-video-uri' })
+    // Log the actual response shape so format changes are diagnosable, and
+    // surface the response keys in `raw` so the client error shows them too.
+    const keys = Object.keys(response).join(',') || 'empty-response'
+    console.error('[/api/status] veo-no-video-uri — response keys:', keys, JSON.stringify(response).slice(0, 600))
+    return res.status(200).json({ status: 'failed', videoUrl: null, raw: `veo-no-video-uri (response had: ${keys})` })
   }
 
   // The Veo file URL needs the API key to download.
