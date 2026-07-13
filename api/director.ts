@@ -150,7 +150,12 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     .join('\n')
   const formatSection = `
 THIS IS A "${template.displayName}" AD — ${template.description}
-It MUST play like a real ${template.displayName}, NOT a generic product hero shot. Follow THIS format's beat DNA (adapt the wording to the actual product, but keep each beat's PURPOSE and physical action):
+It MUST play like a real ${template.displayName}, NOT a generic product hero shot.
+
+EXPERT SKILL (how a specialist shoots this format — follow it explicitly):
+${template.expertSkill}
+
+Follow THIS format's beat DNA (adapt the wording to the actual product, but keep each beat's PURPOSE and physical action):
 ${beatSequence}
 Hook mechanics that work for this format: ${template.hookTypes.join('; ')}.
 Platform behaviour: ${template.platformNotes}
@@ -407,6 +412,9 @@ async function autoAnswerWizard(body: Record<string, any>, res: VercelResponse) 
     model: 'claude-sonnet-4-6',
     max_tokens: 700,
     system: `You are a senior direct-response copywriter who specializes in UGC (user-generated-content-style) ad scripts. You are answering, ON BEHALF OF a creator, the exact questions a wizard would ask a real person before writing a "${template.displayName}" ad (${template.description}).
+
+EXPERT SKILL for this format (answer in a way that serves exactly this shooting style):
+${template.expertSkill}
 
 Your answers become the raw material for the actual video script — they must read like something a real, specific person would say about THIS specific product, not generic ad copy. Apply direct-response craft:
 - HOOK: a pattern-interrupt or a genuinely surprising, specific claim — never "I love this product" energy.

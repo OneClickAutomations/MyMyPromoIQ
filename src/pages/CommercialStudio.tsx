@@ -1205,6 +1205,12 @@ export default function CommercialStudio() {
   // planner's dialogue in what the user actually told us.
   function renderScene() {
     const adType = resolveAdType(brief.style.commercialStyle)
+    // Creator-less formats only offer product-centric presentation options —
+    // never hands-on actions like "holding" or "applying".
+    const creatorLess = getTemplate(adType).needsCreator === false
+    const actionOptions = creatorLess
+      ? PRODUCT_ACTION_OPTIONS.filter(o => ['hero_display', 'dynamic_reveal'].includes(o.id))
+      : PRODUCT_ACTION_OPTIONS
     return (
       <div className="space-y-6">
         <StepHeader title="Tell us about your ad" desc="A few specifics for this format — then how the creator interacts with your product." onBack={goBack} />
@@ -1264,9 +1270,9 @@ export default function CommercialStudio() {
         </div>
 
         <div>
-          <p className="mb-2 text-sm font-medium text-ink">How should the creator interact with your product?</p>
+          <p className="mb-2 text-sm font-medium text-ink">{creatorLess ? 'How should the product be presented?' : 'How should the creator interact with your product?'}</p>
         <div className="grid grid-cols-2 gap-3">
-          {PRODUCT_ACTION_OPTIONS.map(opt => (
+          {actionOptions.map(opt => (
             <button key={opt.id} type="button"
               onClick={() => patch({ scene: { ...brief.scene, productAction: opt.id } })}
               className={`rounded-2xl border p-4 text-left transition-all ${

@@ -5,7 +5,8 @@ import AppShell from '../components/AppShell'
 import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
-import { resolveAdType } from '../lib/studio/promptEngineBridge'
+import TypeQuestions from '../components/studio/TypeQuestions'
+import { resolveAdType, getTemplate } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
@@ -85,6 +86,9 @@ export default function ReviewAndAdjust() {
   const [style, setStyle] = useState('testimonial')
   const [script, setScript] = useState('')
   const [creatorValue, setCreatorValue] = useState<CreatorInputValue>(EMPTY_CREATOR)
+  // Template-specific answers (the chosen style's own questions). Cleared when
+  // the style changes — each format asks completely different things.
+  const [quickAnswers, setQuickAnswers] = useState<Record<string, string>>({})
   // Flips true when the user hits Cancel mid-generation — checked after every
   // await in handleGenerate so a late-arriving result can't reopen the
   // overlay or show a video the user already dismissed.
@@ -264,7 +268,7 @@ export default function ReviewAndAdjust() {
       setErrorMsg('Describe the product you are selling.')
       return
     }
-    if (!isCreatorReady(creatorValue)) {
+    if (showCreator && !isCreatorReady(creatorValue)) {
       setErrorMsg('Confirm you have the right to use this person\'s likeness before generating.')
       return
     }
@@ -278,18 +282,22 @@ export default function ReviewAndAdjust() {
 
     // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
     // the video model's identity reference, taking priority over the product photo.
-    const creatorImageUrl = creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
+    // Creator-less formats (product reveal / comparison / POV) pass NO creator at
+    // all — the planner and Veo must never put a person on camera.
+    const creatorImageUrl = showCreator && creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
     const creatorConsentAt = creatorImageUrl ? creatorValue.consentAt : undefined
-    const creatorArg = creatorValue.mode === 'uploaded_seed'
-      ? { source: 'uploaded' as const }
-      : creatorValue.mode === 'generated' && creatorValue.attributes.gender
-        ? {
-            source: 'generated' as const,
-            gender: creatorValue.attributes.gender,
-            ageRange: creatorValue.attributes.ageRange,
-            ethnicity: creatorValue.attributes.ethnicity,
-          }
-        : undefined
+    const creatorArg = !showCreator
+      ? undefined
+      : creatorValue.mode === 'uploaded_seed'
+        ? { source: 'uploaded' as const }
+        : creatorValue.mode === 'generated' && creatorValue.attributes.gender
+          ? {
+              source: 'generated' as const,
+              gender: creatorValue.attributes.gender,
+              ageRange: creatorValue.attributes.ageRange,
+              ethnicity: creatorValue.attributes.ethnicity,
+            }
+          : undefined
 
     try {
       // ── STEP 0: SCRIPT — plan a storyboard sized to the chosen duration.
@@ -304,6 +312,7 @@ export default function ReviewAndAdjust() {
         referenceDurationSeconds: durationSeconds,
         intent: productIntent || undefined,
         creator: creatorArg,
+        answers: quickAnswers,
         hookLine: script.trim() || undefined,
         regenerationNotes: regenerationNotes?.trim() || undefined,
       })
@@ -525,6 +534,12 @@ export default function ReviewAndAdjust() {
   const isFromClone = prefill !== null
   const isBusy = phase === 'working'
 
+  // The chosen style's template drives which sections even appear: a
+  // creator-less format (product reveal / comparison / POV) never asks about
+  // casting a person — the user only sees preferences relevant to the format.
+  const activeTemplate = getTemplate(resolveAdType(style))
+  const showCreator = activeTemplate.needsCreator !== false
+
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl space-y-8">
@@ -566,7 +581,18 @@ export default function ReviewAndAdjust() {
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
-            <AdTypeSelector selected={resolveAdType(style)} onSelect={(ad) => setStyle(ad)} />
+            <AdTypeSelector selected={resolveAdType(style)} onSelect={(ad) => { setStyle(ad); setQuickAnswers({}) }} />
+          </div>
+
+          {/* The chosen style's OWN questions — an unboxing asks about the
+              packaging, a tutorial asks for the steps, a reveal asks for the
+              tagline. Answers ground the script; skip freely. */}
+          <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+            <TypeQuestions
+              adType={resolveAdType(style)}
+              answers={quickAnswers}
+              onChange={setQuickAnswers}
+            />
           </div>
 
           {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
@@ -737,16 +763,19 @@ export default function ReviewAndAdjust() {
             <p className="text-[10px] text-ink-faint">Adds a spoken voiceover of your script over the video. Leave on "No voiceover" to keep the render's native audio.</p>
           </div>
 
-          {/* Creator */}
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Creator
-              {isFromClone && creatorValue.mode === 'generated' && creatorValue.attributes.gender && (
-                <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
-              )}
-            </label>
-            <CreatorInput value={creatorValue} onChange={setCreatorValue} />
-          </div>
+          {/* Creator — only for formats with an on-camera person. A product
+              reveal / comparison / POV never asks about casting. */}
+          {showCreator && (
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
+                Creator
+                {isFromClone && creatorValue.mode === 'generated' && creatorValue.attributes.gender && (
+                  <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
+                )}
+              </label>
+              <CreatorInput value={creatorValue} onChange={setCreatorValue} />
+            </div>
+          )}
         </div>
 
         {/* Error */}
@@ -927,7 +956,7 @@ export default function ReviewAndAdjust() {
           <button
             type="button"
             onClick={() => handleGenerate()}
-            disabled={!isCreatorReady(creatorValue)}
+            disabled={showCreator && !isCreatorReady(creatorValue)}
             className="btn-fire w-full justify-center gap-2 disabled:opacity-40"
           >
             <Wand className="h-4 w-4" />

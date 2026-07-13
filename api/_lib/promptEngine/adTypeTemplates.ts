@@ -57,9 +57,16 @@ export interface AdTypeTemplate {
   platformNotes: string
   negativePromptAdditions: string[]
   /** Whether this format needs an on-camera creator. Defaults to true; set
-   *  false for creator-less formats (product reveal) → the wizard SKIPS the
-   *  Creator step and the engine builds a person-free prompt. */
+   *  false for creator-less formats (product reveal, comparison, POV) → the
+   *  wizard SKIPS the Creator step and the engine builds a person-free prompt. */
   needsCreator?: boolean
+  /** The expert "skill" for this format — explicit direction telling the AI
+   *  exactly how a specialist would shoot it. Distilled from the
+   *  smixs/visual-skills references (dramaturgy montage patterns, genre
+   *  modules, Veo rules) + Cliprise UGC structures. Injected verbatim into the
+   *  storyboard planner and Creative Direction so the output is unmistakably
+   *  this format, never a generic product hero shot. */
+  expertSkill: string
   /** Environment options tailored to this format (a street interview belongs on
    *  a sidewalk, not a cozy living room). Falls back to the generic list when
    *  omitted. */
@@ -130,6 +137,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'window_light',
     hookTypes: ['contrarian confession', 'result-first', 'skeptic-turned-believer'],
     platformNotes: 'TikTok/Reels: keep the first line under 2s and eyes locked to lens. Meta Feed: front-load the result so it reads with sound off.',
+    expertSkill: 'You are shooting UGC social (genre: authentic, vertical, direct-to-camera). Handheld with natural drift, real window light, a lived-in room — never studio polish. Structure as a first-person account: open MID-STORY (no greeting, no setup), agitate the before-state in one breath, credit the product with ONE specific, checkable result (a number, a timeframe), and close on a personal recommendation. The proof beat IS the testimonial — make it the emotional peak. Every shot needs an environmental pressure (steam, window rain, morning light), a physical micro-action (leans in, taps the jar, small head shake), and a sound anchor (room tone, a click). Eyes stay locked to the lens; delivery is telling a friend, not reading an ad.',
     negativePromptAdditions: ['scripted delivery', 'studio backdrop'],
     environmentPresets: ENV_TALKING,
   },
@@ -165,6 +173,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'studio_softbox',
     hookTypes: ['what\'s inside', 'genuine reaction', 'satisfying open'],
     platformNotes: 'ASMR-adjacent — sound sells this format. Keep hands always in frame; never cut away during the open.',
+    expertSkill: 'You are shooting commercial product drama (pattern: anticipation → reveal → macro texture → reaction → first use). Sound IS the content: tape ripping in one continuous pull, cardboard flexing, tissue rustle, the first click of the product — specify a crisp sound event in every beat. Hands never leave frame during the open; the product is NOT visible until the reveal beat; open in real time with no jump cuts mid-unboxing. Camera grammar: 45-degree tabletop for the arrival, overhead for the lift-out, macro insert for first touch. The emotional beat is the half-second pause AFTER the lid opens — hold it before the reaction.',
     negativePromptAdditions: ['pre-opened box', 'product already visible at start'],
     environmentPresets: ENV_TABLETOP,
   },
@@ -201,6 +210,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'kitchen_morning',
     hookTypes: ['relatable frustration', 'the old way vs the new way'],
     platformNotes: 'The problem beat must be instantly recognizable with sound off — exaggerate the physical failure slightly.',
+    expertSkill: 'You are shooting a contrast story. The pain must be PHYSICAL and on-camera first — a real failed attempt (spill, fumble, mess), shoulders dropping, an audible sigh — never a narrated complaint over neutral footage. Environment carries the emotion (cluttered counter, harsh light for the problem; cleaner light after). The solution lands in ONE clean motion with a satisfying contact sound — the visual contrast between the two states is the story, so the framing must let the viewer SEE the difference, not be told it. Close with a shrug-to-lens that-is-it beat.',
     negativePromptAdditions: [],
   },
 
@@ -240,6 +250,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'golden_hour',
     hookTypes: ['aspirational-but-real', 'a calm moment', 'relatable routine'],
     platformNotes: 'Lean into believable imperfection — a slightly messy counter reads more authentic than a staged set.',
+    expertSkill: 'You are shooting lifestyle b-roll woven around a routine (genre: day-in-the-life). The product is NEVER pitched head-on — it enters mid-scene as a natural step in the routine, used without ceremony. Handheld follow at eye level, golden ambient light, real environmental mess (a mug, keys, an unmade corner) — believable imperfection outperforms staging. Proof is shown through the person\'s genuine micro-reaction (a pause, an exhale, a second glance), never a spoken claim. Keep dialogue conversational voiceover cadence, like narrating your own morning.',
     negativePromptAdditions: ['staged set', 'overly tidy background'],
   },
 
@@ -275,6 +286,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'beauty',
     hookTypes: ['visible transformation', 'the reveal'],
     platformNotes: 'Keep lighting IDENTICAL between before and after or the transformation reads as a lighting trick, not the product.',
+    expertSkill: 'You are shooting a transformation. The ONLY thing that may change between the before and after states is the subject itself — identical framing, identical lens, identical lighting direction and color temperature, or the transformation reads as a camera trick and credibility dies. Shoot the application as a macro insert (fingers, texture, product label passing the lens). The after-reveal is the emotional peak: a small, genuine reaction, not a gasp. State the timeframe out loud — specificity is the proof.',
     negativePromptAdditions: ['different lighting between before and after', 'filter change mid-clip'],
   },
 
@@ -310,6 +322,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'studio_softbox',
     hookTypes: ['numbered steps', 'the mistake everyone makes'],
     platformNotes: 'Number the steps on the audio so it works saved-for-later. Keep each step to one clean physical action.',
+    expertSkill: 'You are shooting an instructional demo (genre: clarity above all). Spoken numbered steps so it works saved-for-later and sound-off with captions. One clean physical action per step — never two motions in one beat. Overhead and 45-degree tabletop grammar, hands and product fully visible, no speed ramps. Name the common mistake mid-way (it is the retention hook). End on the finished result beside the product, label to lens.',
     negativePromptAdditions: [],
   },
 
@@ -344,6 +357,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'outdoor_daylight',
     hookTypes: ['candid stranger', 'live test', 'unscripted reaction'],
     platformNotes: 'Handheld and outdoor ambience sell authenticity. A slightly imperfect frame beats a stable one here.',
+    expertSkill: 'You are shooting man-on-the-street. Authenticity signals are the format: outdoor ambience (traffic wash, passersby, wind), handheld imperfection, an off-screen interviewer\'s question starting the clip. The subject\'s cadence is unscripted — false starts, a laugh, a beat of skepticism BEFORE trying the product, then a genuine surprised reaction ON camera as they try it. The verdict is delivered to the interviewer, half to lens. Never let it feel staged: no perfect framing, no studio silence.',
     negativePromptAdditions: ['studio backdrop', 'perfectly stable tripod'],
     environmentPresets: ENV_STREET,
   },
@@ -379,7 +393,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'window_light',
     hookTypes: ['you-are-there', 'first-person immersion'],
     platformNotes: 'Never show the creator\'s face — the viewer IS the creator. Hands must enter from the bottom edge, never the sides.',
+    expertSkill: 'You are shooting strict first-person POV — the camera IS the viewer\'s eyes. Hands enter from the BOTTOM edge only, never the sides; the face is never visible, no mirrors. Subtle natural head-sway on the camera, intimate close-mic audio (breath, fabric, the product\'s sounds inches away). The arc is embodiment: reach → handle → use → payoff, all at arm\'s length. Dialogue is inner-voice narration in you-language, quiet and close.',
     negativePromptAdditions: ['creator face visible', 'third-person angle', 'hands entering from the sides'],
+    needsCreator: false,
   },
 
   // ── Commercial formats ──────────────────────────────────────────────────────
@@ -410,6 +426,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'luxury_commercial',
     hookTypes: ['cinematic unveil', 'texture and light'],
     platformNotes: 'No dialogue in the reveal beat — let sound design and one clean tagline carry it. Works 1:1 and 9:16.',
+    expertSkill: 'You are shooting a cinematic product reveal (pattern: escalation — wide → medium → macro → hero). NO people, NO hands: light does the acting — a key light raking across the label, reflections traveling on the surface, shadow edges moving as the camera arcs. Controlled single camera move per beat (slow orbit, then macro push). Sound design carries it: a low riser, one crisp settle when the product lands in its hero position, at most ONE spoken tagline at the end. Final frame: label perfectly squared to lens, clean negative space.',
     negativePromptAdditions: ['creator in frame', 'hands in frame', 'cluttered background'],
     needsCreator: false,
     environmentPresets: ENV_REVEAL,
@@ -446,7 +463,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'studio_softbox',
     hookTypes: ['the obvious gap', 'why settle'],
     platformNotes: 'Never show or name a real competitor brand — use a plain unbranded stand-in. Keep both sides in identical light.',
+    expertSkill: 'You are shooting a side-by-side comparison. The gap must be VISIBLE, not narrated — both sides perform the same task in the same frame or in matched back-to-back shots with IDENTICAL lighting and framing per side. The rival is a plain, unbranded generic stand-in. No people on camera; a voiceover carries the argument with one concrete, checkable difference (time, count, residue). Verdict beat: the product moves center-frame in focus, the alternative pushed soft and aside.',
     negativePromptAdditions: ['named competitor brand', 'recognizable rival logo', 'different lighting per side'],
+    needsCreator: false,
     environmentPresets: ENV_TABLETOP,
   },
 
@@ -481,6 +500,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'window_light',
     hookTypes: ['origin story', 'personal conviction', 'the gap I found'],
     platformNotes: 'Sincerity over polish. A real workspace behind the founder outperforms a clean studio.',
+    expertSkill: 'You are shooting documentary intimacy (founder story). Real workspace behind them — shelves, tools, product batches — window key light, a locked-off or barely-breathing camera. The hook is a candid, specific admission of a struggle. Credibility comes from specifics: dates, batch numbers, a failure named out loud. Hands touch the product like it is theirs, because it is. The close is a warm, personal invitation, never a corporate CTA.',
     negativePromptAdditions: ['corporate boardroom', 'stock-footage feel'],
   },
 
@@ -506,6 +526,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'beauty',
     hookTypes: ['pattern interrupt', 'open loop', 'shock open'],
     platformNotes: 'Built to be the first 4s of a longer edit or a standalone scroll-stopper. Front-load everything into frame one.',
+    expertSkill: 'You are shooting a pure pattern-interrupt (rhythm: impact-first). Frame ONE must contain the arresting thing — a fast reach, an object dropped, a snap to lens — with a sharp sound event on the very first frame. No setup, no context, no brand-first. Cut BEFORE resolution: the open loop is the mechanic; the viewer keeps watching to close it. One idea, one motion, maximum contrast (fast motion against a still frame, loud against silence).',
     negativePromptAdditions: [],
   },
 }
