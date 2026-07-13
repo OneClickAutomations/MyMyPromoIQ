@@ -107,7 +107,7 @@ const ADTYPE_TO_PRESET: Record<AdTypeId, string> = {
 
 const STEPS = [
   { num: 1,  key: 'style',       label: 'Ad Type',      required: true,  icon: Wand },
-  { num: 2,  key: 'count',       label: 'Length',       required: true,  icon: Layers },
+  { num: 2,  key: 'count',       label: 'Video Length', required: true,  icon: Layers },
   { num: 3,  key: 'product',     label: 'Assets',        required: true,  icon: Upload },
   { num: 4,  key: 'creator',     label: 'Creator',      required: false, icon: Users },
   { num: 5,  key: 'scene',       label: 'Scene',        required: false, icon: Camera },
@@ -1084,7 +1084,7 @@ export default function CommercialStudio() {
   function renderProduct() {
     return (
       <div className="space-y-5">
-        <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, paste an image URL, or scan a product page URL to auto-fill everything." />
+        <StepHeader title="Drop in your product" desc="Upload a photo, take a photo, paste an image URL, or scan a product page URL to auto-fill everything." onBack={goBack} />
 
         <BestResults tips={[
           'Use a clear, sharp photo on a plain, uncluttered background with even lighting.',
@@ -1332,7 +1332,7 @@ export default function CommercialStudio() {
         />
 
         <button onClick={goForward} disabled={!brief.style.commercialStyle} className="btn-fire w-full disabled:opacity-50">
-          Next — How Many <ArrowRight className="h-4 w-4" />
+          Next — Video Length <ArrowRight className="h-4 w-4" />
         </button>
       </div>
     )

@@ -557,24 +557,24 @@ export default function ReviewAndAdjust() {
 
         {/* Form */}
         <div className="space-y-5">
-          {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
-          <ProductInput value={productValue} onChange={onProductChange} />
-
-          {/* Video length — replaces "how many videos": the user thinks in
-              seconds, Claude figures out how many scenes of what length fit. */}
-          <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
-
-          {/* Ad type — the full 12-format selector (same engine templates as the
-              Build-From-Scratch studio) instead of the old 4 canned styles. */}
+          {/* Style FIRST — the format decides everything downstream (beats,
+              camera, prompts), so it's the opening choice, before the product. */}
           <div className="space-y-3">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
-              Ad type
+              Pick a style
               {isFromClone && (
                 <span className="text-gold text-[10px] font-semibold uppercase tracking-widest">{adForge.review.filledLabel}</span>
               )}
             </label>
             <AdTypeSelector selected={resolveAdType(style)} onSelect={(ad) => setStyle(ad)} />
           </div>
+
+          {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
+          <ProductInput value={productValue} onChange={onProductChange} />
+
+          {/* Video length — replaces "how many videos": the user thinks in
+              seconds, Claude figures out how many scenes of what length fit. */}
+          <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
 
           {/* Script / hook */}
           <div className="space-y-1.5">
