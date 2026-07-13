@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { SignedIn, SignedOut, RedirectToSignIn } from './hooks/useAuth'
 import LandingPage from './LandingPage'
+import Enter from './pages/Enter'
 import SignInPage from './pages/SignIn'
 import SignUpPage from './pages/SignUp'
 import Dashboard from './pages/Dashboard'
@@ -33,7 +34,10 @@ function Protected({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      {/* Front door: the cinematic video intro. Its CTAs land on /home — the
+          full marketing landing page (previously served at /). */}
+      <Route path="/" element={<Enter />} />
+      <Route path="/home" element={<LandingPage />} />
       <Route path="/sign-in/*" element={<SignInPage />} />
       <Route path="/sign-up/*" element={<SignUpPage />} />
       <Route
