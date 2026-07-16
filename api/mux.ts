@@ -68,17 +68,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const b64 = audioBase64.includes(',') ? audioBase64.split(',')[1] : audioBase64
     await writeFile(audioPath, Buffer.from(b64, 'base64'))
 
-    // 3. Mux: keep the video stream as-is, encode audio to AAC, end at the
-    //    shorter of the two, and make it web-streamable.
+    // 3. Mux: keep the video stream as-is, encode audio to AAC. The ElevenLabs
+    //    voiceover is generated independently of Veo's native delivery pace,
+    //    so its length rarely matches the clip exactly. Pad it with silence
+    //    (apad) rather than trusting `-shortest` on the raw track: without
+    //    padding, an ElevenLabs track that's SHORTER than the video truncates
+    //    the picture itself, chopping the clip short mid-scene — the visible
+    //    half of the "voice not synced" bug. Padding makes the video's own
+    //    length authoritative; `-shortest` then only ever trims trailing
+    //    silence off a track that was too long, never the video.
     await run(ffmpegPath, [
       '-y',
       '-i', videoPath,
       '-i', audioPath,
+      '-filter_complex', '[1:a:0]apad[aout]',
       '-c:v', 'copy',
       '-c:a', 'aac',
       '-b:a', '192k',
       '-map', '0:v:0',
-      '-map', '1:a:0',
+      '-map', '[aout]',
       '-shortest',
       '-movflags', '+faststart',
       outPath,

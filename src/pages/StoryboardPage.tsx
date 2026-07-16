@@ -23,6 +23,7 @@ import {
 } from '../lib/api'
 import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
 import type { StoryboardPlan, StoryboardClip } from '../lib/studio/storyboard'
+import { buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 
 /** Cross-origin-safe download: fetch → blob → click (the `download` attr is
  * ignored for cross-origin URLs like Veo/CDN renders). */
@@ -100,6 +101,36 @@ export default function StoryboardPage() {
     runPlan(ctx)
   }
 
+  // Creator context for the storyboard planner. An uploaded/saved photo is a
+  // fixed real person — stay neutral so the planner doesn't invent a gender/
+  // appearance that contradicts the photo Veo conditions on. A GENERATED
+  // creator (no photo) must pass its chosen attributes through, or the
+  // planner (and every downstream render) has zero signal for who the user
+  // actually asked for — this was previously omitted entirely for 'generated'
+  // mode, the root of the "asked for a man, got a woman" bug in this flow.
+  function planCreatorContext() {
+    if (creatorValue.mode !== 'generated') {
+      return creatorValue.resolvedImageUrl ? { source: 'uploaded' as const } : undefined
+    }
+    const a = creatorValue.attributes
+    return a.gender || a.ageRange || a.ethnicity
+      ? { source: 'generated' as const, gender: a.gender || undefined, ageRange: a.ageRange || undefined, ethnicity: a.ethnicity || undefined }
+      : undefined
+  }
+
+  // Authoritative identity line for a generated (no-photo) creator, injected
+  // verbatim into every clip's render call — see planCreatorContext above.
+  function generatedIdentityAnchor(): string | undefined {
+    if (creatorValue.mode !== 'generated' || !creatorValue.attributes.gender) return undefined
+    return buildIdentityAnchor({
+      gender: creatorValue.attributes.gender,
+      ageRange: creatorValue.attributes.ageRange,
+      ethnicity: creatorValue.attributes.ethnicity,
+      hair: creatorValue.attributes.hair,
+      wardrobe: creatorValue.attributes.wardrobe,
+    })
+  }
+
   async function runPlan(c: StoryboardContext, clipCount?: number) {
     setPhase('planning'); setError('')
     try {
@@ -112,12 +143,7 @@ export default function StoryboardPage() {
         referenceDurationSeconds: c.referenceDurationSeconds,
         brandVoice: c.brandVoice,
         cta: c.cta,
-        // Bring Your Own Creator: an uploaded/saved photo is a fixed real
-        // person — tell the planner to stay neutral so it doesn't invent a
-        // gender/appearance that contradicts the photo Veo conditions on.
-        creator: creatorValue.mode !== 'generated' && creatorValue.resolvedImageUrl
-          ? { source: 'uploaded' }
-          : undefined,
+        creator: planCreatorContext(),
       })
       setPlan(plan)
       setPhase('plan')
@@ -145,6 +171,7 @@ export default function StoryboardPage() {
         referenceBeats: [clip.beat],
         brandVoice: ctx.brandVoice,
         cta: ctx.cta,
+        creator: planCreatorContext(),
       })
       const fresh = one.clips[0]
       if (fresh) {
@@ -162,6 +189,7 @@ export default function StoryboardPage() {
     // Bring Your Own Creator: the resolved photo (as-is or transformed) becomes
     // Veo's identity reference, taking priority over the product photo.
     const creatorImageUrl = creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
+    const identityAnchor = generatedIdentityAnchor()
     const { requestId } = await startGeneration({
       productImageUrl: ctx.product.primaryImage,
       productDescription: ctx.product.description || ctx.product.name,
@@ -176,6 +204,9 @@ export default function StoryboardPage() {
       // Continuity across the multi-clip commercial.
       sceneIndex: clip.order,
       sceneCount: plan?.clips.length,
+      composedPrompt: identityAnchor
+        ? `${identityAnchor}, on camera with ${ctx.product.name.trim() || 'the product'}.`
+        : undefined,
     })
     const res = await pollUntilDone(requestId, () => {})
     if (res.status === 'completed' && res.videoUrl) return res.videoUrl

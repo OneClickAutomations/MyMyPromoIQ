@@ -36,6 +36,7 @@ export { buildNegativePrompt } from './negativePrompts.js'
 export { LIGHTING_DESCRIPTIONS } from './lightingVocabulary.js'
 export { CAMERA_PRESETS } from './cameraVocabulary.js'
 export { validateVeoPrompt, validateNanaBananaPrompt } from './validation.js'
+export { buildIdentityAnchor, buildShortDescriptor, buildProductAnchor } from './characterLock.js'
 
 /** Match this clip to its beat definition in the template (by order, then by
  *  beat name), so camera/sfx defaults line up with the planned clip. */
