@@ -450,7 +450,7 @@ function resolveVeoAspectRatio(requested?: string): string {
 async function submitVeoJob(
   prompt: string,
   imageUrl?: string,
-  opts?: { negativePrompt?: string; aspectRatio?: string },
+  opts?: { negativePrompt?: string; aspectRatio?: string; enhancePrompt?: boolean },
 ) {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set (required for Veo video generation).')
@@ -484,6 +484,11 @@ async function submitVeoJob(
       ...(omitAspect ? {} : { aspectRatio }),
       sampleCount: 1,
       ...(avoid ? { negativePrompt: avoid.slice(0, 400) } : {}),
+      // The engine path hand-writes exact timed-beat segments (word counts,
+      // banned words, physics grounding) — Veo's own prompt-enhancement step
+      // silently rewrites that structure away, so it must be OFF whenever the
+      // caller supplies a precisely-engineered prompt.
+      ...(opts?.enhancePrompt === false ? { enhancePrompt: false } : {}),
     },
   })
 
@@ -646,7 +651,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         startFrame = await generateStartFrame(apiKey, nanaBananaPrompt, refs)
       }
       const conditioning = conditioningImageUrl || realCreatorPhoto || startFrame || productImageUrl
-      const { requestId, status } = await submitVeoJob(veoPrompt, conditioning || undefined, { negativePrompt, aspectRatio })
+      const { requestId, status } = await submitVeoJob(veoPrompt, conditioning || undefined, { negativePrompt, aspectRatio, enhancePrompt: false })
       return res.status(200).json({
         requestId,
         status,

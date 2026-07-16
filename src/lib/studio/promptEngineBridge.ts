@@ -11,6 +11,7 @@ import {
   buildPromptPackage,
   AD_TYPE_ORDER,
   getTemplate,
+  buildIdentityAnchor,
 } from '../../../api/_lib/promptEngine/index.js'
 import type {
   AdTypeId,
@@ -124,5 +125,5 @@ export function buildClipPromptPackage(
   return buildPromptPackage(clipToEngineClip(clip), briefToEngineBrief(brief))
 }
 
-export { getTemplate, AD_TYPE_ORDER }
+export { getTemplate, AD_TYPE_ORDER, buildIdentityAnchor }
 export type { AdTypeId, PromptPackage }

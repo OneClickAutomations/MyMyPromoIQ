@@ -6,7 +6,7 @@ import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '.
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
-import { resolveAdType, getTemplate } from '../lib/studio/promptEngineBridge'
+import { resolveAdType, getTemplate, buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
 import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } from '../components/CreatorInput'
@@ -286,6 +286,21 @@ export default function ReviewAndAdjust() {
     // all — the planner and Veo must never put a person on camera.
     const creatorImageUrl = showCreator && creatorValue.mode !== 'generated' ? creatorValue.resolvedImageUrl || undefined : undefined
     const creatorConsentAt = creatorImageUrl ? creatorValue.consentAt : undefined
+    // Gender/identity fix: a GENERATED creator has no photo, so the ONLY
+    // signal the video model gets for who appears on camera is this anchor
+    // string. Without it, "Male" selected in the UI never reaches the actual
+    // render call and the model defaults to whatever it likes (the "asked for
+    // a man, got a woman" bug) — Claude expands the scene around this
+    // AUTHORITATIVE identity line verbatim, never inventing a different one.
+    const identityAnchor = showCreator && creatorValue.mode === 'generated' && creatorValue.attributes.gender
+      ? buildIdentityAnchor({
+          gender: creatorValue.attributes.gender,
+          ageRange: creatorValue.attributes.ageRange,
+          ethnicity: creatorValue.attributes.ethnicity,
+          hair: creatorValue.attributes.hair,
+          wardrobe: creatorValue.attributes.wardrobe,
+        })
+      : undefined
     const creatorArg = !showCreator
       ? undefined
       : creatorValue.mode === 'uploaded_seed'
@@ -348,6 +363,9 @@ export default function ReviewAndAdjust() {
             creatorImageUrl,
             creatorConsentAt,
             conditioningImageUrl: chainImageUrl,
+            composedPrompt: identityAnchor
+              ? `${identityAnchor}, on camera with ${productName.trim() || 'the product'}.`
+              : undefined,
           })
           if (!firstRequestId) firstRequestId = requestId
           const result = await pollUntilDone(requestId, () => {}, { intervalMs: 7_000, timeoutMs: 10 * 60 * 1_000 })
@@ -731,7 +749,7 @@ export default function ReviewAndAdjust() {
                       : 'border-white/[0.08] bg-void-800 text-ink-muted hover:border-white/20'
                   }`}
                 >
-                  No voiceover<br /><span className="font-normal text-ink-faint">Silent / native audio</span>
+                  No voiceover<br /><span className="font-normal text-ink-faint">Lip-synced native audio</span>
                 </button>
                 {voices.slice(0, 20).map(v => {
                   const selected = selectedVoiceId === v.voiceId
@@ -760,7 +778,9 @@ export default function ReviewAndAdjust() {
                 })}
               </div>
             )}
-            <p className="text-[10px] text-ink-faint">Adds a spoken voiceover of your script over the video. Leave on "No voiceover" to keep the render's native audio.</p>
+            <p className="text-[10px] text-ink-faint">
+              "No voiceover" keeps the render's own audio — the script is already spoken with lips synced to it. Picking a voice REPLACES that track with an ElevenLabs recording of the same words; the voice quality is better, but lip movement may drift slightly since Veo generated it to a different take.
+            </p>
           </div>
 
           {/* Creator — only for formats with an on-camera person. A product
