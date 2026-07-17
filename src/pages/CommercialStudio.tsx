@@ -21,6 +21,7 @@ import CreatorInput, { EMPTY_CREATOR, isCreatorReady, type CreatorInputValue } f
 import StoryboardPlanner from '../components/StoryboardPlanner'
 import GenerationPanel from '../components/GenerationPanel'
 import { useGenerationQueue } from '../lib/studio/useGenerationQueue'
+import { audioDurationSeconds, speedToFit } from '../lib/studio/audioFit'
 import type { StoryboardPlan, StoryboardClip } from '../lib/studio/storyboard'
 import {
   ArrowRight, Bolt, Camera, Check, ChevronRight, Download, Film, ImageIcon, Info, Layers,
@@ -729,6 +730,7 @@ export default function CommercialStudio() {
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
         intent: brief.product.intent || undefined,
+        voiced: !!brief.voice.voiceId,
       })
       setWizardPlan(plan)
       setWizardPhase('plan')
@@ -758,6 +760,7 @@ export default function CommercialStudio() {
         creator: planCreatorContext(),
         answers: brief.wizardAnswers,
         intent: brief.product.intent || undefined,
+        voiced: !!brief.voice.voiceId,
         regenerationNotes: notes,
       })
       const fresh = one.clips[0]
@@ -872,14 +875,27 @@ export default function CommercialStudio() {
     try {
       let audioDataUrl: string
       let cues: CaptionCue[] = []
-      if (wantsCaptions && (captionStyle === 'karaoke' || captionStyle === 'highlight' || captionStyle === 'clean')) {
-        const timed = await generateVoiceoverTimed({ text: clip.dialogue, voiceId: brief.voice.voiceId, ownerId: brief.voice.voiceOwnerId, voiceName: brief.voice.voiceName, speed: brief.voice.speed })
-        audioDataUrl = timed.audioDataUrl
-        cues = buildCuesFromEleven(timed.alignment.characters, timed.alignment.startTimes, timed.alignment.endTimes)
-      } else {
-        const v = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, ownerId: brief.voice.voiceOwnerId, voiceName: brief.voice.voiceName, speed: brief.voice.speed })
-        audioDataUrl = v.audioDataUrl
+      const voiceArgs = { text: clip.dialogue, voiceId: brief.voice.voiceId, ownerId: brief.voice.voiceOwnerId, voiceName: brief.voice.voiceName, speed: brief.voice.speed }
+      const wantsTimedCues = wantsCaptions && (captionStyle === 'karaoke' || captionStyle === 'highlight' || captionStyle === 'clean')
+      const record = async (speed?: number) => {
+        const args = speed ? { ...voiceArgs, speed } : voiceArgs
+        if (wantsTimedCues) {
+          const timed = await generateVoiceoverTimed(args)
+          return { audio: timed.audioDataUrl, cues: buildCuesFromEleven(timed.alignment.characters, timed.alignment.startTimes, timed.alignment.endTimes) }
+        }
+        const v = await generateVoiceover(args)
+        return { audio: v.audioDataUrl, cues: [] as CaptionCue[] }
       }
+      let take = await record()
+      // Fit check: a read that outruns the clip gets chopped mid-word by the
+      // mux — re-record slightly faster (capped 1.2x) so the thought completes.
+      const readSecs = await audioDurationSeconds(take.audio).catch(() => 0)
+      const fit = speedToFit(readSecs, clip.durationSeconds, brief.voice.speed || 1)
+      if (fit) {
+        try { take = await record(fit) } catch { /* keep the original take */ }
+      }
+      audioDataUrl = take.audio
+      cues = take.cues
       const { videoDataUrl } = await muxVideoAudio({ videoUrl: final.videoUrl, audioBase64: audioDataUrl })
       return withCaptions(videoDataUrl, cues)
     } catch {

@@ -9,6 +9,7 @@ import TypeQuestions from '../components/studio/TypeQuestions'
 import HookSelector from '../components/studio/HookSelector'
 import WizardStepHeader from '../components/studio/WizardStepHeader'
 import AudioPicker, { EMPTY_AUDIO, type AudioSelection } from '../components/studio/AudioPicker'
+import { audioDurationSeconds, speedToFit } from '../lib/studio/audioFit'
 import { resolveAdType, getTemplate, buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
@@ -112,6 +113,10 @@ export default function ReviewAndAdjust() {
   // uploaded track, plus an optional generated music bed. The picker component
   // owns voice-library loading and preview playback.
   const [audioSel, setAudioSel] = useState<AudioSelection>(EMPTY_AUDIO)
+  // Set when one or more voiceover/audio post-steps failed — the ad still
+  // finishes (with native audio on those scenes), but the user must KNOW the
+  // voice they picked isn't the one playing, instead of a silent deviation.
+  const [audioWarning, setAudioWarning] = useState('')
 
   // Scene rendering is sequential (not parallel) by necessity: each scene's
   // conditioning image is the PREVIOUS scene's last frame (true image-to-video
@@ -257,6 +262,7 @@ export default function ReviewAndAdjust() {
       return
     }
     setErrorMsg('')
+    setAudioWarning('')
     setHistorySaved(false)
     setHistoryError('')
     setPhase('working')
@@ -314,6 +320,9 @@ export default function ReviewAndAdjust() {
         answers: quickAnswers,
         hookLine: script.trim() || undefined,
         regenerationNotes: regenerationNotes?.trim() || undefined,
+        // A recorded ElevenLabs read is slower than Veo's in-scene delivery —
+        // tighter word budget so the take fits the clip instead of getting cut.
+        voiced: audioSel.mode === 'ai' && !!audioSel.voiceId,
       })
       if (cancelledRef.current) return
       setDirectorPrompt(plan.reasoning)
@@ -328,7 +337,7 @@ export default function ReviewAndAdjust() {
       // repeating on every cut).
       setStepIndex(1)
       setSceneProgress({ done: 0, total: plan.clips.length })
-      const rendered: Array<{ videoUrl: string; dialogue: string }> = []
+      const rendered: Array<{ videoUrl: string; dialogue: string; durationSeconds: number }> = []
       let chainImageUrl: string | undefined
       let firstRequestId = ''
       let lastError = ''
@@ -362,7 +371,7 @@ export default function ReviewAndAdjust() {
                 : `Render failed: ${(result.raw && result.raw !== 'null' ? result.raw : 'no detail').slice(0, 240)}`,
             )
           }
-          rendered.push({ videoUrl: result.videoUrl, dialogue: clip.dialogue })
+          rendered.push({ videoUrl: result.videoUrl, dialogue: clip.dialogue, durationSeconds: clip.durationSeconds })
           setSceneProgress(p => ({ ...p, done: p.done + 1 }))
 
           // Chain: the NEXT scene continues from THIS scene's last frame,
@@ -399,21 +408,42 @@ export default function ReviewAndAdjust() {
       let finalUrls: string[]
       if (audioSel.mode === 'ai' && audioSel.voiceId) {
         const withVoice: string[] = []
+        let voiceFailures = 0
         for (const tile of rendered) {
           if (cancelledRef.current) return
           try {
-            const { audioDataUrl } = await generateVoiceover({
+            const voiceArgs = {
               text: tile.dialogue,
               voiceId: audioSel.voiceId,
               ownerId: audioSel.voiceOwnerId,
               voiceName: audioSel.voiceName,
-            })
+            }
+            let { audioDataUrl } = await generateVoiceover(voiceArgs)
+            // Fit check: if the recorded read runs past the clip, re-record
+            // slightly faster (ElevenLabs speed, capped 1.2x) instead of letting
+            // the mux chop the last words mid-thought.
+            const readSecs = await audioDurationSeconds(audioDataUrl).catch(() => 0)
+            const fit = speedToFit(readSecs, tile.durationSeconds)
+            if (fit) {
+              try {
+                audioDataUrl = (await generateVoiceover({ ...voiceArgs, speed: fit })).audioDataUrl
+              } catch { /* keep the original take */ }
+            }
             const { videoDataUrl } = await muxVideoAudio({ videoUrl: tile.videoUrl, audioBase64: audioDataUrl })
             withVoice.push(videoDataUrl)
-          } catch {
-            // Voiceover/mux is a nice-to-have — never fail the whole ad over it.
+          } catch (e) {
+            // Never fail the whole ad over audio — but never hide it either:
+            // a scene that keeps native audio plays a DIFFERENT voice than the
+            // one the user picked, and they must be told.
+            console.warn('[ReviewAndAdjust] voiceover failed for a scene:', e)
+            voiceFailures++
             withVoice.push(tile.videoUrl)
           }
+        }
+        if (voiceFailures > 0) {
+          setAudioWarning(
+            `Your ${audioSel.voiceName || 'ElevenLabs'} voiceover failed on ${voiceFailures} of ${rendered.length} scene${rendered.length === 1 ? '' : 's'} — those play the render's native voice instead. Check your ElevenLabs quota/voice and hit Regenerate to retry.`,
+          )
         }
         finalUrls = withVoice
       } else {
@@ -434,6 +464,7 @@ export default function ReviewAndAdjust() {
           finalUrl = (await muxVideoAudio({ videoUrl: finalUrl, audioBase64: audioSel.uploadDataUrl })).videoDataUrl
         } catch (e) {
           console.warn('[ReviewAndAdjust] uploaded-audio mux failed, keeping original audio:', e)
+          setAudioWarning('Your uploaded audio could not be applied — the ad plays its original audio. Hit Regenerate to retry.')
         }
         if (cancelledRef.current) return
       }
@@ -443,6 +474,7 @@ export default function ReviewAndAdjust() {
           finalUrl = (await muxVideoAudio({ videoUrl: finalUrl, audioBase64: audioDataUrl, mixMode: 'mix' })).videoDataUrl
         } catch (e) {
           console.warn('[ReviewAndAdjust] music generation/mix failed, continuing without music:', e)
+          setAudioWarning(w => w || 'Background music could not be generated — the ad plays without it. Hit Regenerate to retry.')
         }
         if (cancelledRef.current) return
       }
@@ -498,6 +530,7 @@ export default function ReviewAndAdjust() {
     setVideoUrl(null)
     setDirectorPrompt('')
     setErrorMsg('')
+    setAudioWarning('')
     setHistorySaved(false)
     setHistoryError('')
     setStepIndex(0)
@@ -925,6 +958,9 @@ export default function ReviewAndAdjust() {
             )}
             {historyError && (
               <p className="text-xs text-amber-300">History save failed: {historyError}</p>
+            )}
+            {audioWarning && (
+              <p className="rounded-xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-3 text-xs leading-relaxed text-amber-300">{audioWarning}</p>
             )}
 
             {directorPrompt && (

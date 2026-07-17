@@ -77,6 +77,11 @@ async function planStoryboard(body: Record<string, any>, res: VercelResponse) {
     answers,
     // Campaign goal — steers the hook/angle/CTA toward the objective.
     intent,
+    // True when an ElevenLabs voiceover will REPLACE the native audio. TTS
+    // reads slower than Veo's in-scene delivery, so the word budget tightens —
+    // a script written to 2.5 w/s gets chopped mid-word by the mux when the
+    // recorded read runs past the clip length.
+    voiced,
   } = body
 
   // Who's on camera. Without this, the planner invents a person and defaults to
@@ -166,8 +171,8 @@ When you output clips, set each clip's "beat" to the beat NAME above (lowercased
 
 THE #1 RULE — COMPLETENESS OVER COUNT:
 Regardless of how few clips you're given, the finished sequence must play as one complete, usable, standalone commercial — a full arc from hook to call-to-action, never a fragment that stops mid-pitch and never feeling rushed. A complete sales narrative has five elements: (1) hook/attention, (2) problem or desire (agitate it — make the pain or want specific and relatable), (3) solution/demonstration, (4) credibility or proof (a testimonial beat: a specific, believable result — a number, a timeframe, a before/after, an "I was skeptical until..." moment — never a vague "it's amazing"), (5) call-to-action (a direct, specific action verb — "Tap the link", "Get yours today", "Try it risk-free" — plus a reason to act NOW, not generic "check it out"). When ${desired} is smaller than 5, you do NOT get to drop elements — you COMPRESS multiple elements into the same clip's dialogue and visual direction instead. Concretely:
-- 1 clip: hook + problem + solution + proof + CTA all land in that single clip's dialogue and action, in that order, still fitting the word budget below.
-- 2 clips: clip 1 = hook + problem + solution; clip 2 = proof + CTA.
+- 1 clip: hook + problem + solution + proof + CTA all land in that single clip's dialogue and action, in that order, still fitting the word budget below. Micro-arc formula for one clip: an arresting hook (<=5 words) -> one concrete benefit/proof (one specific claim) -> a CTA (3-5 words, action verb). Three short complete sentences beat one long one.
+- 2 clips: this is PART ONE / PART TWO of one continuous story. Clip 1 = hook + problem, ending on a deliberate open loop that demands the payoff; clip 2 = solution + proof + CTA, opening mid-thought as the direct payoff of clip 1's loop. Same speaker, same energy, same product — a viewer watching both must experience one seamless ad, not two attempts.
 - 3 clips: clip 1 = hook + problem; clip 2 = solution + proof; clip 3 = CTA.
 - 4 clips: hook; problem + solution; proof; CTA.
 - 5+ clips: one element per clip (hook, problem, solution, proof, cta), with any extra clips elaborating the solution/proof (more demo detail, a second proof point, an objection handled).
@@ -184,7 +189,10 @@ COPYWRITING CRAFT (this is what separates a script that sells from one that just
 HARD RULES:
 - Exactly ${desired} clips, ordered 1..${desired}.
 - Each clip durationSeconds is one of 4,5,6,7,8.
-- Dialogue is what a person SPEAKS in that clip. Natural pace ≈ 2.5 words/second, so the word count MUST fit: 4s→≤10 words, 5s→≤12, 6s→≤15, 7s→≤17, 8s→≤20. If an idea needs more words, shorten it — do not overstuff. Compression means writing TIGHTER, more efficient lines that still cover every compressed element, not cramming more words in.
+- ${voiced
+    ? 'Dialogue is what a person SPEAKS in that clip, and it will be recorded as a REAL voiceover. Recorded speech runs ≈ 2 words/second with natural breath, so the word count MUST fit: 4s→≤8 words, 5s→≤10, 6s→≤12, 7s→≤14, 8s→≤16. If an idea needs more words, shorten it — an overstuffed line gets physically CUT OFF mid-word when the recording outruns the clip.'
+    : 'Dialogue is what a person SPEAKS in that clip. Natural pace ≈ 2.5 words/second, so the word count MUST fit: 4s→≤10 words, 5s→≤12, 6s→≤15, 7s→≤17, 8s→≤20. If an idea needs more words, shorten it — do not overstuff.'} Compression means writing TIGHTER, more efficient lines that still cover every compressed element, not cramming more words in.
+- The FINAL clip's dialogue targets ~80% of its word cap so the ad lands with half a second of breathing room — the last sentence IS the CTA, it must be complete, and it must never feel clipped. If anything has to be trimmed to fit, trim from the middle of the script, never the CTA.
 - visualDescription: physically observable, camera-direction language (no mood adjectives). If a CREATOR is specified below, honor it exactly — never invent or contradict the creator's gender or appearance.
 - creatorAction: what the person physically does with the product.
 - beat: one of hook, problem, solution, demo, proof, cta, bridge, reveal, outro — pick the DOMINANT element for clips that compress more than one (e.g. a clip compressing hook+problem+solution is still tagged "hook").

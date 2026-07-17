@@ -838,6 +838,9 @@ export type StoryboardPlanInput = {
   }
   /** Optional hook line — clip 1's dialogue opens with or echoes this verbatim. */
   hookLine?: string
+  /** True when an ElevenLabs voiceover will replace the native audio — the
+   *  planner tightens the word budget so the recorded read fits each clip. */
+  voiced?: boolean
   /** Free-text keywords/notes from the "Regenerate" panel — incorporated with
    *  priority over the generic style brief. */
   regenerationNotes?: string
