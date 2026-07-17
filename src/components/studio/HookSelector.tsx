@@ -7,8 +7,8 @@
  * plumbing, it just gets a real UI in front of an existing hook-line input.
  */
 import { useState } from 'react'
-import { generateHooks, type HookOption } from '../../lib/api'
-import { RefreshCw, Check } from '../icons'
+import { generateHooks, enhanceAnswer, type HookOption } from '../../lib/api'
+import { RefreshCw, Check, Spark } from '../icons'
 
 export default function HookSelector({
   adType,
@@ -29,6 +29,28 @@ export default function HookSelector({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [writingOwn, setWritingOwn] = useState(false)
+  const [magicBusy, setMagicBusy] = useState(false)
+  const [magicError, setMagicError] = useState('')
+
+  async function runMagic() {
+    if (!value.trim()) return
+    setMagicBusy(true)
+    setMagicError('')
+    try {
+      const { enhanced } = await enhanceAnswer({
+        adType,
+        question: 'What\'s the opening line?',
+        answer: value,
+        productName,
+        description,
+      })
+      onChange(enhanced)
+    } catch (e) {
+      setMagicError(e instanceof Error ? e.message : 'Enhancement failed.')
+    } finally {
+      setMagicBusy(false)
+    }
+  }
 
   async function load() {
     if (!description.trim() && !productName?.trim()) return
@@ -115,13 +137,28 @@ export default function HookSelector({
       )}
 
       {(writingOwn || (hooks.length > 0 && value && !hooks.some(h => h.text === value))) ? (
-        <textarea
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder="Write your own opening line"
-          rows={2}
-          className="w-full resize-none rounded-xl border border-fire-start/40 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none"
-        />
+        <div className="space-y-1.5">
+          <textarea
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            disabled={magicBusy}
+            placeholder="Write your own opening line"
+            rows={2}
+            className="w-full resize-none rounded-xl border border-fire-start/40 bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-50"
+          />
+          <button
+            type="button"
+            disabled={magicBusy || !value.trim()}
+            onClick={runMagic}
+            className="flex items-center gap-1 rounded-lg border border-white/[0.10] bg-void-700/60 px-2 py-1 text-[11px] font-semibold text-ink-muted transition-all hover:border-fire-start/30 hover:text-fire-start disabled:opacity-30"
+          >
+            {magicBusy
+              ? <><RefreshCw className="h-3 w-3 animate-spin" /> Enhancing…</>
+              : <><Spark className="h-3 w-3" /> AI Magic</>
+            }
+          </button>
+          {magicError && <p className="text-[11px] text-rose-400">{magicError}</p>}
+        </div>
       ) : hooks.length > 0 && (
         <button
           type="button"

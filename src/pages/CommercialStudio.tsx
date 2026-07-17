@@ -1266,6 +1266,8 @@ export default function CommercialStudio() {
             adType={adType}
             answers={brief.wizardAnswers ?? {}}
             onChange={(next) => patch({ wizardAnswers: next })}
+            productName={brief.product.productName || undefined}
+            description={brief.product.description || descInput || undefined}
           />
         </div>
 

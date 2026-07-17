@@ -307,6 +307,47 @@ Write the spoken hook line.`,
   return res.status(200).json({ script })
 }
 
+/** "AI Magic" for a single wizard-question answer — sharpens whatever the
+ *  user typed into a punchier, more specific "10x" version without changing
+ *  their underlying claim. Every free-text field across all 12 templates
+ *  (Testimonial's "what result did you get", Unboxing's "why did you order
+ *  this", Problem/Solution's "what was the problem", etc.) gets this same
+ *  button — it's one question-aware endpoint, not 12 bespoke ones. */
+async function enhanceAnswer(body: Record<string, any>, res: VercelResponse) {
+  const { adType, question, answer, productName, description } = body
+  if (!answer?.trim()) return res.status(400).json({ error: 'Type something first.' })
+
+  const template = getTemplate((adType as AdTypeId) || 'testimonial')
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 220,
+    system: `You sharpen ONE answer in a UGC ad wizard into a dramatically punchier, more specific version — same underlying claim, 10x more concrete and persuasive delivery. This format is "${template.displayName}" (${template.description}).
+
+Rules:
+- NEVER invent a different result, number, or claim than what the user gave — only sharpen the delivery, add ONE plausible concrete specific if the original was vague (a number, a timeframe, a sensory detail), and cut filler.
+- Read like a real person talking, not ad copy — contractions, natural rhythm, the way someone actually tells a friend.
+- Keep it roughly the same length as the input — this feeds a spoken dialogue line, not a headline or a paragraph.
+- Never use: cinematic, professional, amazing, incredible, perfect, stunning, seamless, elegant, luxurious, premium, life-changing, revolutionary, game-changing.
+- Never add exclamation marks.
+- Output ONLY the improved answer. No preamble, no quotes, no explanation.`,
+    messages: [{
+      role: 'user',
+      content: `Product: ${productName || '(unnamed)'}${description ? ` — ${description}` : ''}
+Question: "${question || ''}"
+User's rough answer: "${answer.trim()}"
+
+Rewrite this answer to be 10x punchier and more specific.`,
+    }],
+  })
+
+  const enhanced = (message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '').trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim()
+
+  return res.status(200).json({ enhanced: enhanced || answer.trim() })
+}
+
 /** "AI Magic" — expand a few user keywords into a concrete, specific
  *  regeneration directive: physically observable actions/camera/detail, not
  *  vague mood words. Powers the enhance button next to the Regenerate
@@ -591,6 +632,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director generate-hooks]', err)
       const message = err instanceof Error ? err.message : 'Hook generation failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'enhance-answer') {
+    try {
+      return await enhanceAnswer(body, res)
+    } catch (err) {
+      console.error('[/api/director enhance-answer]', err)
+      const message = err instanceof Error ? err.message : 'Enhancement failed.'
       return res.status(502).json({ error: message })
     }
   }

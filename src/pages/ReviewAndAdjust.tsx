@@ -659,6 +659,8 @@ export default function ReviewAndAdjust() {
               adType={resolveAdType(style)}
               answers={quickAnswers}
               onChange={setQuickAnswers}
+              productName={productName || undefined}
+              description={(productDescription || productName).trim() || undefined}
             />
           </div>
           )}

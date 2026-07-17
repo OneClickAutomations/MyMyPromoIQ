@@ -10,12 +10,17 @@
  * pair) render as real upload dropzones grouped in their own grid ahead of the
  * text/select questions, so a before/after pair reads as two upload zones
  * side by side rather than being buried in a text-field list.
+ *
+ * Every free-text answer across all 12 templates gets an "AI Magic" button —
+ * one question-aware enhance call, not 12 bespoke ones. Selecting/multiselect
+ * chips and image uploads don't get it: there's no rough draft to sharpen.
  */
 import { useRef, useState } from 'react'
 import { getTemplate } from '../../lib/studio/promptEngineBridge'
 import type { AdTypeId, WizardQuestion } from '../../lib/studio/promptEngineBridge'
 import { fileToResizedDataUrl } from '../../lib/studio/imageUpload'
-import { Upload, X } from '../icons'
+import { enhanceAnswer } from '../../lib/api'
+import { Upload, X, Spark, RefreshCw } from '../icons'
 
 function ImageDropzone({
   label,
@@ -85,16 +90,45 @@ export default function TypeQuestions({
   adType,
   answers,
   onChange,
+  productName,
+  description,
 }: {
   adType: AdTypeId
   answers: Record<string, string>
   onChange: (next: Record<string, string>) => void
+  /** Grounds the AI Magic enhancement in the real product instead of enhancing blind. */
+  productName?: string
+  description?: string
 }) {
   const template = getTemplate(adType)
   const set = (label: string, value: string) => onChange({ ...answers, [label]: value })
 
   const imageQuestions = template.wizardQuestions.filter((q) => q.type === 'image')
   const otherQuestions = template.wizardQuestions.filter((q) => q.type !== 'image')
+
+  const [magicBusy, setMagicBusy] = useState<Record<string, boolean>>({})
+  const [magicError, setMagicError] = useState<Record<string, string>>({})
+
+  async function runMagic(q: WizardQuestion) {
+    const current = answers[q.question] ?? ''
+    if (!current.trim()) return
+    setMagicBusy((b) => ({ ...b, [q.id]: true }))
+    setMagicError((e) => ({ ...e, [q.id]: '' }))
+    try {
+      const { enhanced } = await enhanceAnswer({
+        adType,
+        question: q.question,
+        answer: current,
+        productName,
+        description,
+      })
+      set(q.question, enhanced)
+    } catch (e) {
+      setMagicError((err) => ({ ...err, [q.id]: e instanceof Error ? e.message : 'Enhancement failed.' }))
+    } finally {
+      setMagicBusy((b) => ({ ...b, [q.id]: false }))
+    }
+  }
 
   function renderQuestion(q: WizardQuestion) {
     const value = answers[q.question] ?? ''
@@ -108,9 +142,26 @@ export default function TypeQuestions({
       else next.add(opt)
       set(q.question, Array.from(next).join(', '))
     }
+    const isTextField = q.type === 'text' || (!q.options && q.type !== 'multiselect' && q.type !== 'select')
+    const busy = !!magicBusy[q.id]
     return (
       <div key={q.id} className="space-y-1.5">
-        <label className="block text-sm font-medium text-ink">{q.question}</label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="block text-sm font-medium text-ink">{q.question}</label>
+          {isTextField && (
+            <button
+              type="button"
+              disabled={busy || !value.trim()}
+              onClick={() => runMagic(q)}
+              className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-white/[0.10] bg-void-700/60 px-2 py-1 text-[11px] font-semibold text-ink-muted transition-all hover:border-fire-start/30 hover:text-fire-start disabled:opacity-30"
+            >
+              {busy
+                ? <><RefreshCw className="h-3 w-3 animate-spin" /> Enhancing…</>
+                : <><Spark className="h-3 w-3" /> AI Magic</>
+              }
+            </button>
+          )}
+        </div>
         {q.type === 'multiselect' && q.options ? (
           <div className="flex flex-wrap gap-2">
             {q.options.map((opt) => (
@@ -149,11 +200,13 @@ export default function TypeQuestions({
           <textarea
             value={value}
             onChange={(e) => set(q.question, e.target.value)}
+            disabled={busy}
             placeholder={q.placeholder}
             rows={2}
-            className="w-full resize-none rounded-xl border border-white/[0.10] bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none"
+            className="w-full resize-none rounded-xl border border-white/[0.10] bg-void-900 px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none disabled:opacity-50"
           />
         )}
+        {magicError[q.id] && <p className="text-[11px] text-rose-400">{magicError[q.id]}</p>}
       </div>
     )
   }

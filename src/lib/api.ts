@@ -918,6 +918,26 @@ export async function generateHooks(input: {
   return res.json()
 }
 
+/** "AI Magic" for one wizard-question answer — the same button on every
+ *  free-text field across all 12 templates. Sharpens whatever the user
+ *  typed into a punchier, more specific version without changing their
+ *  underlying claim (never invents a different result/number). */
+export async function enhanceAnswer(input: {
+  adType: string
+  question: string
+  answer: string
+  productName?: string
+  description?: string
+}): Promise<{ enhanced: string }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'enhance-answer', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {
   const res = await fetch('/api/director', {
     method: 'POST',
