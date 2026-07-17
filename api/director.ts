@@ -459,6 +459,72 @@ ${questionList}`,
   return res.status(200).json({ answers })
 }
 
+// Five hook patterns, one hook each — mirrors what Arcads/Higgsfield show
+// before generating: the user picks the line that sounds most like them,
+// instead of Claude silently committing to one opening.
+const HOOK_PATTERNS = [
+  { id: 'pattern_interrupt', label: 'Pattern Interrupt', instruction: 'subverts what the viewer expects to hear next' },
+  { id: 'bold_claim',        label: 'Bold Claim',         instruction: 'a specific, provable result stated flatly, no hype' },
+  { id: 'curiosity_gap',     label: 'Curiosity Gap',      instruction: 'opens a question the viewer needs answered — do not answer it in the hook' },
+  { id: 'social_proof',      label: 'Social Proof',       instruction: 'a number, a count, or a consensus signal ("400,000 people...")' },
+  { id: 'demonstration',     label: 'Demonstration',      instruction: 'describes a physical action happening in frame right now, not a claim' },
+] as const
+
+async function generateHooks(body: Record<string, any>, res: VercelResponse) {
+  const { adType, productName, description, answers } = body
+  if (!description && !productName) {
+    return res.status(400).json({ error: 'description or productName is required' })
+  }
+  const template = getTemplate((adType as AdTypeId) || 'testimonial')
+  const answerLines = answers && typeof answers === 'object'
+    ? Object.entries(answers as Record<string, string>).filter(([, v]) => v?.trim()).map(([k, v]) => `${k}: ${v}`).join('\n')
+    : ''
+
+  const anthropic = new Anthropic()
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 500,
+    system: `You are a viral social media copywriter specializing in UGC ad hooks for a "${template.displayName}" format (${template.description}).
+
+Generate exactly 5 opening hooks — the first line spoken or shown in the ad. Each hook MUST use a different one of these patterns, in this order:
+${HOOK_PATTERNS.map((p, i) => `${i + 1}. ${p.label}: ${p.instruction}`).join('\n')}
+
+Rules:
+- Each hook is under 12 words.
+- Each sounds like a real person talking, not an ad — contractions, natural rhythm.
+- Each is specific to THIS product and grounded in the details given below — never generic.
+- Never start with "Are you", "Have you ever", or "Introducing".
+- Never use exclamation marks.
+- Never use these words: cinematic, professional, amazing, incredible, perfect, stunning, seamless, elegant, luxurious, premium, life-changing, revolutionary, game-changing.
+
+Respond with STRICT JSON only, no markdown, no preamble:
+{"hooks": [{"pattern": "<pattern id>", "text": "<hook line>"}, ...]}
+Exactly 5 entries, in the pattern order given above.`,
+    messages: [{
+      role: 'user',
+      content: `Product name: ${productName || '(unnamed)'}
+Product description: ${description || '(none given)'}
+Ad format: ${template.displayName}${answerLines ? `\n\nDetails the user already gave (ground the hooks in these specifics, especially any result/number/timeframe):\n${answerLines}` : ''}`,
+    }],
+  })
+
+  const rawText = message.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text?.trim() ?? '{}'
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+  const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+  const rawHooks: Array<{ pattern?: string; text?: string }> = Array.isArray(parsed.hooks) ? parsed.hooks : []
+  const hooks = rawHooks
+    .map((h, i) => ({
+      pattern: HOOK_PATTERNS.find(p => p.id === h.pattern)?.label ?? HOOK_PATTERNS[i]?.label ?? 'Hook',
+      text: (h.text ?? '').trim(),
+    }))
+    .filter(h => h.text)
+
+  if (!hooks.length) {
+    return res.status(502).json({ error: 'Hook generation returned nothing. Try again.' })
+  }
+  return res.status(200).json({ hooks })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -511,6 +577,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (err) {
       console.error('[/api/director auto-answer-wizard]', err)
       const message = err instanceof Error ? err.message : 'Creative Direction failed.'
+      return res.status(502).json({ error: message })
+    }
+  }
+
+  if (body.mode === 'generate-hooks') {
+    try {
+      return await generateHooks(body, res)
+    } catch (err) {
+      console.error('[/api/director generate-hooks]', err)
+      const message = err instanceof Error ? err.message : 'Hook generation failed.'
       return res.status(502).json({ error: message })
     }
   }

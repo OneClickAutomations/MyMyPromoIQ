@@ -6,6 +6,7 @@ import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '.
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
+import HookSelector from '../components/studio/HookSelector'
 import { resolveAdType, getTemplate, buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
@@ -21,6 +22,11 @@ import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
 
 const CLONE_PREFILL_KEY = 'promoiq_clone_prefill'
+
+// Formats where the opening line carries the whole ad's credibility — these
+// get the 5-hook-pattern picker. Formats like Unboxing or Tutorial open on an
+// action, not a claim, so a "pick your hook" step would just be noise there.
+const HOOK_ELIGIBLE_TYPES = new Set(['testimonial', 'problem_solution', 'before_after', 'founder_story', 'hook_only'])
 
 const STYLE_OPTIONS = [
   { id: 'testimonial',  label: 'Testimonial',      hint: 'Creator to camera' },
@@ -619,6 +625,23 @@ export default function ReviewAndAdjust() {
           {/* Video length — replaces "how many videos": the user thinks in
               seconds, Claude figures out how many scenes of what length fit. */}
           <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
+
+          {/* Hook picker — only for formats where the opening line IS the ad
+              (testimonial, problem/solution, before/after, founder story,
+              hook-only). Selecting a hook writes straight into the script
+              field below, which already carries through as the opening line. */}
+          {HOOK_ELIGIBLE_TYPES.has(resolveAdType(style)) && (
+            <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+              <HookSelector
+                adType={resolveAdType(style)}
+                productName={productName || undefined}
+                description={(productDescription || productName).trim()}
+                answers={quickAnswers}
+                value={script}
+                onChange={setScript}
+              />
+            </div>
+          )}
 
           {/* Script / hook */}
           <div className="space-y-1.5">

@@ -893,6 +893,31 @@ export async function autoAnswerWizard(input: {
   return res.json()
 }
 
+export interface HookOption {
+  pattern: string
+  text: string
+}
+
+/** Five opening-line options, one per hook pattern (Pattern Interrupt, Bold
+ *  Claim, Curiosity Gap, Social Proof, Demonstration) — the user picks the
+ *  one that sounds most like them instead of Claude silently committing to
+ *  a single hook. Grounded in whatever wizard answers already exist (e.g. a
+ *  testimonial's "result" field feeds the Bold Claim/Social Proof hooks). */
+export async function generateHooks(input: {
+  adType: string
+  productName?: string
+  description: string
+  answers?: Record<string, string>
+}): Promise<{ hooks: HookOption[] }> {
+  const res = await fetch('/api/director', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'generate-hooks', ...input }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function planStoryboard(input: StoryboardPlanInput): Promise<{ plan: import('./studio/storyboard').StoryboardPlan }> {
   const res = await fetch('/api/director', {
     method: 'POST',

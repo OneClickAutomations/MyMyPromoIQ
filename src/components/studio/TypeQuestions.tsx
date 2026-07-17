@@ -32,10 +32,37 @@ export default function TypeQuestions({
 
       {template.wizardQuestions.map((q) => {
         const value = answers[q.question] ?? ''
+        // Multiselect answers are stored as a comma-joined string (answers is
+        // Record<string, string> end to end) — split back out for the chip
+        // row's selected state, join back on toggle.
+        const selectedSet = new Set(value ? value.split(', ').map(s => s.trim()).filter(Boolean) : [])
+        function toggleMulti(opt: string) {
+          const next = new Set(selectedSet)
+          if (next.has(opt)) next.delete(opt)
+          else next.add(opt)
+          set(q.question, Array.from(next).join(', '))
+        }
         return (
           <div key={q.id} className="space-y-1.5">
             <label className="block text-sm font-medium text-ink">{q.question}</label>
-            {q.type === 'select' && q.options ? (
+            {q.type === 'multiselect' && q.options ? (
+              <div className="flex flex-wrap gap-2">
+                {q.options.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => toggleMulti(opt)}
+                    className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
+                      selectedSet.has(opt)
+                        ? 'border-fire-start bg-fire-start/[0.08] text-ink'
+                        : 'border-white/[0.10] bg-void-800 text-ink-muted hover:border-white/20'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            ) : q.type === 'select' && q.options ? (
               <div className="flex flex-wrap gap-2">
                 {q.options.map((opt) => (
                   <button
