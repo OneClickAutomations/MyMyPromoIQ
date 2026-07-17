@@ -1,18 +1,20 @@
 /**
  * Enter — the cinematic front door at "/".
  *
- * Full-viewport UGC-reel video (public/assets/hero-reel.mp4 — compressed from
- * the uploaded master, 1.7MB + instant poster) with a two-layer parallax:
+ * Full-viewport UGC-reel video (public/assets/hero-reel.{webm,mp4}, mobile-
+ * optimized source under 768px + instant poster) with a two-layer parallax:
  *   • scroll — the video is a fixed layer that drifts down at a fraction of the
  *     scroll rate while the content panel slides up OVER it, dimming as it goes
  *   • mouse — a few px of cursor-tracked float (desktop only)
  * The video's headline ("Outperform. Outcreate. Outgrow.") sits dead-center,
  * so the glass CTA lives in the lower band where it never covers the text.
+ * The source has a real voiceover track — muted by default (autoplay
+ * requirement), with a glass sound toggle that never restarts playback.
  *
  * Every CTA here lands on /home — the full marketing landing page.
- * prefers-reduced-motion: parallax off, video paused on its poster.
+ * prefers-reduced-motion: parallax off, video paused on its poster, grain still.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { brand } from '../copy'
 import { ArrowRight, Bolt, ChevronDown, Film, Layers, Zap } from '../components/icons'
@@ -20,19 +22,68 @@ import { ArrowRight, Bolt, ChevronDown, Film, Layers, Zap } from '../components/
 const REDUCED = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
+function MutedIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" />
+      <line x1="17" y1="9" x2="23" y2="15" />
+    </svg>
+  )
+}
+function UnmutedIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  )
+}
+
 export default function Enter() {
   const layerRef = useRef<HTMLDivElement>(null)
   const dimRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [isLoaded, setIsLoaded] = useState(false)
+  const [isMuted, setIsMuted] = useState(true)
+  const [hasInteracted, setHasInteracted] = useState(false)
+
+  const handleCanPlay = useCallback(() => setIsLoaded(true), [])
+
+  // Sound toggle — flips the muted flag only, never touches playback state,
+  // so the loop never restarts or stutters.
+  const toggleSound = useCallback(() => {
+    const video = videoRef.current
+    if (!video) return
+    const next = !video.muted
+    video.muted = next
+    setIsMuted(next)
+    setHasInteracted(true)
+    if (!next && video.paused) {
+      video.play().catch(() => {
+        video.muted = true
+        setIsMuted(true)
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (REDUCED()) {
       // Respect reduced motion: hold the poster, no parallax.
       videoRef.current?.pause()
+      setIsLoaded(true)
       return
     }
     let raf = 0
     let mx = 0, my = 0, sy = 0
+    // Once the content panel has fully risen over the video (~1.1 viewport
+    // heights of scroll), the video is completely covered — pause it there to
+    // save CPU/battery, and resume the instant the user scrolls back up. A
+    // classic IntersectionObserver doesn't apply here: this layer is `fixed`,
+    // so its own bounding rect never leaves the viewport — what actually
+    // matters is whether the sliding content panel has covered it.
+    let coveredPaused = false
     const apply = () => {
       raf = 0
       const vh = window.innerHeight || 1
@@ -45,6 +96,17 @@ export default function Enter() {
         // Deepen the dim as the content panel rises over the video.
         const p = Math.min(1, sy / vh)
         dimRef.current.style.opacity = String(0.28 + p * 0.55)
+      }
+      const video = videoRef.current
+      if (video) {
+        const shouldPause = sy > vh * 0.95
+        if (shouldPause && !coveredPaused) {
+          video.pause()
+          coveredPaused = true
+        } else if (!shouldPause && coveredPaused) {
+          video.play().catch(() => {})
+          coveredPaused = false
+        }
       }
     }
     const schedule = () => { if (!raf) raf = requestAnimationFrame(apply) }
@@ -68,25 +130,63 @@ export default function Enter() {
     <div className="min-h-screen bg-void text-ink">
       {/* ── Fixed video layer (the parallax background) ── */}
       <div className="fixed inset-0 overflow-hidden" aria-hidden>
-        <div ref={layerRef} className="absolute inset-0 will-change-transform" style={{ transform: 'scale(1.08)' }}>
+        {/* Poster shows instantly beneath the video layer — no flash while it fades in */}
+        <div
+          className="absolute inset-0 bg-cover bg-center contrast-[1.04] brightness-[1.02]"
+          style={{ backgroundImage: "url('/assets/hero-poster.jpg')" }}
+        />
+        <div
+          ref={layerRef}
+          className={`absolute inset-0 will-change-transform contrast-[1.04] brightness-[1.02] transition-opacity duration-[1200ms] ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+          style={{ transform: 'scale(1.08)' }}
+        >
           <video
             ref={videoRef}
-            src="/assets/hero-reel.mp4"
             poster="/assets/hero-poster.jpg"
             autoPlay
             muted
             loop
             playsInline
             preload="auto"
+            onCanPlay={handleCanPlay}
             className="h-full w-full object-cover"
-          />
+          >
+            <source src="/assets/hero-reel.webm" type="video/webm" media="(min-width: 769px)" />
+            <source src="/assets/hero-reel-mobile.mp4" type="video/mp4" media="(max-width: 768px)" />
+            <source src="/assets/hero-reel.mp4" type="video/mp4" />
+          </video>
         </div>
+        {/* Cinematic vignette — edges darken, center stays bright */}
+        <div
+          className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse 140% 120% at 50% 50%, transparent 40%, rgba(0,0,0,0.16) 70%, rgba(0,0,0,0.4) 100%)' }}
+        />
         {/* Legibility gradients — light at center (video text), weighted at edges */}
         <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/70 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
+        {/* Film grain — felt, not seen; stilled under prefers-reduced-motion */}
+        <div
+          className="absolute -inset-[20%] animate-grain-shift opacity-[0.028] motion-reduce:animate-none"
+          style={{
+            backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+            backgroundSize: '256px 256px',
+          }}
+        />
         {/* Scroll-driven dim */}
         <div ref={dimRef} className="absolute inset-0 bg-void" style={{ opacity: 0.28 }} />
       </div>
+
+      {/* ── Sound toggle ── */}
+      <button
+        type="button"
+        onClick={toggleSound}
+        aria-label={isMuted ? 'Enable sound' : 'Mute video'}
+        title={isMuted ? 'Enable sound' : 'Mute'}
+        className={`fixed bottom-6 right-6 z-30 flex items-center gap-2 rounded-full border border-white/[0.12] bg-void/[0.52] px-4 py-2.5 text-xs font-medium text-white/75 backdrop-blur-2xl backdrop-saturate-150 transition-all duration-200 hover:-translate-y-0.5 hover:border-fire-start/35 hover:bg-fire-start/15 hover:text-white sm:bottom-8 sm:right-8 ${!hasInteracted ? 'animate-sound-pulse' : ''}`}
+      >
+        <span className="flex flex-shrink-0 items-center opacity-90">{isMuted ? <MutedIcon /> : <UnmutedIcon />}</span>
+        <span className="hidden whitespace-nowrap sm:inline">{isMuted ? 'Sound off' : 'Sound on'}</span>
+      </button>
 
       {/* ── Hero viewport ── */}
       <section className="relative flex h-[100svh] flex-col">
