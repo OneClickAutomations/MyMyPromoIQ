@@ -131,6 +131,15 @@ export interface CreativeBrief {
     speed?: number
     emotion?: string
     voiceId?: string
+    /** Shared-library voices carry the ElevenLabs owner id (needed on first TTS use). */
+    voiceOwnerId?: string
+    voiceName?: string
+    /** mode 'uploaded': the user's own track (data URL) — replaces the ad's audio at assembly. */
+    uploadDataUrl?: string
+    uploadName?: string
+    /** ElevenLabs Music bed, generated at assembly and mixed under the voice. */
+    musicEnabled?: boolean
+    musicPrompt?: string
   }
 
   script: {

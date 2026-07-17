@@ -43,6 +43,7 @@ import {
   listVoices,
   generateVoiceover,
   generateVoiceoverTimed,
+  generateMusic,
   burnCaptionsOnClip,
   muxVideoAudio,
   stitchVideos,
@@ -872,11 +873,11 @@ export default function CommercialStudio() {
       let audioDataUrl: string
       let cues: CaptionCue[] = []
       if (wantsCaptions && (captionStyle === 'karaoke' || captionStyle === 'highlight' || captionStyle === 'clean')) {
-        const timed = await generateVoiceoverTimed({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+        const timed = await generateVoiceoverTimed({ text: clip.dialogue, voiceId: brief.voice.voiceId, ownerId: brief.voice.voiceOwnerId, voiceName: brief.voice.voiceName, speed: brief.voice.speed })
         audioDataUrl = timed.audioDataUrl
         cues = buildCuesFromEleven(timed.alignment.characters, timed.alignment.startTimes, timed.alignment.endTimes)
       } else {
-        const v = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, speed: brief.voice.speed })
+        const v = await generateVoiceover({ text: clip.dialogue, voiceId: brief.voice.voiceId, ownerId: brief.voice.voiceOwnerId, voiceName: brief.voice.voiceName, speed: brief.voice.speed })
         audioDataUrl = v.audioDataUrl
       }
       const { videoDataUrl } = await muxVideoAudio({ videoUrl: final.videoUrl, audioBase64: audioDataUrl })
@@ -921,7 +922,22 @@ export default function CommercialStudio() {
       // A single clip IS the finished ad — skip the network round-trip to
       // ffmpeg (and its failure surface) entirely rather than stitching one
       // video against itself.
-      const videoDataUrl = urls.length === 1 ? urls[0] : (await stitchVideos(urls)).videoDataUrl
+      let videoDataUrl = urls.length === 1 ? urls[0] : (await stitchVideos(urls)).videoDataUrl
+      // Uploaded track replaces the assembled ad's audio; the music bed mixes
+      // UNDER whatever audio remains. Both best-effort — an audio post-step
+      // never sinks a finished render.
+      if (brief.voice.mode === 'uploaded' && brief.voice.uploadDataUrl) {
+        try {
+          videoDataUrl = (await muxVideoAudio({ videoUrl: videoDataUrl, audioBase64: brief.voice.uploadDataUrl })).videoDataUrl
+        } catch (e) { console.warn('[CommercialStudio] uploaded-audio mux failed:', e) }
+      }
+      if (brief.voice.musicEnabled && brief.voice.musicPrompt?.trim()) {
+        try {
+          const totalSeconds = wizardPlan?.clips.reduce((s, c) => s + c.durationSeconds, 0) || 30
+          const { audioDataUrl } = await generateMusic({ prompt: brief.voice.musicPrompt, durationSeconds: totalSeconds })
+          videoDataUrl = (await muxVideoAudio({ videoUrl: videoDataUrl, audioBase64: audioDataUrl, mixMode: 'mix' })).videoDataUrl
+        } catch (e) { console.warn('[CommercialStudio] music generation/mix failed:', e) }
+      }
       setWizardAssembledUrl(videoDataUrl)
       patch({ status: 'complete', render: { ...brief.render, outputUrl: videoDataUrl, statusLog: [] } })
       // Persist the finished ad so it appears in Projects/History. Previously the
@@ -1498,12 +1514,43 @@ export default function CommercialStudio() {
                 <p className="font-semibold text-ink">{label}</p>
                 <p className="text-xs text-ink-muted">{hint}</p>
               </div>
-              {(id === 'cloned' || id === 'uploaded') && (
+              {id === 'cloned' && (
                 <span className="ml-auto rounded-full bg-void-700/60 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-ink-faint">Soon</span>
               )}
             </button>
           ))}
         </div>
+
+        {brief.voice.mode === 'uploaded' && (
+          <div className="space-y-2">
+            {brief.voice.uploadDataUrl ? (
+              <div className="flex items-center gap-3 rounded-xl border border-white/[0.10] bg-void-800 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-ink">{brief.voice.uploadName || 'Uploaded audio'}</p>
+                  <audio src={brief.voice.uploadDataUrl} controls className="mt-1.5 h-8 w-full" />
+                </div>
+                <button type="button" onClick={() => patch({ voice: { ...brief.voice, uploadDataUrl: undefined, uploadName: undefined } })}
+                  className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg bg-void-700 text-ink-muted hover:text-ink" aria-label="Remove audio">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <label className="flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-dashed border-white/[0.14] py-6 text-ink-faint transition-colors hover:border-fire-start/40 hover:text-ink-muted">
+                <Upload className="h-5 w-5" />
+                <span className="text-xs font-medium">Upload MP3, WAV, or M4A (max 15MB)</span>
+                <span className="text-[10px]">Replaces the finished ad's audio track at assembly.</span>
+                <input type="file" accept="audio/*" className="hidden" onChange={e => {
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  if (f.size > 15 * 1024 * 1024) return
+                  const r = new FileReader()
+                  r.onload = () => patch({ voice: { ...brief.voice, uploadDataUrl: r.result as string, uploadName: f.name } })
+                  r.readAsDataURL(f)
+                }} />
+              </label>
+            )}
+          </div>
+        )}
 
         {brief.voice.mode === 'ai_generated' && (
           <div className="space-y-5">
@@ -1534,10 +1581,8 @@ export default function CommercialStudio() {
 
               {!voicesLoading && !voicesError && voices.length > 0 && (() => {
                 const g = (brief.voice.gender ?? '').toLowerCase()
-                const filtered = g && g !== 'neutral'
-                  ? voices.filter(v => !v.gender || v.gender.toLowerCase() === g)
-                  : voices
-                const list = (filtered.length ? filtered : voices).slice(0, 24)
+                const filtered = g ? voices.filter(v => v.gender === g) : voices
+                const list = (filtered.length ? filtered : voices).slice(0, 80)
                 return (
                   <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {list.map(v => {
@@ -1556,7 +1601,7 @@ export default function CommercialStudio() {
                           >
                             {previewingVoiceId === v.voiceId ? <span className="h-2.5 w-2.5 rounded-sm bg-fire-start" /> : <PlayIcon className="h-3.5 w-3.5" />}
                           </button>
-                          <button type="button" onClick={() => patch({ voice: { ...brief.voice, voiceId: v.voiceId } })} className="min-w-0 flex-1 text-left">
+                          <button type="button" onClick={() => patch({ voice: { ...brief.voice, voiceId: v.voiceId, voiceOwnerId: v.ownerId, voiceName: v.name } })} className="min-w-0 flex-1 text-left">
                             <p className="truncate text-sm font-semibold text-ink">{v.name}</p>
                             <p className="truncate text-[11px] text-ink-faint capitalize">
                               {[v.gender, v.accent, v.useCase].filter(Boolean).join(' · ') || v.category}
@@ -1577,6 +1622,27 @@ export default function CommercialStudio() {
             </div>
           </div>
         )}
+
+        {/* Background music — ElevenLabs Music, generated at assembly to match
+            the ad's length and mixed under the voice at reduced volume. */}
+        <div className={`rounded-2xl border p-5 transition ${brief.voice.musicEnabled ? 'border-fire-start/40 bg-fire-start/[0.04]' : 'border-white/[0.08] bg-void-800'}`}>
+          <button type="button" onClick={() => patch({ voice: { ...brief.voice, musicEnabled: !brief.voice.musicEnabled } })}
+            className="flex w-full items-center justify-between gap-3 text-left">
+            <span>
+              <span className="block text-sm font-semibold text-ink">Background music</span>
+              <span className="block text-xs text-ink-muted">ElevenLabs Music — generated to match your ad, mixed under the voice.</span>
+            </span>
+            <span className={`grid h-5 w-9 flex-shrink-0 place-items-center rounded-full border transition ${brief.voice.musicEnabled ? 'border-fire-start bg-fire-start/30' : 'border-white/20 bg-void-700'}`}>
+              <span className={`h-3.5 w-3.5 rounded-full transition-transform ${brief.voice.musicEnabled ? 'translate-x-2 bg-fire-start' : '-translate-x-2 bg-white/40'}`} />
+            </span>
+          </button>
+          {brief.voice.musicEnabled && (
+            <textarea value={brief.voice.musicPrompt ?? ''} rows={2}
+              onChange={e => patch({ voice: { ...brief.voice, musicPrompt: e.target.value } })}
+              placeholder="e.g. Upbeat lo-fi with warm bass and light percussion, optimistic, no vocals"
+              className="mt-3 w-full resize-none rounded-lg border border-white/[0.10] bg-void-900 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-fire-start/50 focus:outline-none" />
+          )}
+        </div>
 
         {/* Captions — burned from the script (always correct spelling), synced
             to the audio: precisely for an ElevenLabs voice, estimated otherwise. */}

@@ -280,8 +280,12 @@ export type ElevenVoice = {
   previewUrl?: string
   gender?: string
   accent?: string
+  age?: string
   description?: string
   useCase?: string
+  /** Shared-library voices carry the owner id needed before first TTS use. */
+  ownerId?: string
+  source?: 'mine' | 'library'
 }
 
 export async function listVoices(): Promise<{ voices: ElevenVoice[] }> {
@@ -295,6 +299,9 @@ export async function listVoices(): Promise<{ voices: ElevenVoice[] }> {
 export type VoiceoverInput = {
   text: string
   voiceId: string
+  /** For shared-library voices — lets the server auto-add the voice on first use. */
+  ownerId?: string
+  voiceName?: string
   modelId?: string
   stability?: number
   similarityBoost?: number
@@ -321,6 +328,18 @@ export async function generateVoiceoverTimed(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ...input, withTimestamps: true }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/** ElevenLabs Music — generate a background track from a text prompt,
+ *  sized to the ad's duration (server clamps to Eleven Music's 10-300s). */
+export async function generateMusic(input: { prompt: string; durationSeconds?: number }): Promise<{ audioDataUrl: string; bytes: number }> {
+  const res = await fetch('/api/voiceover', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'music', ...input }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -416,7 +435,14 @@ export async function extractLastFrame(videoUrl: string): Promise<{ imageDataUrl
 }
 
 /** Combine a silent video URL + voiceover audio into one MP4 with sound. */
-export async function muxVideoAudio(input: { videoUrl: string; audioBase64: string }): Promise<{ videoDataUrl: string; bytes: number }> {
+export async function muxVideoAudio(input: {
+  videoUrl: string
+  audioBase64: string
+  /** 'replace' (default) swaps the video's audio for the track; 'mix' layers
+   *  the track UNDER the existing audio at reduced volume (music bed). */
+  mixMode?: 'replace' | 'mix'
+  overlayVolume?: number
+}): Promise<{ videoDataUrl: string; bytes: number }> {
   const res = await fetch('/api/mux', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
-import { ArrowRight, Check, Download, RefreshCw, Spark, Wand, PlayIcon } from '../components/icons'
+import { ArrowRight, Check, Download, RefreshCw, Spark, Wand } from '../components/icons'
 import ProductInput, { type ProductInputValue } from '../components/ProductInput'
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
 import HookSelector from '../components/studio/HookSelector'
 import WizardStepHeader from '../components/studio/WizardStepHeader'
+import AudioPicker, { EMPTY_AUDIO, type AudioSelection } from '../components/studio/AudioPicker'
 import { resolveAdType, getTemplate, buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
@@ -16,8 +17,7 @@ import type { CreatorAttributes } from '../lib/studio/types'
 import { estimateClipCount } from '../lib/studio/storyboard'
 import {
   startGeneration, pollUntilDone, saveCampaign, saveScene, writeAdScript, enhancePrompt,
-  planStoryboard, generateVoiceover, muxVideoAudio, stitchVideos, listVoices, extractLastFrame,
-  type ElevenVoice,
+  planStoryboard, generateVoiceover, generateMusic, muxVideoAudio, stitchVideos, extractLastFrame,
 } from '../lib/api'
 import type { ClonePrefill } from '../lib/discovery/types'
 import { adForge } from '../copy'
@@ -108,13 +108,10 @@ export default function ReviewAndAdjust() {
   // no stitching). Users drag right to add whole clips.
   const [durationSeconds, setDurationSeconds] = useState(8)
 
-  // Voiceover (ElevenLabs) — loaded lazily, empty selection = silent/native audio.
-  const [voices, setVoices] = useState<ElevenVoice[]>([])
-  const [voicesLoading, setVoicesLoading] = useState(false)
-  const [voicesError, setVoicesError] = useState('')
-  const [selectedVoiceId, setSelectedVoiceId] = useState('')
-  const [previewingVoiceId, setPreviewingVoiceId] = useState('')
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+  // Audio (ElevenLabs) — the three-tab selection: native audio / AI voice /
+  // uploaded track, plus an optional generated music bed. The picker component
+  // owns voice-library loading and preview playback.
+  const [audioSel, setAudioSel] = useState<AudioSelection>(EMPTY_AUDIO)
 
   // Scene rendering is sequential (not parallel) by necessity: each scene's
   // conditioning image is the PREVIOUS scene's last frame (true image-to-video
@@ -150,26 +147,6 @@ export default function ReviewAndAdjust() {
   const [historySaved, setHistorySaved] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [downloading, setDownloading] = useState(false)
-
-  // Load ElevenLabs voices once, lazily — silent if no key is configured
-  // server-side (the voiceover step is opt-in, never blocks generation).
-  useEffect(() => {
-    setVoicesLoading(true)
-    listVoices()
-      .then(({ voices: v }) => setVoices(v))
-      .catch(e => setVoicesError(e instanceof Error ? e.message : 'Could not load voices.'))
-      .finally(() => setVoicesLoading(false))
-  }, [])
-
-  function previewVoice(v: ElevenVoice) {
-    if (!v.previewUrl) return
-    previewAudioRef.current?.pause()
-    const audio = new Audio(v.previewUrl)
-    previewAudioRef.current = audio
-    setPreviewingVoiceId(v.voiceId)
-    audio.play().catch(() => {})
-    audio.onended = () => setPreviewingVoiceId('')
-  }
 
   // Read prefill on mount, then clear it
   useEffect(() => {
@@ -415,15 +392,22 @@ export default function ReviewAndAdjust() {
         return
       }
 
-      // ── STEP 2: VOICEOVER — layer ElevenLabs onto each clip (skipped entirely if no voice picked).
+      // ── STEP 2: VOICEOVER — layer an ElevenLabs AI voice onto each clip
+      // (skipped for native audio and for uploaded tracks, which are applied
+      // to the assembled ad as a whole).
       setStepIndex(2)
       let finalUrls: string[]
-      if (selectedVoiceId) {
+      if (audioSel.mode === 'ai' && audioSel.voiceId) {
         const withVoice: string[] = []
         for (const tile of rendered) {
           if (cancelledRef.current) return
           try {
-            const { audioDataUrl } = await generateVoiceover({ text: tile.dialogue, voiceId: selectedVoiceId })
+            const { audioDataUrl } = await generateVoiceover({
+              text: tile.dialogue,
+              voiceId: audioSel.voiceId,
+              ownerId: audioSel.voiceOwnerId,
+              voiceName: audioSel.voiceName,
+            })
             const { videoDataUrl } = await muxVideoAudio({ videoUrl: tile.videoUrl, audioBase64: audioDataUrl })
             withVoice.push(videoDataUrl)
           } catch {
@@ -439,8 +423,29 @@ export default function ReviewAndAdjust() {
 
       // ── STEP 3: RENDERING — assemble into one seamless video.
       setStepIndex(3)
-      const finalUrl = finalUrls.length === 1 ? finalUrls[0] : (await stitchVideos(finalUrls)).videoDataUrl
+      let finalUrl = finalUrls.length === 1 ? finalUrls[0] : (await stitchVideos(finalUrls)).videoDataUrl
       if (cancelledRef.current) return
+
+      // Uploaded track replaces the whole ad's audio; the music bed is mixed
+      // UNDER whatever audio the ad ends up with. Both are best-effort — an
+      // audio post-step never sinks a finished render.
+      if (audioSel.mode === 'upload' && audioSel.uploadDataUrl) {
+        try {
+          finalUrl = (await muxVideoAudio({ videoUrl: finalUrl, audioBase64: audioSel.uploadDataUrl })).videoDataUrl
+        } catch (e) {
+          console.warn('[ReviewAndAdjust] uploaded-audio mux failed, keeping original audio:', e)
+        }
+        if (cancelledRef.current) return
+      }
+      if (audioSel.musicEnabled && audioSel.musicPrompt?.trim()) {
+        try {
+          const { audioDataUrl } = await generateMusic({ prompt: audioSel.musicPrompt, durationSeconds })
+          finalUrl = (await muxVideoAudio({ videoUrl: finalUrl, audioBase64: audioDataUrl, mixMode: 'mix' })).videoDataUrl
+        } catch (e) {
+          console.warn('[ReviewAndAdjust] music generation/mix failed, continuing without music:', e)
+        }
+        if (cancelledRef.current) return
+      }
 
       setVideoUrl(finalUrl)
       setPhase('done')
@@ -802,60 +807,16 @@ export default function ReviewAndAdjust() {
           </div>
           )}
 
-          {/* Voiceover — ElevenLabs, opt-in. Empty selection = silent/native audio only. */}
+          {/* Audio — three tabs (native / AI voice / upload) + music bed. */}
           {currentKey === 'voiceover' && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Voiceover</label>
+              <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Audio</label>
               <span className="text-[10px] font-semibold uppercase tracking-widest text-ink-faint">ElevenLabs</span>
             </div>
-            {voicesLoading && <p className="text-sm text-ink-muted">Loading voices…</p>}
-            {voicesError && (
-              <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-xs text-ink-muted">{voicesError}</div>
-            )}
-            {!voicesLoading && !voicesError && (
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                <button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => setSelectedVoiceId('')}
-                  className={`flex-shrink-0 rounded-xl border px-3.5 py-2.5 text-left text-xs font-semibold transition-all disabled:opacity-50 ${
-                    !selectedVoiceId
-                      ? 'border-fire-start/50 bg-fire-start/[0.08] text-ink'
-                      : 'border-white/[0.08] bg-void-800 text-ink-muted hover:border-white/20'
-                  }`}
-                >
-                  No voiceover<br /><span className="font-normal text-ink-faint">Lip-synced native audio</span>
-                </button>
-                {voices.slice(0, 20).map(v => {
-                  const selected = selectedVoiceId === v.voiceId
-                  return (
-                    <div
-                      key={v.voiceId}
-                      className={`flex flex-shrink-0 items-center gap-2 rounded-xl border px-2.5 py-2 transition-all ${
-                        selected ? 'border-fire-start/50 bg-fire-start/[0.08]' : 'border-white/[0.08] bg-void-800 hover:border-white/20'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => previewVoice(v)}
-                        disabled={!v.previewUrl || isBusy}
-                        className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-lg bg-void-700 text-fire-start hover:bg-void-600 disabled:opacity-30"
-                        aria-label={`Preview ${v.name}`}
-                      >
-                        {previewingVoiceId === v.voiceId ? <span className="h-2 w-2 rounded-sm bg-fire-start" /> : <PlayIcon className="h-3 w-3" />}
-                      </button>
-                      <button type="button" disabled={isBusy} onClick={() => setSelectedVoiceId(v.voiceId)} className="min-w-0 text-left disabled:opacity-50">
-                        <p className="max-w-[110px] truncate text-xs font-semibold text-ink">{v.name}</p>
-                      </button>
-                      {selected && <Check className="h-3.5 w-3.5 flex-shrink-0 text-fire-start" />}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            <AudioPicker value={audioSel} onChange={setAudioSel} disabled={isBusy} />
             <p className="text-[10px] text-ink-faint">
-              "No voiceover" keeps the render's own audio — the script is already spoken with lips synced to it. Picking a voice REPLACES that track with an ElevenLabs recording of the same words; the voice quality is better, but lip movement may drift slightly since Veo generated it to a different take.
+              "No voiceover" keeps the render's own audio — the script is already spoken with lips synced to it. An AI voice or uploaded track REPLACES that audio; voice quality is better, but lip movement may drift slightly since the video was generated to a different take.
             </p>
           </div>
           )}
@@ -883,7 +844,7 @@ export default function ReviewAndAdjust() {
                 <div className="flex justify-between gap-3"><dt className="text-ink-faint">Product</dt><dd className="truncate text-ink-muted">{productName || productDescription || '—'}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-ink-faint">Length</dt><dd className="text-ink-muted">~{durationSeconds}s</dd></div>
                 {script && <div className="flex justify-between gap-3"><dt className="text-ink-faint">Opening line</dt><dd className="truncate text-ink-muted">"{script}"</dd></div>}
-                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Voiceover</dt><dd className="text-ink-muted">{selectedVoiceId ? voices.find(v => v.voiceId === selectedVoiceId)?.name || 'Selected' : 'Native audio'}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Audio</dt><dd className="truncate text-ink-muted">{audioSel.mode === 'ai' && audioSel.voiceId ? `AI voice — ${audioSel.voiceName || 'selected'}` : audioSel.mode === 'upload' && audioSel.uploadDataUrl ? `Uploaded — ${audioSel.uploadName || 'audio'}` : 'Native audio'}{audioSel.musicEnabled ? ' + music' : ''}</dd></div>
                 {showCreator && (
                   <div className="flex justify-between gap-3"><dt className="text-ink-faint">Creator</dt><dd className="text-ink-muted">{creatorValue.mode === 'uploaded_seed' ? 'Uploaded photo' : creatorValue.attributes.gender ? `${creatorValue.attributes.gender}, ${creatorValue.attributes.ageRange || 'age unset'}` : 'Not set'}</dd></div>
                 )}
@@ -935,7 +896,7 @@ export default function ReviewAndAdjust() {
             estimateSecondsForStep={[
               12,
               planClipCount * 70,
-              selectedVoiceId ? planClipCount * 8 : 3,
+              audioSel.mode === 'ai' && audioSel.voiceId ? planClipCount * 8 : 3,
               15 + planClipCount * 3,
             ][stepIndex]}
             onCancel={handleCancel}
