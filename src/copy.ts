@@ -102,10 +102,10 @@ export const problem = {
 }
 
 export const videoSection = {
-  caption: 'Watch a real product turn into a scroll-stopping ad in 90 seconds',
-  subcaption: 'One upload in. A finished, on-brand UGC video out. No timeline, no plugins, no editor.',
-  // Drop a real <video> src or embed here later.
-  posterAlt: 'Product-to-ad demo preview',
+  caption: 'Upload a product. Get a scroll-stopping UGC ad back.',
+  subcaption: 'PromoIQ is the AI ad studio that scripts, casts, films, and voices your ad automatically — no camera, no actors, no editor. See real output below.',
+  posterAlt: 'Real PromoIQ output — unboxing, testimonial, and lifestyle UGC',
+  durationLabel: '0:08',
 }
 
 export const howItWorks = {

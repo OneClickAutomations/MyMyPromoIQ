@@ -1,11 +1,19 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { videoSection } from '../copy'
 import Reveal from './Reveal'
 
-/** Demo video block. Swap the inner faux-frame for a real <video src> /
- *  embed when the demo asset is ready. */
+/** Demo video block — real output reel, click-to-play over the poster. */
 export default function VideoSection() {
   const [playing, setPlaying] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  function play() {
+    setPlaying(true)
+    // Autoplay-with-sound needs a user gesture — this click IS that gesture,
+    // so play() unmuted here won't be blocked the way a mount-time autoplay
+    // would be.
+    requestAnimationFrame(() => videoRef.current?.play().catch(() => {}))
+  }
 
   return (
     <section id="demo" className="relative py-12 md:py-16">
@@ -29,9 +37,20 @@ export default function VideoSection() {
                 <div className="absolute -left-16 top-10 h-56 w-56 rounded-full bg-fire-start/20 blur-3xl" />
                 <div className="absolute -right-10 bottom-0 h-48 w-48 rounded-full bg-gold/10 blur-3xl" />
 
-                {!playing ? (
+                <video
+                  ref={videoRef}
+                  src="/assets/demo.mp4"
+                  poster="/assets/demo-poster.jpg"
+                  controls={playing}
+                  playsInline
+                  onEnded={() => setPlaying(false)}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  aria-label={videoSection.posterAlt}
+                />
+
+                {!playing && (
                   <button
-                    onClick={() => setPlaying(true)}
+                    onClick={play}
                     className="absolute inset-0 grid place-items-center"
                     aria-label="Play demo"
                   >
@@ -40,14 +59,9 @@ export default function VideoSection() {
                       <span className="ml-1 h-0 w-0 border-y-[14px] border-l-[22px] border-y-transparent border-l-[#F2B84B]" />
                     </span>
                     <span className="absolute bottom-5 rounded-full bg-black/40 px-3 py-1 text-xs text-white/80 backdrop-blur-sm">
-                      {videoSection.posterAlt} · 1:00
+                      {videoSection.posterAlt} · {videoSection.durationLabel}
                     </span>
                   </button>
-                ) : (
-                  <div className="absolute inset-0 grid place-items-center text-sm text-ink-muted">
-                    {/* TODO: replace with <video controls autoPlay src="/assets/demo.mp4" /> */}
-                    Demo player mounts here
-                  </div>
                 )}
               </div>
             </div>
