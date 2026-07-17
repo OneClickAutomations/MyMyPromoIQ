@@ -7,6 +7,7 @@ import ProductInput, { type ProductInputValue } from '../components/ProductInput
 import AdTypeSelector from '../components/studio/AdTypeSelector'
 import TypeQuestions from '../components/studio/TypeQuestions'
 import HookSelector from '../components/studio/HookSelector'
+import WizardStepHeader from '../components/studio/WizardStepHeader'
 import { resolveAdType, getTemplate, buildIdentityAnchor } from '../lib/studio/promptEngineBridge'
 import GenerationOverlay, { type GenerationStep } from '../components/ui/GenerationOverlay'
 import DurationSlider from '../components/ui/DurationSlider'
@@ -563,6 +564,30 @@ export default function ReviewAndAdjust() {
   // casting a person — the user only sees preferences relevant to the format.
   const activeTemplate = getTemplate(resolveAdType(style))
   const showCreator = activeTemplate.needsCreator !== false
+  const hookEligible = HOOK_ELIGIBLE_TYPES.has(resolveAdType(style))
+
+  // The bespoke wizard shell: one step visible at a time instead of one long
+  // scrolling form. The step LIST itself is format-specific — a creator-less
+  // format skips the Creator step entirely, a format without a hook moment
+  // skips the hook picker — computed fresh each render so changing style at
+  // step 0 immediately reflects the new format's actual step count.
+  const WIZARD_STEPS: Array<{ key: string; label: string }> = [
+    { key: 'style', label: 'Format' },
+    { key: 'details', label: 'Details' },
+    { key: 'product', label: 'Product' },
+    { key: 'length', label: 'Length' },
+    ...(hookEligible ? [{ key: 'hook', label: 'Hook' }] : []),
+    { key: 'script', label: 'Script' },
+    { key: 'voiceover', label: 'Voiceover' },
+    ...(showCreator ? [{ key: 'creator', label: 'Creator' }] : []),
+    { key: 'review', label: 'Review' },
+  ]
+  const [wizardStep, setWizardStep] = useState(0)
+  const currentStep = Math.min(wizardStep, WIZARD_STEPS.length - 1)
+  const currentKey = WIZARD_STEPS[currentStep].key
+  const goNext = () => setWizardStep(s => Math.min(s + 1, WIZARD_STEPS.length - 1))
+  const goBack = () => setWizardStep(s => Math.max(s - 1, 0))
+  const showWizard = phase === 'idle'
 
   return (
     <AppShell>
@@ -594,10 +619,26 @@ export default function ReviewAndAdjust() {
           </div>
         )}
 
+        {/* Bespoke wizard shell — one step visible at a time, chrome shared
+            across every format, content per-step is format-specific (a
+            creator-less format skips Creator, a non-hook format skips Hook). */}
+        {showWizard && (
+          <WizardStepHeader
+            templateName={activeTemplate.displayName}
+            stepIndex={currentStep}
+            stepCount={WIZARD_STEPS.length}
+            stepLabel={WIZARD_STEPS[currentStep].label}
+            onBack={goBack}
+            canGoBack={currentStep > 0}
+          />
+        )}
+
         {/* Form */}
+        {showWizard && (
         <div className="space-y-5">
           {/* Style FIRST — the format decides everything downstream (beats,
               camera, prompts), so it's the opening choice, before the product. */}
+          {currentKey === 'style' && (
           <div className="space-y-3">
             <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
               Pick a style
@@ -607,10 +648,12 @@ export default function ReviewAndAdjust() {
             </label>
             <AdTypeSelector selected={resolveAdType(style)} onSelect={(ad) => { setStyle(ad); setQuickAnswers({}) }} />
           </div>
+          )}
 
           {/* The chosen style's OWN questions — an unboxing asks about the
               packaging, a tutorial asks for the steps, a reveal asks for the
               tagline. Answers ground the script; skip freely. */}
+          {currentKey === 'details' && (
           <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
             <TypeQuestions
               adType={resolveAdType(style)}
@@ -618,19 +661,24 @@ export default function ReviewAndAdjust() {
               onChange={setQuickAnswers}
             />
           </div>
+          )}
 
           {/* Product — the shared capture component (upload / camera / URL / AI clean-up) */}
+          {currentKey === 'product' && (
           <ProductInput value={productValue} onChange={onProductChange} />
+          )}
 
           {/* Video length — replaces "how many videos": the user thinks in
               seconds, Claude figures out how many scenes of what length fit. */}
+          {currentKey === 'length' && (
           <DurationSlider value={durationSeconds} onChange={setDurationSeconds} disabled={isBusy} />
+          )}
 
           {/* Hook picker — only for formats where the opening line IS the ad
               (testimonial, problem/solution, before/after, founder story,
               hook-only). Selecting a hook writes straight into the script
               field below, which already carries through as the opening line. */}
-          {HOOK_ELIGIBLE_TYPES.has(resolveAdType(style)) && (
+          {currentKey === 'hook' && (
             <div className="rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
               <HookSelector
                 adType={resolveAdType(style)}
@@ -644,6 +692,7 @@ export default function ReviewAndAdjust() {
           )}
 
           {/* Script / hook */}
+          {currentKey === 'script' && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
@@ -749,8 +798,10 @@ export default function ReviewAndAdjust() {
               <p className="text-[10px] text-ink-faint">The opening scene will speak this line, then Claude continues the story to fill your chosen video length.</p>
             )}
           </div>
+          )}
 
           {/* Voiceover — ElevenLabs, opt-in. Empty selection = silent/native audio only. */}
+          {currentKey === 'voiceover' && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold uppercase tracking-widest text-ink-faint">Voiceover</label>
@@ -805,10 +856,11 @@ export default function ReviewAndAdjust() {
               "No voiceover" keeps the render's own audio — the script is already spoken with lips synced to it. Picking a voice REPLACES that track with an ElevenLabs recording of the same words; the voice quality is better, but lip movement may drift slightly since Veo generated it to a different take.
             </p>
           </div>
+          )}
 
           {/* Creator — only for formats with an on-camera person. A product
               reveal / comparison / POV never asks about casting. */}
-          {showCreator && (
+          {currentKey === 'creator' && showCreator && (
             <div className="space-y-1.5">
               <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-ink-faint">
                 Creator
@@ -819,10 +871,41 @@ export default function ReviewAndAdjust() {
               <CreatorInput value={creatorValue} onChange={setCreatorValue} />
             </div>
           )}
+
+          {/* Review — final step: recap what's set, surface any error, Generate lives below. */}
+          {currentKey === 'review' && (
+            <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-void-800/60 p-5">
+              <p className="text-sm font-semibold text-ink">Ready to generate</p>
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Format</dt><dd className="text-ink-muted">{activeTemplate.displayName}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Product</dt><dd className="truncate text-ink-muted">{productName || productDescription || '—'}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Length</dt><dd className="text-ink-muted">~{durationSeconds}s</dd></div>
+                {script && <div className="flex justify-between gap-3"><dt className="text-ink-faint">Opening line</dt><dd className="truncate text-ink-muted">"{script}"</dd></div>}
+                <div className="flex justify-between gap-3"><dt className="text-ink-faint">Voiceover</dt><dd className="text-ink-muted">{selectedVoiceId ? voices.find(v => v.voiceId === selectedVoiceId)?.name || 'Selected' : 'Native audio'}</dd></div>
+                {showCreator && (
+                  <div className="flex justify-between gap-3"><dt className="text-ink-faint">Creator</dt><dd className="text-ink-muted">{creatorValue.mode === 'uploaded_seed' ? 'Uploaded photo' : creatorValue.attributes.gender ? `${creatorValue.attributes.gender}, ${creatorValue.attributes.ageRange || 'age unset'}` : 'Not set'}</dd></div>
+                )}
+              </dl>
+            </div>
+          )}
         </div>
+        )}
+
+        {/* Wizard nav — Back handled by the header; Continue advances to the
+            next step. Hidden once generation starts (overlay/result take over)
+            and on the final Review step (Generate replaces Continue). */}
+        {showWizard && currentKey !== 'review' && (
+          <button
+            type="button"
+            onClick={goNext}
+            className="btn-fire w-full justify-center gap-2"
+          >
+            Continue <ArrowRight className="h-4 w-4" />
+          </button>
+        )}
 
         {/* Error */}
-        {errorMsg && (
+        {showWizard && currentKey === 'review' && errorMsg && (
           <p className="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3 text-sm text-rose-400">
             {errorMsg}
           </p>
@@ -995,7 +1078,7 @@ export default function ReviewAndAdjust() {
         )}
 
         {/* Generate CTA */}
-        {(phase === 'idle') && (
+        {phase === 'idle' && currentKey === 'review' && (
           <button
             type="button"
             onClick={() => handleGenerate()}
