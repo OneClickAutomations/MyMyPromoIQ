@@ -27,7 +27,10 @@ export interface BeatDefinition {
 export interface WizardQuestion {
   id: string
   question: string
-  type: 'text' | 'select' | 'multiselect' | 'toggle'
+  /** 'image' renders a real upload dropzone (thumbnail preview, stored as a
+   *  data URL) — used where a format structurally needs a second photo the
+   *  main product shot doesn't cover (packaging, a before/after pair). */
+  type: 'text' | 'select' | 'multiselect' | 'toggle' | 'image'
   options?: string[]
   placeholder?: string
   /** Which CreativeBrief-ish field this answer feeds. */
@@ -149,8 +152,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'room tone, one quiet exhale' },
     ],
     wizardQuestions: [
-      { id: 'result', question: 'What specific result did you get?', type: 'text', placeholder: 'e.g. My skin cleared up in three weeks', feedsIntoPromptField: 'proof' },
-      { id: 'timeframe', question: 'How long did it take?', type: 'text', placeholder: 'e.g. About 3 weeks', feedsIntoPromptField: 'proof' },
+      { id: 'result', question: 'What specific result did you get? Be specific — vague results make weak testimonials.', type: 'text', placeholder: 'e.g. My skin cleared up in three weeks (not "it works great")', feedsIntoPromptField: 'proof' },
+      { id: 'timeframe', question: 'How long did it take to see results?', type: 'select', options: ['Same day', '2-3 days', '1 week', '2 weeks', '1 month'], feedsIntoPromptField: 'proof' },
+      { id: 'skeptical', question: 'Were you skeptical before trying it?', type: 'select', options: ['Yes, very', 'A little', 'Not really'], feedsIntoPromptField: 'hook' },
       { id: 'hook', question: 'What\'s the one line that would stop a scroll?', type: 'text', placeholder: 'e.g. I almost returned it on day two', feedsIntoPromptField: 'hook' },
       { id: 'recommend', question: 'Would you recommend it, and to whom?', type: 'text', placeholder: 'e.g. Anyone who\'s tried everything', feedsIntoPromptField: 'cta' },
     ],
@@ -186,6 +190,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'crisp mechanical click of the product opening, close breath' },
     ],
     wizardQuestions: [
+      { id: 'packaging_image', question: 'Show us the packaging — upload a photo of the box, mailer, or bag it arrives in', type: 'image', feedsIntoPromptField: 'scene' },
       { id: 'order_reason', question: 'Why did you order this?', type: 'text', placeholder: 'e.g. My skin has been so dry this winter', feedsIntoPromptField: 'hook' },
       { id: 'packaging_type', question: 'What kind of packaging does it arrive in?', type: 'select', options: ['Retail box', 'Mailer', 'Bag', 'Gift box', 'Bottle in box'], feedsIntoPromptField: 'scene' },
       { id: 'packaging_quality', question: 'How nice is the packaging?', type: 'select', options: ['Budget — plain/basic', 'Standard', 'Premium', 'Luxury — really impressive'], feedsIntoPromptField: 'hook' },
@@ -227,7 +232,10 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'room tone, one quiet exhale' },
     ],
     wizardQuestions: [
-      { id: 'problem', question: 'What was the problem?', type: 'text', placeholder: 'e.g. My old blender left chunks every time', feedsIntoPromptField: 'problem' },
+      { id: 'problem', question: 'What was the problem? Describe the frustration in your own words.', type: 'text', placeholder: 'e.g. My old blender left chunks every time', feedsIntoPromptField: 'problem' },
+      { id: 'intensity', question: 'How intense was the problem?', type: 'select', options: ['Mild annoyance', 'Real struggle', 'Desperate'], feedsIntoPromptField: 'problem' },
+      { id: 'duration', question: 'How long had this been a problem?', type: 'select', options: ['Recent', 'Months', 'Years', 'Forever'], feedsIntoPromptField: 'problem' },
+      { id: 'tried_already', question: 'What did you already try that didn\'t work?', type: 'text', placeholder: 'e.g. Cheaper blenders, pre-chopping everything', feedsIntoPromptField: 'problem' },
       { id: 'severity', question: 'How bad was it — what did it cost you?', type: 'text', placeholder: 'e.g. I\'d given up on smoothies entirely', feedsIntoPromptField: 'problem' },
       { id: 'solution_line', question: 'What happened when you tried the product?', type: 'text', placeholder: 'e.g. It was smooth on the first try', feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you close?', type: 'text', placeholder: 'e.g. Do yourself a favor', feedsIntoPromptField: 'cta' },
@@ -236,7 +244,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     defaultLighting: 'kitchen_morning',
     hookTypes: ['relatable frustration', 'the old way vs the new way'],
     platformNotes: 'The problem beat must be instantly recognizable with sound off — exaggerate the physical failure slightly.',
-    expertSkill: 'You are shooting a contrast story built on a deliberate LIGHTING TURN. The problem beat is cool and cluttered — flat, slightly harsh or dim light, messy counter, tight nervous framing — and the moment the product solves it the world visibly warms and opens: light lifts, shadows soften, the frame breathes wider. That lighting shift IS the emotional payoff and must be legible with sound off. The pain must be PHYSICAL and on-camera first — a real failed attempt (spill, fumble, mess), shoulders dropping, an audible sigh — never a narrated complaint over neutral footage. The solution lands in ONE clean motion with a satisfying contact sound; the framing must let the viewer SEE the before/after difference, not be told it. Close with a shrug-to-lens that-is-it beat in the new warm light.',
+    expertSkill: 'You are shooting a contrast story built on a deliberate LIGHTING TURN. The problem beat is cool and cluttered — flat, slightly harsh or dim light, messy counter, tight nervous framing — and the moment the product solves it the world visibly warms and opens: light lifts, shadows soften, the frame breathes wider. That lighting shift IS the emotional payoff and must be legible with sound off. The pain must be PHYSICAL and on-camera first — a real failed attempt (spill, fumble, mess), shoulders dropping, an audible sigh — never a narrated complaint over neutral footage. The solution lands in ONE clean motion with a satisfying contact sound; the framing must let the viewer SEE the before/after difference, not be told it. Close with a shrug-to-lens that-is-it beat in the new warm light. If the user named things they already tried, work ONE into the problem beat as a physical prop (the failed gadget visible and pushed aside) — it is the agitation that makes this product read as the thing that finally worked, not just another option.',
     negativePromptAdditions: ['narrated complaint over neutral footage', 'identical mood before and after'],
   },
 
@@ -267,7 +275,8 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'room tone' },
     ],
     wizardQuestions: [
-      { id: 'routine', question: 'What part of your day does this fit into?', type: 'text', placeholder: 'e.g. My 6am before the kids wake up', feedsIntoPromptField: 'scene' },
+      { id: 'routine_slot', question: 'When do you use this?', type: 'multiselect', options: ['Morning routine', 'Night routine', 'Pre-workout', 'Post-workout', 'With coffee', 'With meals', 'Travel', 'Work desk', 'Shower/bath'], feedsIntoPromptField: 'scene' },
+      { id: 'routine', question: 'What part of your day does this fit into? Describe the vibe in one sentence.', type: 'text', placeholder: 'e.g. My 6am before the kids wake up, cozy and slow', feedsIntoPromptField: 'scene' },
       { id: 'use_line', question: 'How do you actually use it?', type: 'text', placeholder: 'e.g. Two pumps while the coffee brews', feedsIntoPromptField: 'proof' },
       { id: 'payoff', question: 'What\'s the small payoff you feel?', type: 'text', placeholder: 'e.g. That one calm minute', feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you close?', type: 'text', placeholder: 'e.g. It\'s the little things', feedsIntoPromptField: 'cta' },
@@ -304,9 +313,11 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'an upbeat breath, room tone lifting' },
     ],
     wizardQuestions: [
+      { id: 'before_image', question: 'Before photo (optional — upload or just describe it below)', type: 'image', feedsIntoPromptField: 'problem' },
+      { id: 'after_image', question: 'After photo (optional — upload or just describe it below)', type: 'image', feedsIntoPromptField: 'proof' },
       { id: 'before_state', question: 'Describe the "before" state specifically.', type: 'text', placeholder: 'e.g. Frizzy, dry, impossible to manage', feedsIntoPromptField: 'problem' },
       { id: 'after_state', question: 'What changed after using the product?', type: 'text', placeholder: 'e.g. Smooth and shiny, no frizz', feedsIntoPromptField: 'proof' },
-      { id: 'timeframe', question: 'Over what timeframe?', type: 'text', placeholder: 'e.g. One wash', feedsIntoPromptField: 'proof' },
+      { id: 'timeframe', question: 'Over what timeframe?', type: 'select', options: ['1 week', '2 weeks', '1 month', '3 months'], feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you close?', type: 'text', placeholder: 'e.g. I\'m never going back', feedsIntoPromptField: 'cta' },
     ],
     defaultCameraProgression: ['talking_head', 'macro_detail', 'slow_push'],
@@ -344,7 +355,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
       { id: 'step1', question: 'What\'s step 1?', type: 'text', placeholder: 'e.g. Start on damp hair', feedsIntoPromptField: 'proof' },
       { id: 'step2', question: 'What\'s step 2?', type: 'text', placeholder: 'e.g. Work it through mid-lengths', feedsIntoPromptField: 'proof' },
       { id: 'step3', question: 'What\'s step 3?', type: 'text', placeholder: 'e.g. Air-dry, don\'t touch it', feedsIntoPromptField: 'proof' },
-      { id: 'mistake', question: 'What common mistake should viewers avoid?', type: 'text', placeholder: 'e.g. Using too much', feedsIntoPromptField: 'hook' },
+      { id: 'step4', question: 'Step 4? (optional — 4 max, more gets long for short-form)', type: 'text', placeholder: 'e.g. Touch up with a drop of oil after', feedsIntoPromptField: 'proof' },
+      { id: 'mistake', question: 'What common mistake should viewers avoid? (strong retention hook)', type: 'text', placeholder: 'e.g. Using too much', feedsIntoPromptField: 'hook' },
+      { id: 'camera_style', question: 'Camera style for the demo?', type: 'select', options: ['Eye level — talking head', 'Overhead — hands', 'Split — talking + overhead'], feedsIntoPromptField: 'scene' },
     ],
     defaultCameraProgression: ['tabletop_45', 'tabletop_overhead', 'slow_push'],
     defaultLighting: 'studio_softbox',
@@ -377,7 +390,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'street ambience, a car passing' },
     ],
     wizardQuestions: [
+      { id: 'interview_style', question: 'Interview style?', type: 'select', options: ['"Have you tried this?" — brand awareness', 'Show product, get first reaction — raw discovery', 'Results interview — "your skin looks amazing..."'], feedsIntoPromptField: 'hook' },
       { id: 'question', question: 'What does the interviewer ask?', type: 'text', placeholder: 'e.g. Ever paid $80 for this?', feedsIntoPromptField: 'hook' },
+      { id: 'initial_reaction', question: 'Initial reaction to capture?', type: 'select', options: ['Skeptical then curious', 'Never heard of it', 'Already a fan', 'Would try it'], feedsIntoPromptField: 'proof' },
       { id: 'reaction', question: 'What\'s the honest first reaction?', type: 'text', placeholder: 'e.g. Wait, that\'s actually good', feedsIntoPromptField: 'proof' },
       { id: 'verdict', question: 'What\'s the final verdict?', type: 'text', placeholder: 'e.g. Yeah, I\'d buy this', feedsIntoPromptField: 'cta' },
     ],
@@ -413,8 +428,10 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'a satisfied exhale, close room tone' },
     ],
     wizardQuestions: [
+      { id: 'scenario', question: 'What moment are we capturing from the viewer\'s eyes?', type: 'select', options: ['Receiving and opening it for the first time', 'Using it in your morning routine', 'Seeing the result in the mirror', 'Someone noticing and asking about it'], feedsIntoPromptField: 'hook' },
       { id: 'pov_hook', question: 'What\'s the "you" moment that opens it?', type: 'text', placeholder: 'e.g. It\'s 7am and you reach for this', feedsIntoPromptField: 'hook' },
       { id: 'pov_use', question: 'What does the viewer do with it?', type: 'text', placeholder: 'e.g. One press and you\'re done', feedsIntoPromptField: 'proof' },
+      { id: 'audio_style', question: 'Audio style?', type: 'select', options: ['Voiceover (internal thoughts)', 'Natural sounds only', 'Trending audio (no dialogue)'], feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you close the POV?', type: 'text', placeholder: 'e.g. This is your new normal', feedsIntoPromptField: 'cta' },
     ],
     defaultCameraProgression: ['pov_first_person', 'pov_first_person', 'pov_first_person'],
@@ -446,6 +463,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'the tone resolving, a crisp settle as the product lands in its hero position' },
     ],
     wizardQuestions: [
+      { id: 'reveal_style', question: 'Reveal style?', type: 'select', options: ['Slow orbit — camera circles the product', 'Hand reveal — hand carries it into frame', 'Box open — packaging reveals it inside', 'Mist reveal — emerges from atmosphere', 'Macro to wide — starts extreme close-up'], feedsIntoPromptField: 'scene' },
       { id: 'tagline', question: 'What\'s the one-line tagline (spoken or on the beat)?', type: 'text', placeholder: 'e.g. Made for the ones who notice', feedsIntoPromptField: 'cta' },
       { id: 'surface', question: 'What surface / setting should it sit on?', type: 'text', placeholder: 'e.g. Wet black stone', feedsIntoPromptField: 'scene' },
       { id: 'mood', question: 'What single mood word (we translate it to light)?', type: 'select', options: ['luxury', 'clean/minimal', 'bold/energetic', 'warm/natural'], feedsIntoPromptField: 'lighting' },
@@ -483,6 +501,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'room tone, one confident tap of the product on the surface' },
     ],
     wizardQuestions: [
+      { id: 'compare_against', question: 'What are you comparing against? (never a specific competitor brand)', type: 'select', options: ['The expensive version', 'What I used to use', 'Other products I\'ve tried', 'DIY / doing it manually'], feedsIntoPromptField: 'problem' },
       { id: 'old_way', question: 'What does the "other way" do worse?', type: 'text', placeholder: 'e.g. Leaves streaks', feedsIntoPromptField: 'problem' },
       { id: 'new_way_line', question: 'What does your product do better?', type: 'text', placeholder: 'e.g. One pass, no streaks', feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you close?', type: 'text', placeholder: 'e.g. Why settle?', feedsIntoPromptField: 'cta' },
@@ -520,8 +539,9 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
         sfx: 'room tone, a small sincere breath' },
     ],
     wizardQuestions: [
-      { id: 'why', question: 'Why did you make this?', type: 'text', placeholder: 'e.g. Everything on the shelf let me down', feedsIntoPromptField: 'hook' },
-      { id: 'how', question: 'What did you do differently?', type: 'text', placeholder: 'e.g. No fillers, made in small batches', feedsIntoPromptField: 'proof' },
+      { id: 'role', question: 'Your role?', type: 'select', options: ['Founder / creator of this product', 'Passionate customer turned advocate', 'Affiliate / content creator who believes in it'], feedsIntoPromptField: 'hook' },
+      { id: 'why', question: 'Why does this product exist? What was life like before it?', type: 'text', placeholder: 'e.g. Everything on the shelf let me down', feedsIntoPromptField: 'hook' },
+      { id: 'how', question: 'The turning point — what did you do differently?', type: 'text', placeholder: 'e.g. No fillers, made in small batches', feedsIntoPromptField: 'proof' },
       { id: 'cta', question: 'How do you invite them in?', type: 'text', placeholder: 'e.g. Give it one honest week', feedsIntoPromptField: 'cta' },
     ],
     defaultCameraProgression: ['talking_head', 'slow_push', 'talking_head'],
@@ -550,6 +570,7 @@ export const AD_TYPE_TEMPLATES: Record<AdTypeId, AdTypeTemplate> = {
     wizardQuestions: [
       { id: 'hook', question: 'What\'s the single pattern-interrupt line?', type: 'text', placeholder: 'e.g. Stop scrolling — you need to see this', feedsIntoPromptField: 'hook' },
       { id: 'action', question: 'What\'s the one physical thing on screen?', type: 'text', placeholder: 'e.g. I dump the whole thing out', feedsIntoPromptField: 'proof' },
+      { id: 'duration', question: 'Duration?', type: 'select', options: ['4s', '5s', '6s'], feedsIntoPromptField: 'scene' },
     ],
     defaultCameraProgression: ['slow_push'],
     defaultLighting: 'beauty',

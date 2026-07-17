@@ -126,4 +126,4 @@ export function buildClipPromptPackage(
 }
 
 export { getTemplate, AD_TYPE_ORDER, buildIdentityAnchor }
-export type { AdTypeId, PromptPackage }
+export type { AdTypeId, PromptPackage, WizardQuestion } from '../../../api/_lib/promptEngine/index.js'

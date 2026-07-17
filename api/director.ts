@@ -403,7 +403,11 @@ async function autoAnswerWizard(body: Record<string, any>, res: VercelResponse) 
     if (attrs) creatorLine = `Creator: ${attrs} — write dialogue/claims that read as authentic coming from this person.`
   }
 
+  // 'image' questions ask for an uploaded photo (packaging, before/after) —
+  // Claude can't supply a photo on the user's behalf, so those are skipped
+  // here entirely rather than asked to "answer" one with invented text.
   const questionList = template.wizardQuestions
+    .filter((q) => q.type !== 'image')
     .map((q, i) => `${i + 1}. [id: ${q.id}] ${q.question}`)
     .join('\n')
 
