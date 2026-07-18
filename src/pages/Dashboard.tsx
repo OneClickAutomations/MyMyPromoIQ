@@ -29,7 +29,7 @@ function PosterCard({ to, src, alt }: { to: string; src: string; alt: string }) 
       to={to}
       className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-black shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-fire-start/40 hover:shadow-fire-glow"
     >
-      <img src={src} alt={alt} className="h-auto w-full transition-transform duration-500 group-hover:scale-[1.02]" />
+      <img src={src} alt={alt} className="aspect-[4/5] w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]" />
     </Link>
   )
 }
