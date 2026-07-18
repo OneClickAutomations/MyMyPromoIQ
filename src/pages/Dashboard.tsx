@@ -17,57 +17,19 @@ import { useUser } from '../hooks/useAuth'
 import AppShell from '../components/AppShell'
 import { listCampaigns, listBriefs, type StoredCampaign, type StoredBriefSummary } from '../lib/api'
 import {
-  ArrowRight, PlayIcon, Spark, ChevronRight,
-  Film, Compass, Package, Star, TrendingUp,
+  PlayIcon, Spark, ChevronRight,
+  Film, Compass, Package, Star,
 } from '../components/icons'
 
-// ── Full-bleed cinematic card art ──────────────────────────────────────────────
-function CardArt({ src, label }: { src: string; label: string }) {
+// ── Poster cards — the user's approved full card designs (title, copy, and CTA
+// are baked into the artwork itself; the whole card is the link) ──────────────
+function PosterCard({ to, src, alt }: { to: string; src: string; alt: string }) {
   return (
-    <div className="relative flex-1 overflow-hidden rounded-2xl border border-white/10">
-      <img
-        src={src}
-        alt=""
-        className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.04]"
-      />
-      {/* Legibility gradient + a one-line story pill so the art stays a poster,
-          not a mystery */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-      <span className="absolute inset-x-3 bottom-3 rounded-xl bg-black/45 px-3 py-2 text-center text-xs font-semibold text-white/90 backdrop-blur-md">
-        {label}
-      </span>
-    </div>
-  )
-}
-
-// ── Shared hero shell (header row: title + spark subtitle · pill CTA) ───────────
-type HeroTone = 'fire' | 'gold' | 'emerald'
-const TONE_TEXT: Record<HeroTone, string> = { fire: 'text-fire-start', gold: 'text-gold', emerald: 'text-emerald-300' }
-
-function HeroCard({ to, title, subtitle, cta, tone, badge, children }: {
-  to: string; title: string; subtitle: string; cta: string; tone: HeroTone; badge?: string; children: React.ReactNode
-}) {
-  return (
-    <Link to={to} className="group relative flex h-[460px] flex-col gap-3 overflow-hidden rounded-3xl border border-white/[0.08] bg-void-800 p-4 shadow-card transition-all duration-300 hover:border-fire-start/40 hover:shadow-fire-glow">
-      <div className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full bg-fire-start/20 blur-3xl opacity-40 transition-opacity duration-500 group-hover:opacity-90" />
-      {/* header row */}
-      <div className="relative flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-bold tracking-[-0.02em] text-white">{title}</h3>
-          <p className={`mt-0.5 flex items-center gap-1.5 text-[11px] font-medium ${TONE_TEXT[tone]}`}>
-            <Spark className="h-3 w-3" /> {subtitle}
-          </p>
-        </div>
-        <span className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full bg-gradient-fire px-3.5 py-2 text-xs font-bold text-white shadow-fire-soft transition-transform duration-200 group-hover:gap-2.5">
-          {cta} <ArrowRight className="h-3.5 w-3.5" />
-        </span>
-      </div>
-      {badge && (
-        <span className={`absolute left-4 top-16 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] backdrop-blur-md ${TONE_TEXT[tone]}`}>
-          {tone === 'fire' && <TrendingUp className="h-3 w-3" />}{badge}
-        </span>
-      )}
-      {children}
+    <Link
+      to={to}
+      className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-black shadow-card transition-all duration-300 hover:-translate-y-1 hover:border-fire-start/40 hover:shadow-fire-glow"
+    >
+      <img src={src} alt={alt} className="h-auto w-full transition-transform duration-500 group-hover:scale-[1.02]" />
     </Link>
   )
 }
@@ -119,17 +81,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Hero row — three distinct cinematic cards */}
+        {/* Hero row — three poster cards (art carries title, copy, and CTA) */}
         <div className="grid gap-5 md:grid-cols-3">
-          <HeroCard to="/discover" title="Clone a Winning Ad" subtitle="Find ads that convert" cta="Get Started" tone="fire">
-            <CardArt src="/assets/dash-clone.jpg" label="Recreate winners with your brand" />
-          </HeroCard>
-          <HeroCard to="/studio/new" title="Build From Scratch" subtitle="Full creative control" cta="Start Building" tone="gold">
-            <CardArt src="/assets/dash-build.jpg" label="Idea → Storyboard → Commercial" />
-          </HeroCard>
-          <HeroCard to="/forge/review" title="Quick Generate" subtitle="Product in. Commercial out." cta="Upload Product" tone="emerald">
-            <CardArt src="/assets/dash-quick.jpg" label="Drop a product. Get a commercial." />
-          </HeroCard>
+          <PosterCard to="/discover" src="/assets/dash-clone.jpg" alt="Clone a Winning Ad — find ads that convert, recreate them with your brand. Get started." />
+          <PosterCard to="/studio/new" src="/assets/dash-build.jpg" alt="Build From Scratch — your idea, our AI, full creative control. Start building." />
+          <PosterCard to="/forge/review" src="/assets/dash-quick.jpg" alt="Quick Generate — upload a product, AI creates, receive your commercial. Upload product." />
         </div>
 
         {/* In progress — real drafts (resume where you left off) */}
